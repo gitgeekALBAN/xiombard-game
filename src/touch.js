@@ -57,7 +57,7 @@ export function initTouch(root, look, actions) {
   lookZone.addEventListener('pointermove', (e) => {
     if (e.pointerId !== lookId) return;
     look.yaw -= (e.clientX - lx) * LOOK_SENS;
-    look.pitch = Math.max(-0.35, Math.min(1.2, look.pitch + (e.clientY - ly) * LOOK_SENS));
+    look.pitch = Math.max(look.min ?? -0.35, Math.min(look.max ?? 1.2, look.pitch + (e.clientY - ly) * LOOK_SENS));
     lx = e.clientX; ly = e.clientY;
   });
   const lookEnd = (e) => { if (e.pointerId === lookId) lookId = null; };

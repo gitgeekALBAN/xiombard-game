@@ -3,6 +3,7 @@ import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom } from './net.js';
 import { unlockAudio } from './audio.js';
 import { touch, initTouch, isTouchDevice } from './touch.js';
+import { createBots } from './sim/bots.js';
 
 const $ = (id) => document.getElementById(id);
 const view = new View(document.body);
@@ -10,7 +11,9 @@ const canvas = view.renderer.domElement;
 
 // ---------- input ----------
 const keys = new Set();
-const look = { yaw: Math.PI, pitch: 0.32 };
+// pitch > 0 looks down; min/max change with the camera mode (see setFirstPerson)
+const look = { yaw: Math.PI, pitch: 0.32, min: -0.35, max: 1.2 };
+const clampPitch = (v) => Math.max(look.min, Math.min(look.max, v));
 const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 };
 let playing = false;
 const SENS = 0.0024;
@@ -43,15 +46,15 @@ canvas.addEventListener('pointerdown', (e) => {
 addEventListener('mousemove', (e) => {
   if (!playing || document.pointerLockElement !== canvas) return;
   look.yaw -= e.movementX * SENS;
-  look.pitch = Math.max(-0.35, Math.min(1.2, look.pitch + e.movementY * SENS));
+  look.pitch = clampPitch(look.pitch + e.movementY * SENS);
 });
 
 function readInput(dt) {
   const k = (c) => keys.has(c);
   if (k('ArrowLeft')) look.yaw += dt * 2.2;
   if (k('ArrowRight')) look.yaw -= dt * 2.2;
-  if (k('ArrowUp')) look.pitch = Math.max(-0.35, look.pitch - dt * 1.2);
-  if (k('ArrowDown')) look.pitch = Math.min(1.2, look.pitch + dt * 1.2);
+  if (k('ArrowUp')) look.pitch = clampPitch(look.pitch - dt * 1.2);
+  if (k('ArrowDown')) look.pitch = clampPitch(look.pitch + dt * 1.2);
   input.mz = (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0) + touch.mz;
   input.mx = (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0) + touch.mx;
   input.run = k('ShiftLeft') || k('ShiftRight') || touch.run;
@@ -63,6 +66,7 @@ function readInput(dt) {
 
 // ---------- session ----------
 let sim = null;      // host only
+let bots = null;     // host only: AI teammates
 let myId = 0;
 let hostConn = null; // guest only
 const guests = new Map(); // conn -> { id, ver }
@@ -83,12 +87,18 @@ function playerName() {
   return n;
 }
 
+const BOT_NAMES = ['Mortimer', 'Gravella', 'Old Bones', 'Wendel', 'Ichabod'];
+
 async function host() {
   unlockAudio();
   setStatus('Opening the graveyard gates...');
   sim = new Sim();
-  window.__xiom = { sim, view, look };
   myId = sim.addPlayer(playerName()).id;
+  // AI teammates so nobody digs alone: ?bots=N (0..5), 3 by default; they step aside for joining humans
+  bots = createBots(sim);
+  const nBots = Math.max(0, Math.min(5, +(new URLSearchParams(location.search).get('bots') ?? 3)));
+  for (const name of BOT_NAMES.slice(0, nBots)) bots.add(name);
+  window.__xiom = { sim, view, look, bots };
   view.myId = myId;
   startPlaying();
   try {
@@ -103,6 +113,8 @@ function onGuest(conn) {
   conn.on('data', (msg) => {
     if (msg.t === 'hello') {
       if ([...guests.values()].length >= 5) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 500); return; }
+      // a bot steps aside so the yard never holds more than six diggers
+      if (bots.ids.length && 1 + guests.size + bots.ids.length >= 6) bots.remove(bots.ids[bots.ids.length - 1]);
       const p = sim.addPlayer(msg.name);
       guests.set(conn, { id: p.id, ver: -1 });
       conn.send({ t: 'welcome', id: p.id });
@@ -173,6 +185,7 @@ let last = performance.now();
 function tick(dt) {
   if (sim) {
     if (playing) sim.setInput(myId, { ...readInput(dt) });
+    bots.update(dt);
     sim.update(dt);
     if (sim.version !== view.version) view.setEntities(sim.describe(), sim.version);
     view.setTransforms(sim.transforms(), sim.version, true);
