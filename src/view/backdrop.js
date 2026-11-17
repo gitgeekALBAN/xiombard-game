@@ -112,7 +112,7 @@ const terrainFrag = /* glsl */ `
     vec3 N = normalize(vN);
     vec2 p = vW.xz;
     vec2 dp = fwidth(p);
-    float px = mix(min(dp.x, dp.y), max(max(dp.x, dp.y), fwidth(vW.y)), 0.4);
+    float px = mix(min(dp.x, dp.y), max(max(dp.x, dp.y), fwidth(vW.y)), 0.85); // see ground.js: avoids radial streaks
     float r = length(p);
     vec3 col = groundTop(p, px);
     // steep flanks lose their grass to bare earth streaks, like dry-brushed paint

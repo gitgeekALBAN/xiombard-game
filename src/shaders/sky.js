@@ -136,7 +136,8 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         float csd = max(big.x, small.x);
         vec2 nrm = useBig ? big.yz : small.yz;
         nrm = normalize(nrm + 1e-5);
-        float cover = smoothstep(0.02, 0.14, h) * smoothstep(0.92, 0.45, h);
+        // high up the planar projection blows lobes up into huge arcs, so clouds keep to the lower sky
+        float cover = smoothstep(0.02, 0.14, h) * smoothstep(0.62, 0.3, h);
         float aw = fwidth(csd) * 1.2 + 1e-4;
         float shape = smoothstep(-aw, aw, csd) * cover;
         // each lobe is shaded like a flat paper disc tilted to the moon: a bright crescent on the moon side
@@ -147,16 +148,16 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         vec3 litCol = mix(vec3(0.24, 0.2, 0.37), vec3(0.62, 0.58, 0.82), near);
         body = mix(body, litCol, smoothstep(0.15, 0.55, ndl) * smoothstep(0.45, 0.95, rim));
         // curls: some big lobes carry a painted spiral stroke
-        if (useBig && big.w > 0.72) {
+        if (useBig && big.w > 0.84) {
           float rr = length(big.yz) / rBig;
           float an = atan(big.y, big.z) * (big.w > 0.86 ? 1.0 : -1.0);
           float sp = abs(fract(rr * 2.6 - an / 6.2832) - 0.5);
           float sw = fwidth(rr * 2.6) + 0.06;
-          body = mix(body, litCol * 0.8 + body * 0.2, smoothstep(sw, sw * 0.4, sp) * smoothstep(0.85, 0.6, rr) * smoothstep(0.08, 0.2, rr) * 0.8);
+          body = mix(body, litCol * 0.8 + body * 0.2, smoothstep(sw, sw * 0.4, sp) * smoothstep(0.85, 0.6, rr) * smoothstep(0.08, 0.2, rr) * 0.45);
         }
         // outline: silver lining beside the moon, an ink line elsewhere (matches the outlined models)
         float line = smoothstep(-aw, aw, csd) - smoothstep(aw, aw * 3.0 + 0.004, csd);
-        body = mix(body, vec3(0.05, 0.035, 0.09), line * (1.0 - near) * 0.6);
+        body = mix(body, vec3(0.05, 0.035, 0.09), line * (1.0 - near) * 0.4);
         body += vec3(0.6, 0.55, 0.8) * line * near * (0.5 + 0.5 * max(ndl, 0.0));
         float ca = shape * 0.95;
         col = mix(col, body, ca);

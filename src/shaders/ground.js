@@ -172,8 +172,9 @@ export function groundMaterial() {
         vec3 N = normalize(vN);
         vec2 p = vW.xz;
         vec2 dp = fwidth(p);
-        // between the min and max footprint: max alone blurs the ground at grazing angles
-        float px = mix(min(dp.x, dp.y), max(max(dp.x, dp.y), fwidth(vW.y)), 0.4);
+        // close to the max footprint: with the min footprint, detail aliases along the view direction at grazing
+        // angles and reads as streaks radiating from the camera
+        float px = mix(min(dp.x, dp.y), max(max(dp.x, dp.y), fwidth(vW.y)), 0.85);
         vec3 col;
         if (vW.y < -0.02) {
           bool floorFace = N.y > 0.5;
