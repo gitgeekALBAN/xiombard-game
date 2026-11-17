@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:showcase": "vite build --config vite.showcase.config.js",
+    "build:sdf": "vite build --config vite.sdf.config.js",
     "preview": "vite preview"
   },
   "dependencies": {
