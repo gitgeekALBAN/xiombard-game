@@ -92,6 +92,10 @@ export class View {
     this.version = -1;
     this.state = null;
     this.myId = 0;
+    // first-person camera for the local digger (toggled from main.js); falls back to third person while ragdolled
+    this.firstPerson = true;
+    this.eye = new THREE.Vector3();
+    this.eyeFresh = true;
     this.camTarget = new THREE.Vector3(0, 1.5, 6);
     this.time = 0;
     this.labels = document.getElementById('labels');
@@ -198,9 +202,27 @@ export class View {
     }
     this.graves.update(this.time);
 
-    // third-person camera around my digger
     const me = this.ents.get(this.myId);
-    if (me) {
+    const meState = me && this.state ? this.state.players.find((p) => p.id === this.myId) : null;
+    // first person while on your feet; a ragdolled digger falls back to the third-person view so you see the flop
+    const fp = !!(me && this.firstPerson && !meState?.rag);
+    if (me) me.groups[P.head].visible = !fp || !!this.debugCam; // your own head and hat would fill the screen
+    const fov = fp ? 74 : 62;
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    if (fp) {
+      // eye in the head, nudged forward so the near plane clears the face; smoothed so ragdoll jitter and the
+      // walk cycle give a gentle bob instead of a shake
+      const head = me.groups[P.head].position;
+      const fx = Math.sin(look.yaw), fz = Math.cos(look.yaw);
+      this.eye.set(head.x + fx * 0.14, head.y + 0.06, head.z + fz * 0.14);
+      if (this.eyeFresh) { this.camTarget.copy(this.eye); this.eyeFresh = false; }
+      this.camTarget.lerp(this.eye, 1 - Math.exp(-dt * 22));
+      const cp = Math.cos(look.pitch), dir = new THREE.Vector3(fx * cp, -Math.sin(look.pitch), fz * cp);
+      this.camera.position.copy(this.camTarget);
+      this.camera.lookAt(this.camTarget.x + dir.x, this.camTarget.y + dir.y, this.camTarget.z + dir.z);
+    } else if (me) {
+      // third-person camera around my digger
+      if (!this.eyeFresh) { this.eyeFresh = true; this.camTarget.copy(me.groups[P.chest].position); }
       const chest = me.groups[P.chest].position;
       this.camTarget.lerp(new THREE.Vector3(chest.x, chest.y + 0.55, chest.z), 1 - Math.exp(-dt * 12));
       const cp = Math.cos(look.pitch), dir = new THREE.Vector3(Math.sin(look.yaw) * cp, -Math.sin(look.pitch), Math.cos(look.yaw) * cp);

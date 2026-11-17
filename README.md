@@ -19,6 +19,7 @@ Host a game, share the 4-letter room code (or the invite link) with friends, the
 | Right-click or Q | throw what you hold |
 | F (hold) | dig a grave / fill it once a coffin with a body is inside |
 | R | go limp (ragdoll) / get up |
+| V | first-person / third-person view |
 
 On phones and tablets on-screen controls appear automatically: stick on the left, drag on the right to look, buttons for grab, dig, jump, throw and limp.
 

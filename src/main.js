@@ -14,6 +14,13 @@ const keys = new Set();
 // pitch > 0 looks down; min/max change with the camera mode (see setFirstPerson)
 const look = { yaw: Math.PI, pitch: 0.32, min: -0.35, max: 1.2 };
 const clampPitch = (v) => Math.max(look.min, Math.min(look.max, v));
+// First person is the default view; V switches to the third-person camera and back (?view=third starts there).
+function setFirstPerson(on) {
+  view.firstPerson = on;
+  Object.assign(look, on ? { min: -1.3, max: 1.35 } : { min: -0.35, max: 1.2 });
+  look.pitch = clampPitch(on ? Math.min(look.pitch, 0.15) : Math.max(look.pitch, 0.32));
+}
+setFirstPerson(new URLSearchParams(location.search).get('view') !== 'third');
 const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 };
 let playing = false;
 const SENS = 0.0024;
@@ -26,6 +33,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyQ') input.th++;
   if (e.code === 'KeyR') input.fl++;
   if (e.code === 'KeyH') $('help').classList.toggle('open');
+  if (e.code === 'KeyV') setFirstPerson(!view.firstPerson);
   if (e.code === 'Space') e.preventDefault();
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
