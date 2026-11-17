@@ -7,7 +7,7 @@ import { MOON_DIR } from '../shaders/toon.js';
 // screen-space ellipse, splats are sorted back to front on the CPU and blended with premultiplied alpha.
 // Splat data lives in float textures; the only per-frame upload is the sorted index list.
 const TEX_W = 512;
-const K = 2.6; // quad half-size in standard deviations
+const K = 2.0; // quad half-size in standard deviations
 
 const vert = /* glsl */ `
 uniform sampler2D tA; uniform sampler2D tB; uniform sampler2D tC; uniform sampler2D tD;
@@ -54,9 +54,10 @@ void main() {
   // painterly lighting per dab: cold moon key with purple shadows, warm footlights, ink toward the silhouette
   vec3 N = normalize(R[2]);
   vec3 V = normalize(cameraPosition - world.xyz);
+  if (dot(N, V) < 0.0) N = -N; // cloth is one layer of dabs seen from both sides
   float m = dot(N, MOON);
-  vec3 light = mix(vec3(0.3, 0.26, 0.5), vec3(0.6, 0.58, 0.88), smoothstep(-0.3, 0.05, m));
-  light = mix(light, vec3(0.95, 0.98, 1.12), smoothstep(0.2, 0.55, m));
+  vec3 light = mix(vec3(0.4, 0.35, 0.62), vec3(0.72, 0.7, 1.0), smoothstep(-0.3, 0.05, m));
+  light = mix(light, vec3(1.1, 1.12, 1.28), smoothstep(0.2, 0.55, m));
   for (int k = 0; k < 2; k++) {
     vec3 L = uLampPos[k] - world.xyz;
     float r2 = dot(L, L);
@@ -71,9 +72,9 @@ const frag = /* glsl */ `
 uniform float uSharp;
 varying vec2 vP; varying vec4 vCol;
 void main() {
-  float g = exp(-0.5 * dot(vP, vP));
-  // uSharp > 1 flattens the top of the Gaussian, so a dab keeps a readable edge like gouache
-  float al = vCol.a * min(1.0, g * uSharp);
+  float g = exp(-0.5 * dot(vP, vP)) - ${Math.exp(-0.5 * K * K).toFixed(4)}; // falls to zero at the quad's edge
+  // uSharp flattens the top of the Gaussian: a dab is an opaque disc with a narrow soft rim, like gouache
+  float al = vCol.a * clamp(g * uSharp, 0.0, 1.0);
   if (al < 0.004) discard;
   gl_FragColor = vec4(vCol.rgb * al, al);
   #include <colorspace_fragment>
@@ -129,7 +130,7 @@ export class SplatCloud {
       uniforms: {
         tA: { value: tex[0] }, tB: { value: tex[1] }, tC: { value: tex[2] }, tD: { value: tex[3] },
         uPart: { value: this.parts }, uViewport: { value: new THREE.Vector2(1, 1) },
-        uSize: { value: 1 }, uSharp: { value: 2.4 }, uInk: { value: 1 },
+        uSize: { value: 0.85 }, uSharp: { value: 6 }, uInk: { value: 1 },
         uLampPos: { value: [new THREE.Vector3(), new THREE.Vector3()] }, uLampCol: { value: new THREE.Color(1.0, 0.62, 0.3) },
       },
       vertexShader: vert, fragmentShader: frag,
