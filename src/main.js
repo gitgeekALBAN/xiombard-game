@@ -197,11 +197,38 @@ function tick(dt) {
     if (inAcc >= 1 / 30) { inAcc = 0; hostConn.send({ t: 'in', ...input }); }
   }
 }
+// Performance meter: F3 toggles it, or open the page with ?fps or #fps. Shows real frame rate, worst frame,
+// draw calls and triangles, so testers on real hardware can report numbers.
+const perf = { el: null, n: 0, t0: 0, worst: 0 };
+function togglePerf(on = !perf.el) {
+  if (on && !perf.el) {
+    perf.el = Object.assign(document.createElement('div'), { id: 'perf' });
+    perf.el.style.cssText = 'position:fixed;right:max(8px,env(safe-area-inset-right,0px));bottom:max(8px,env(safe-area-inset-bottom,0px));z-index:5;'
+      + 'font:12px/1.35 ui-monospace,Consolas,monospace;color:#efe6d6;background:rgba(20,15,28,.82);padding:6px 9px;border-radius:8px;pointer-events:none;white-space:pre';
+    perf.el.textContent = 'measuring...';
+    document.body.appendChild(perf.el);
+  } else if (!on && perf.el) { perf.el.remove(); perf.el = null; }
+}
+if (/fps/.test(location.search + location.hash)) togglePerf(true);
+addEventListener('keydown', (e) => { if (e.code === 'F3') { e.preventDefault(); togglePerf(); } });
+function measure(now, dt) {
+  if (!perf.el) return;
+  perf.n++;
+  perf.worst = Math.max(perf.worst, dt);
+  if (now - perf.t0 < 1000) return;
+  const fps = (perf.n * 1000) / (now - perf.t0), r = view.renderer.info.render;
+  perf.el.textContent = `${fps.toFixed(0)} fps  worst ${(perf.worst * 1000).toFixed(0)} ms\n`
+    + `${r.calls} draws  ${(r.triangles / 1000).toFixed(0)}k tris\n${innerWidth}x${innerHeight} @${view.renderer.getPixelRatio()}x  post ${view.post?.quality ?? '-'}`;
+  perf.n = 0; perf.t0 = now; perf.worst = 0;
+}
+
 function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
+  const raw = (now - last) / 1000;
+  const dt = Math.min(0.05, raw);
   last = now;
   tick(dt);
   view.frame(dt, look);
+  measure(now, raw);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
