@@ -6,23 +6,40 @@ import { createGraves } from './graves.js';
 import { PLOTS, PLOT_HALF } from '../shared/layout.js';
 import { P } from '../shared/skeleton.js';
 import { sfx } from '../audio.js';
+import { isTouchDevice } from '../touch.js';
+import { Post } from './post.js';
+
+// Fog and sky horizon share this color (sRGB): a dark saturated violet, so distance reads as depth, not milk.
+// FogExp2 at 0.0145 gives about 16% fog at 30 m, 50% at 57 m and 95% at 120 m.
+const FOG_COLOR = '#2a2344';
+const FOG_DENSITY = 0.0145;
 
 const _q = new THREE.Quaternion();
 
 export class View {
   constructor(container) {
-    const r = (this.renderer = new THREE.WebGLRenderer({ antialias: true }));
+    // post quality: ?post=high|low|off overrides; phones get the light pipeline
+    const q = new URLSearchParams(location.search).get('post');
+    const quality = ['high', 'low', 'off'].includes(q) ? q : isTouchDevice() ? 'low' : 'high';
+    // with post on, MSAA lives in the scene render target, so the canvas itself needs none
+    const r = (this.renderer = new THREE.WebGLRenderer({ antialias: quality === 'off' }));
     r.setPixelRatio(Math.min(devicePixelRatio, 2));
     r.setSize(innerWidth, innerHeight);
     r.outputColorSpace = THREE.SRGBColorSpace;
+    // several render calls per frame: reset the stats once per frame so info reports the whole frame
+    r.info.autoReset = false;
     container.appendChild(r.domElement);
+    this.post = new Post(r, quality);
     this.scene = new THREE.Scene();
-    // fog is mixed after the sRGB conversion, so its color is given in output space to match the sky horizon
-    this.scene.fog = new THREE.FogExp2(new THREE.Color().setRGB(0.19, 0.16, 0.28, THREE.LinearSRGBColorSpace), 0.028);
+    // The fog color is an ordinary sRGB color: three.js converts the uniform to whatever space the fog is mixed in
+    // (sRGB on the canvas, linear in the post render target), and the sky decodes the same value exactly at the
+    // horizon, so the horizon line disappears in both paths. See post.js for the full note.
+    const fogColor = new THREE.Color(FOG_COLOR);
+    this.scene.fog = new THREE.FogExp2(fogColor, FOG_DENSITY);
     this.camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 1200);
     this.camera.position.set(8, 6, 18);
     this.camera.lookAt(0, 0, 3);
-    this.sky = createSky();
+    this.sky = createSky(fogColor);
     this.scene.add(this.sky);
     this.world = buildWorld(this.scene);
     this.groundMat = this.world.groundMat;
@@ -31,8 +48,43 @@ export class View {
     this.billboards = [];
     this.scene.traverse((o) => { if (o.userData.billboard) this.billboards.push(o); });
     // blob shadows pool
-    this.shadowGeo = new THREE.CircleGeometry(1, 20).rotateX(-Math.PI / 2);
-    this.shadowMat = new THREE.MeshBasicMaterial({ color: '#0b0812', transparent: true, opacity: 0.45, depthWrite: false, fog: true });
+    // soft blob shadows: dark core plus a wide penumbra; scale.y (unused by the flat quad) carries the fade,
+    // and fog thins the shadow instead of tinting it, so far shadows do not turn into violet discs
+    this.shadowGeo = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
+    this.shadowMat = new THREE.ShaderMaterial({
+      uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uColor: { value: new THREE.Color('#07040d') }, uOpacity: { value: 0.62 } }]),
+      vertexShader: /* glsl */ `
+        varying vec2 vUv; varying float vFade;
+        #include <common>
+        #include <fog_pars_vertex>
+        void main() {
+          vUv = uv * 2.0 - 1.0;
+          vFade = length(modelMatrix[1].xyz);
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_Position = projectionMatrix * mvPosition;
+          #include <fog_vertex>
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor; uniform float uOpacity;
+        varying vec2 vUv; varying float vFade;
+        #include <common>
+        #include <fog_pars_fragment>
+        void main() {
+          float r = length(vUv);
+          float a = (pow(1.0 - smoothstep(0.0, 1.0, r), 1.7) * 0.65 + (1.0 - smoothstep(0.1, 0.55, r)) * 0.35) * uOpacity * vFade;
+          #ifdef USE_FOG
+            #ifdef FOG_EXP2
+              a *= exp(-fogDensity * fogDensity * vFogDepth * vFogDepth);
+            #else
+              a *= 1.0 - smoothstep(fogNear, fogFar, vFogDepth);
+            #endif
+          #endif
+          gl_FragColor = vec4(uColor, a);
+          #include <colorspace_fragment>
+        }`,
+      transparent: true, depthWrite: false, fog: true,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+    });
     // Debug: set view.debugCam = { p: [x, y, z], t: [x, y, z] } to override the camera (screenshots, tuning).
     this.debugCam = null;
     this.ents = new Map();
@@ -122,6 +174,7 @@ export class View {
   // ---------- per-frame ----------
   frame(dt, look) {
     this.time += dt;
+    this.renderer.info.reset();
     this.sky.material.uniforms.uTime.value = this.time;
     const a = 1 - Math.exp(-dt * 16);
     for (const e of this.order) {
@@ -134,8 +187,8 @@ export class View {
         const gy = this.groundHeight(c.x, c.z);
         const hgt = Math.max(0, c.y - gy);
         e.shadow.position.set(c.x, gy + 0.015, c.z);
-        const s = (e.kind === 'coffin' ? 0.75 : 0.45) * (1 + hgt * 0.15);
-        e.shadow.scale.set(s, 1, e.kind === 'coffin' ? s * 1.6 : s);
+        const s = (e.kind === 'coffin' ? 0.95 : 0.6) * (1 + hgt * 0.25);
+        e.shadow.scale.set(s, Math.max(0.001, 1 / (1 + hgt * 0.8)), e.kind === 'coffin' ? s * 1.55 : s);
         e.shadow.visible = hgt < 4;
       }
       if (e.kind === 'truck') {
@@ -182,7 +235,7 @@ export class View {
       if (b.parent) b.quaternion.premultiply(b.parent.getWorldQuaternion(_q).invert());
     }
     this.sky.position.copy(this.camera.position);
-    this.renderer.render(this.scene, this.camera);
+    this.post.render(this.scene, this.camera, this.time);
     this.updateLabels();
   }
 
