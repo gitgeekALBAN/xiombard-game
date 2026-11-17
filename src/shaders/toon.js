@@ -80,7 +80,7 @@ void main() {
   vec3 base = uColor;
   if (uStripes > 0.0) {
     float c = (uAxis == 0 ? vO.y : (uAxis == 1 ? vO.x : vO.z)) * uStripes;
-    float aa = fwidth(c);
+    float aa = max(fwidth(c), 1e-4); // fwidth is 0 on faces perpendicular to the stripe axis
     float s = smoothstep(-aa, aa, abs(fract(c) - 0.5) - (0.5 - uStripeDuty * 0.5));
     s = mix(s, uStripeDuty, smoothstep(0.35, 0.7, aa)); // too dense to resolve: fade to the average
     base = mix(uColor, uColor2, s);
