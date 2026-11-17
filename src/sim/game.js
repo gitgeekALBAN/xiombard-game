@@ -17,6 +17,7 @@ const STEP = 1 / 60;
 const CORPSE_MASS = 30, DIGGER_RAG_MASS = 45;
 const COLORS = ['#e2584a', '#4fc0b0', '#f0b83a', '#a77de0', '#7fb2ff', '#f07fb8'];
 const MAX_CORPSES = 9;
+const TRUCK_SPAWN_X = TRUCK_START_X - 25; // where a load appears on the road: inside the |x| < 45 cleanup bounds
 // Coffins are held low by one end: one digger drags it, two diggers carry it level.
 const COFFIN_HOLD_Y = 0.55;
 // Grip strength in newtons. cannon-es clamps constraint *impulse per step*, so these are multiplied by STEP.
@@ -179,13 +180,14 @@ export class Sim {
   }
 
   spawnTruck() {
-    const b = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: this.mGround, collisionFilterGroup: G_TRUCK, collisionFilterMask: ALL });
+    // kinematic bodies fall asleep while parked and then ignore their velocity, so the truck must never sleep
+    const b = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: this.mGround, collisionFilterGroup: G_TRUCK, collisionFilterMask: ALL, allowSleep: false });
     for (const box of TRUCK.boxes) b.addShape(new CANNON.Box(v3(box.h)), v3(box.c));
-    b.position.set(TRUCK_START_X - 25, 0, ROAD_Z);
+    b.position.set(TRUCK_SPAWN_X, 0, ROAD_Z);
     this.world.addBody(b);
     const e = this.addEnt({ kind: 'truck', body: b });
     // Invisible cage around the bed, solid only while the truck drives in, so the load arrives on board.
-    const cage = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: this.mGround, collisionFilterGroup: G_TRUCK, collisionFilterMask: G_PROP });
+    const cage = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: this.mGround, collisionFilterGroup: G_TRUCK, collisionFilterMask: G_PROP, allowSleep: false });
     cage.addShape(new CANNON.Box(new CANNON.Vec3(0.05, 1.0, 1.0)), new CANNON.Vec3(TRUCK.bed.x1 + 0.05, 1.9, 0));
     cage.addShape(new CANNON.Box(new CANNON.Vec3(1.8, 0.9, 0.05)), new CANNON.Vec3(1.2, 2.04, 0.95));
     cage.addShape(new CANNON.Box(new CANNON.Vec3(1.8, 0.9, 0.05)), new CANNON.Vec3(1.2, 2.04, -0.95));
@@ -570,7 +572,7 @@ export class Sim {
         if (g.contents) this.restores.push({ ent: g.contents, p, t: this.time + 0.45 });
         g.contents = inside;
       }
-      if (inside) for (const b of inside.bodies) b.collisionFilterMask &= ~p.bit;
+      if (inside) for (const b of inside.bodies) { b.wakeUp(); b.collisionFilterMask &= ~p.bit; } // a sleeping passenger would pin the coffin
     }
     if (g.coffin && !p.input.run) {
       // A calmly held coffin resists tipping. Sprint with it and you are on your own.
@@ -638,7 +640,9 @@ export class Sim {
     // keep a couple of empty coffins at the pile
     if (Math.floor(this.time / 2) !== Math.floor((this.time - h) / 2)) {
       const coffins = this.ents.filter((e) => e.kind === 'coffin');
-      const free = coffins.filter((c) => !this.coffinContents(c) && !PLOTS.some((_, i) => this.coffinInPlot(this.plots[i]) === c));
+      // only coffins a player can actually use count: upright, empty, inside the fence and not already in a grave
+      const free = coffins.filter((c) => this.coffinUp(c) > 0.5 && Math.abs(c.body.position.x) < 27 && Math.abs(c.body.position.z) < 27
+        && !this.coffinContents(c) && !PLOTS.some((_, i) => this.coffinInPlot(this.plots[i]) === c));
       if (free.length < 2 && coffins.length < 8) {
         // pick a free spot at the pile so the new coffin never spawns inside another one
         let spot = null;
@@ -679,7 +683,7 @@ export class Sim {
       }
     } else if (t.state === 'leave') {
       vx = -Math.min(8, 0.5 + (this.time - t.t) * 2);
-      if (x < -TRUCK_START_X) { t.state = 'away'; t.t = this.time; b.position.x = TRUCK_START_X; b.aabbNeedsUpdate = true; }
+      if (x < -TRUCK_START_X) { t.state = 'away'; t.t = this.time; b.position.x = TRUCK_SPAWN_X; b.aabbNeedsUpdate = true; }
     } else if (t.state === 'away') {
       const corpses = this.ents.filter((e) => e.kind === 'corpse').length;
       if (this.time - t.t > 14 && corpses < MAX_CORPSES - 2) {
