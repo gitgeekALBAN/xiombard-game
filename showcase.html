@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>XIOMBARD Puppet Lineup</title>
+    <style>
+      /* one deliberate look: a night stage, dark in either host theme */
+      :root { color-scheme: dark; --fg: #efe6d6; --muted: #a59bb8; --accent: #f0c060; --ink: #140f1c; --panel: rgba(24, 18, 34, 0.84); --line: #3a2f4a; }
+      html, body { margin: 0; height: 100%; background: #120e1a; color: var(--fg); overflow: hidden; font-family: Georgia, 'Times New Roman', serif; }
+      canvas { display: block; position: fixed; inset: 0; touch-action: none; cursor: grab; }
+      #head { position: fixed; z-index: 2; pointer-events: none; top: max(14px, env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); }
+      h1 { margin: 0; font-size: clamp(22px, 4.2vw, 36px); letter-spacing: .1em; line-height: 1.05; text-shadow: 2px 2px 0 #000; transform: rotate(-1deg); transform-origin: left; }
+      #head p { margin: 6px 0 0; max-width: 46ch; color: var(--muted); font-size: 14px; line-height: 1.35; text-shadow: 1px 1px 0 #000; }
+      #labels { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+      .tag { position: absolute; left: 0; top: 0; text-align: center; white-space: nowrap; padding: 3px 9px 4px; border-radius: 10px 4px 11px 5px;
+        background: var(--panel); border: 1.5px solid var(--c, var(--line)); font-size: 12px; line-height: 1.25; }
+      .tag b { display: block; font-size: 14px; letter-spacing: .04em; }
+      .tag span { color: var(--muted); font-variant-numeric: tabular-nums; }
+      #bar { position: fixed; z-index: 2; left: 0; right: 0; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; justify-content: center;
+        padding: 10px max(16px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+        background: linear-gradient(transparent, rgba(12, 9, 18, 0.9) 45%); }
+      button { font: inherit; font-size: 14px; color: var(--fg); background: var(--panel); border: 1.5px solid var(--line); border-radius: 12px 5px 13px 6px;
+        padding: 7px 13px; cursor: pointer; }
+      button:hover { border-color: var(--accent); }
+      button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      button.main { background: var(--accent); color: var(--ink); border-color: var(--accent); font-weight: bold; }
+      button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+      label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+      input[type="range"] { width: 92px; accent-color: var(--accent); }
+      #info { flex-basis: 100%; text-align: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      @media (max-width: 600px) { #head p { display: none; } .tag span { display: none; } button { padding: 6px 10px; font-size: 13px; } input[type="range"] { width: 70px; } }
+    </style>
+  </head>
+  <body>
+    <div id="head">
+      <h1>PUPPET LINEUP</h1>
+      <p>Five looks for the bot team, each painted from Gaussian splats. Drag to look around, click a puppet to knock it over.</p>
+    </div>
+    <div id="labels"></div>
+    <div id="bar">
+      <button id="drop" class="main">Drop them all</button>
+      <button id="up">Back on your feet</button>
+      <button id="walk">Walk</button>
+      <button id="turn">Turn</button>
+      <label for="size">Dab size <input id="size" type="range" min="0.35" max="1.6" step="0.01" value="1" /></label>
+      <label for="soft">Edge <input id="soft" type="range" min="1" max="4" step="0.05" value="2.4" /></label>
+      <div id="info"><span id="stats"></span> · <span id="fps"></span></div>
+    </div>
+    <script type="module" src="/src/showcase/main.js"></script>
+  </body>
+</html>
