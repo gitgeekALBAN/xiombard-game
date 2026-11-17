@@ -2,6 +2,7 @@ import { View } from './view/view.js';
 import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom } from './net.js';
 import { unlockAudio } from './audio.js';
+import { touch, initTouch, isTouchDevice } from './touch.js';
 
 const $ = (id) => document.getElementById(id);
 const view = new View(document.body);
@@ -27,10 +28,15 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-canvas.addEventListener('mousedown', (e) => {
-  if (!playing) return;
+// Pointer lock needs a user gesture and is missing on phones — never let a refusal break the game.
+function lockPointer() {
+  if (touch.active) return;
+  try { canvas.requestPointerLock?.()?.catch?.(() => {}); } catch { /* not available */ }
+}
+canvas.addEventListener('pointerdown', (e) => {
+  if (!playing || e.pointerType !== 'mouse') return;
   unlockAudio();
-  if (document.pointerLockElement !== canvas) { canvas.requestPointerLock?.(); return; }
+  if (document.pointerLockElement !== canvas) { lockPointer(); return; }
   if (e.button === 0) input.g++;
   if (e.button === 2) input.th++;
 });
@@ -46,11 +52,11 @@ function readInput(dt) {
   if (k('ArrowRight')) look.yaw -= dt * 2.2;
   if (k('ArrowUp')) look.pitch = Math.max(-0.35, look.pitch - dt * 1.2);
   if (k('ArrowDown')) look.pitch = Math.min(1.2, look.pitch + dt * 1.2);
-  input.mz = (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0);
-  input.mx = (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0);
-  input.run = k('ShiftLeft') || k('ShiftRight');
-  input.jump = k('Space');
-  input.dig = k('KeyF');
+  input.mz = (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0) + touch.mz;
+  input.mx = (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0) + touch.mx;
+  input.run = k('ShiftLeft') || k('ShiftRight') || touch.run;
+  input.jump = k('Space') || touch.jump;
+  input.dig = k('KeyF') || touch.dig;
   input.yaw = look.yaw;
   return input;
 }
@@ -64,10 +70,11 @@ let netAcc = 0, inAcc = 0;
 
 function startPlaying() {
   playing = true;
+  document.body.classList.add('playing');
   $('menu').classList.add('hidden');
   $('hud').classList.add('visible');
   unlockAudio();
-  canvas.requestPointerLock?.();
+  lockPointer();
 }
 
 function playerName() {
@@ -77,6 +84,7 @@ function playerName() {
 }
 
 async function host() {
+  unlockAudio();
   setStatus('Opening the graveyard gates...');
   sim = new Sim();
   window.__xiom = { sim, view, look };
@@ -116,6 +124,7 @@ function onGuest(conn) {
 
 async function join(code) {
   if (!/^[A-Za-z]{4}$/.test(code)) { setStatus('Room codes are 4 letters.'); return; }
+  unlockAudio();
   setStatus('Knocking on the crypt door...');
   try {
     const { conn } = await joinRoom(code);
@@ -127,7 +136,7 @@ async function join(code) {
       else if (msg.t === 'snap') { view.setTransforms(new Float32Array(msg.buf), msg.v, false); applyState(msg.st); }
       else if (msg.t === 'full') setStatus('That graveyard is full (6 diggers max).');
     });
-    conn.on('close', () => { playing = false; document.exitPointerLock?.(); $('lost').classList.add('open'); });
+    conn.on('close', () => { playing = false; document.body.classList.remove('playing'); document.exitPointerLock?.(); $('lost').classList.add('open'); });
   } catch (err) {
     setStatus(err.message || String(err));
   }
@@ -146,20 +155,22 @@ function applyState(st) {
   view.setState(st);
   $('score').textContent = st.score;
   const me = st.players.find((p) => p.id === myId);
-  $('hint').textContent = me ? me.hint : '';
+  $('hint').textContent = me ? hintText(me.hint) : '';
   const grip = me ? me.grip : -1;
   $('grip').classList.toggle('show', grip >= 0);
   $('gripfill').style.width = `${Math.max(0, grip) * 100}%`;
   $('gripfill').style.background = grip < 0.3 ? '#e2584a' : '#cfe8a0';
   $('players').innerHTML = st.players.map((p) => `<li style="--c:${p.color}">${escapeHtml(p.name)}${p.id === myId ? ' (you)' : ''}</li>`).join('');
 }
+// Hints are written by the host in keyboard terms; on a touch screen show the button names instead.
+const TOUCH_WORDS = [[/Hold F/g, 'Hold DIG'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'],
+  [/Click to drop/g, 'GRAB to drop'], [/Press R/g, 'Tap LIMP']];
+const hintText = (h) => (touch.active ? TOUCH_WORDS.reduce((t, [re, w]) => t.replace(re, w), h) : h);
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // ---------- loop ----------
 let last = performance.now();
-function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
+function tick(dt) {
   if (sim) {
     if (playing) sim.setInput(myId, { ...readInput(dt) });
     sim.update(dt);
@@ -176,7 +187,7 @@ function frame(now) {
         for (const [conn, g] of guests) {
           if (!conn.open) continue;
           if (g.ver !== sim.version) { conn.send({ t: 'ents', list: desc, v: sim.version }); g.ver = sim.version; }
-          conn.send({ t: 'snap', buf, v: sim.version, st: { ...st, ev: st.ev } });
+          conn.send({ t: 'snap', buf, v: sim.version, st });
         }
       }
     }
@@ -185,10 +196,29 @@ function frame(now) {
     inAcc += dt;
     if (inAcc >= 1 / 30) { inAcc = 0; hostConn.send({ t: 'in', ...input }); }
   }
+}
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  tick(dt);
   view.frame(dt, look);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+
+// Browsers pause requestAnimationFrame in background tabs. If the host switches tabs the whole
+// game would freeze for everyone, so a worker timer keeps the simulation ticking while hidden.
+try {
+  const ticker = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 33)'], { type: 'text/javascript' })));
+  ticker.onmessage = () => {
+    if (!document.hidden || !sim) return;
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    keys.clear();
+    for (let t = dt; t > 0; t -= 0.05) tick(Math.min(0.05, t));
+  };
+} catch { /* no worker support: the game just pauses in the background */ }
 
 // ---------- menu ----------
 try { $('name').value = localStorage.getItem('xiombard-name') || ''; } catch {}
@@ -196,5 +226,10 @@ $('host').onclick = host;
 $('join').onclick = () => join($('code').value.trim());
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') join($('code').value.trim()); });
 $('lost').onclick = () => location.reload();
+if (isTouchDevice()) {
+  initTouch($('touch'), look, { grab: () => input.g++, throw: () => input.th++, flop: () => input.fl++ });
+  view.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+}
+if (innerHeight < 520) $('help').classList.remove('open'); // keep short screens uncluttered
 const autoJoin = new URLSearchParams(location.search).get('join');
 if (autoJoin) { $('code').value = autoJoin.toUpperCase(); $('join').textContent = 'Join friends'; $('join').focus(); }

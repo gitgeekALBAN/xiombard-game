@@ -21,15 +21,16 @@ export const LANTERNS = [
 ];
 
 // Coffin and truck dimensions (shared by physics and visuals).
-export const COFFIN = { hx: 0.4, hy: 0.25, hz: 1.05, wall: 0.05 };
+// inner width must exceed the skeleton's shoulder width (~0.76 m) or bodies cannot lie inside
+export const COFFIN = { hx: 0.5, hy: 0.25, hz: 1.12, wall: 0.05 };
 export const TRUCK = {
   // boxes in truck-local space (truck faces -X; the open bed is at +X)
   boxes: [
     { c: [-2.5, 0.85, 0], h: [0.5, 0.55, 0.9] }, // hood
     { c: [-1.3, 1.45, 0], h: [0.7, 0.95, 1.0] }, // cab
     { c: [1.2, 0.7, 0], h: [1.8, 0.2, 1.0] }, // bed floor (top at 0.9)
-    { c: [1.2, 1.1, 0.95], h: [1.8, 0.2, 0.05] }, // bed wall
-    { c: [1.2, 1.1, -0.95], h: [1.8, 0.2, 0.05] }, // bed wall
+    { c: [1.2, 1.02, 0.95], h: [1.8, 0.12, 0.05] }, // low bed wall (bodies must slide over it)
+    { c: [1.2, 1.02, -0.95], h: [1.8, 0.12, 0.05] }, // low bed wall
   ],
   bed: { x0: -0.6, x1: 3.0, top: 0.9 },
   half: [3.1, 1.2, 1.15],

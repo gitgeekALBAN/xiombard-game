@@ -207,7 +207,7 @@ export function buildTruck() {
   // tailgate (opens on delivery)
   const gate = new THREE.Group();
   gate.position.set(3.0, 0.9, 0);
-  gate.add(part(BOX, toon('#5a3a6e', { color2: '#3a2348', stripes: 5 }), { pos: [0, 0.2, 0], scale: [0.08, 0.4, 1.9] }));
+  gate.add(part(BOX, toon('#5a3a6e', { color2: '#3a2348', stripes: 5 }), { pos: [0, 0.12, 0], scale: [0.08, 0.24, 1.9] }));
   g.add(gate);
   g.userData = { wheels, gate };
   return [g];

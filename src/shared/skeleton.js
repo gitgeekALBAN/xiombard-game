@@ -63,10 +63,10 @@ export function animRots(s, rots = restRots()) {
   rots[P.farmL][0] = -0.35 - 0.3 * k; rots[P.farmR][0] = -0.35 - 0.3 * k;
   if (s.carry) {
     const low = s.carry === 'coffin';
-    rots[P.uarmL][0] = rots[P.uarmR][0] = low ? -0.85 : -1.3;
+    rots[P.uarmL][0] = rots[P.uarmR][0] = low ? -0.45 : -1.3;
     rots[P.uarmL][2] = 0.05; rots[P.uarmR][2] = -0.05;
     rots[P.farmL][0] = rots[P.farmR][0] = low ? -0.2 : -0.25;
-    rots[P.chest][0] += low ? 0.2 : -0.08;
+    rots[P.chest][0] += low ? 0.35 : -0.08;
   }
   if (s.dig) {
     const c = Math.sin(t * 7);

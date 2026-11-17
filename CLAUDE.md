@@ -29,6 +29,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/shared/` — data both sides need: `skeleton.js` (part list + FK + animation), `layout.js` (level, colliders, decor), `rng.js`.
 - `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `sky.js`, `ground.js`, `noise.glsl.js`.
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
+- `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard.
 - Custom shaders use `ShaderMaterial`; they write linear color and include `colorspace_fragment` + fog chunks.
 
 ## Multiplayer architecture (decided)
@@ -39,6 +40,14 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - Signaling: free PeerJS cloud broker. Some strict NATs need a TURN server (not set up yet). Local testing: run a PeerJS server on
   port 9000 and open `?peerhost=127.0.0.1&peerport=9000`.
 - No host migration: if the host leaves, the game ends for guests.
+
+## Physics gotchas (learned the hard way)
+- cannon-es constraint `maxForce` clamps **impulse per step**, not newtons. Multiply a force in newtons by `STEP` (see `CORPSE_GRIP_N`).
+- Carried things (and a held coffin's passenger) are masked out of the carrier's collision bit so they cannot wedge against the player.
+  Each player owns one collision bit (`PLAYER_BITS`).
+- The coffin's inner width must stay wider than the skeleton's shoulders, or bodies cannot lie in it.
+- Assists are deliberate: a body dropped at an open coffin is laid inside; a coffin dropped by a dug grave is aligned and falls in.
+- `afterStep` clamps prop speeds as a safety net against solver blow-ups.
 
 ## Workflow
 - `npm install`, `npm run dev` (port 5173), `npm run build` must pass before pushing.

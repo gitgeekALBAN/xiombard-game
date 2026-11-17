@@ -24,6 +24,8 @@ export function hostRoom(onGuest, tries = 4) {
     const peer = new Peer(PREFIX + code, peerOptions());
     peer.on('open', () => resolve({ peer, code }));
     peer.on('connection', (conn) => onGuest(conn));
+    // keep the room joinable if the link to the signaling broker drops
+    peer.on('disconnected', () => { if (!peer.destroyed) setTimeout(() => { try { peer.reconnect(); } catch { /* destroyed meanwhile */ } }, 1500); });
     peer.on('error', (err) => {
       if (err.type === 'unavailable-id' && tries > 0) { peer.destroy(); hostRoom(onGuest, tries - 1).then(resolve, reject); }
       else reject(err);
