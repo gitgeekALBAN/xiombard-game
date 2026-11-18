@@ -1,5 +1,5 @@
 import { smin, sphere, ellipsoid, roundCone, capsule, turned, mirrorX, squashZ, noise3 } from './sdf.js';
-import { lathe, merge, place, ribbon } from './prims.js';
+import { lathe, merge, place, ribbon, revolve, ball, along, clip } from './prims.js';
 
 // A two-legged character as a list of pieces for the mesher, sculpted from the numbers of its look (see
 // shared/crew.js for what each array means). Rest pose: feet on y = 0, facing +Z, +X is the character's left.
@@ -9,7 +9,6 @@ export const MAT = { skin: 1, scarf: 2, knit: 3, cuff: 4, mitten: 5, leg: 6, boo
 export const lin = (hex) => hex.slice(1).match(/../g).map((h) => { const c = parseInt(h, 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
 const box2 = (x, y, hx, hy) => { const dx = Math.abs(x) - hx, dy = Math.abs(y) - hy; return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0); };
 const pad = (b, m) => [b[0] - m, b[1] - m, b[2] - m, b[3] + m, b[4] + m, b[5] + m];
-const MIN_LIMB = 0.03;  // thinner limbs than this fall between the mesher's cells
 
 const moved = (d, ox, oy, oz) => (x, y, z) => d(x - ox, y - oy, z - oz);
 const shift = (b, ox, oy, oz) => [b[0] + ox, b[1] + oy, b[2] + oz, b[3] + ox, b[4] + oy, b[5] + oz];
@@ -25,7 +24,7 @@ const shift = (b, ox, oy, oz) => [b[0] + ox, b[1] + oy, b[2] + oz, b[3] + ox, b[
 //   prop 'pin'  a rolling pin in the right mitten
 export function humanPieces(k, q = 1) {
   const [yB, rB, yN, rN] = k.bean, [yH, rH, zs] = k.head, col = Object.fromEntries(Object.entries(k.colors).map(([n, h]) => [n, lin(h)]));
-  const [sx, sy, sz] = k.shoulder, [hx, hy, hz] = k.hand, ar = Math.max(k.arm[0], MIN_LIMB), mr = k.arm[1], out = [], c = (v) => v / q;
+  const [sx, sy, sz] = k.shoulder, [hx, hy, hz] = k.hand, ar = k.arm[0], mr = k.arm[1], out = [], c = (v) => v / q;
   const loose = k.headAt, coat = k.coat, ho = loose ? [loose[0], loose[1] - yH, loose[2]] : [0, 0, 0]; // where the head went
   let belly, head;
   if (k.ball) {
@@ -41,48 +40,49 @@ export function humanPieces(k, q = 1) {
   const trunk = loose ? belly : (x, y, z) => smin(belly(x, y, z), head(x, y, z), k.ball ? 0.03 : 0.06);
   const garb = coat ? lin(coat.color) : null; // what the body and sleeves are made of
   const armL = roundCone(sx, sy, sz, hx, hy, hz, ar, ar * 0.88), armR = mirrorX(armL);
-  const skin = (x, y, z) => smin(trunk(x, y, z), Math.min(armL(x, y, z), armR(x, y, z)), 0.045);
 
-  // ---- skin: the trunk is one coarse piece; each arm is a finer piece that carries its own soft shoulder
-  const bodyBox = pad([-rB, Math.min(yB - rB, coat ? coat.hem : 9), -rB * zs, rB, Math.max(yN + rN, loose || coat ? 0 : yH + rH), rB * zs], 0.03);
-  const headBox = pad([ho[0] - rH, Math.min(yN, yH + ho[1] - rH) - (loose ? 0 : rN), ho[2] - rH, ho[0] + rH, yH + ho[1] + rH, ho[2] + rH], 0.03);
-  if (!coat && !loose) out.push({ d: trunk, box: bodyBox, cell: c(0.04), mat: MAT.skin, color: col.skin, bones: [{ part: 0, d: belly }, { part: 1, d: head }], soft: 0.05 });
+  // ---- skin. The body and the head are solids of revolution and the arms are tubes: all primitives, so they are
+  // smooth with a few hundred triangles. The formulas above are still used for bone weights and baked shading.
+  const turn = (d, yMid, rings = 12) => revolve((r, y) => d(r, y, 0), yMid, rings, 18, { zs });
+  if (!coat && !loose) out.push({ mesh: turn(trunk, yB, 14), occ: trunk, mat: MAT.skin, color: col.skin, bones: [{ part: 0, d: belly }, { part: 1, d: head }], soft: 0.05 });
   else { // the body and the head are separate pieces: a coat with a head in its collar, or a head carried in a mitten
-    out.push({ d: belly, box: bodyBox, cell: c(0.04), mat: coat ? MAT.cloth : MAT.skin, color: garb || col.skin, bone: 0 });
-    out.push({ d: head, box: headBox, cell: c(0.03), mat: MAT.skin, color: col.skin, bone: 1 });
-    if (loose) out.push({ d: ellipsoid(0, yN + rN * 0.55, 0, rN * 0.92, 0.035, rN * 0.92 * zs), box: pad([-rN, yN + rN * 0.4, -rN, rN, yN + rN * 0.8, rN], 0.04), cell: c(0.018), mat: MAT.cloth, color: lin(k.capColor || '#8a5a44'), bone: 0 });
+    out.push({ mesh: turn(belly, yB), occ: belly, mat: coat ? MAT.cloth : MAT.skin, color: garb || col.skin, bone: 0 });
+    out.push({ mesh: loose ? place(ball(rH, rH * 0.96, rH * zs, 12, 8), (x, y, z) => [x, y, z], ...loose) : turn(head, (yN + yH) / 2, 9), occ: head, mat: MAT.skin, color: col.skin, bone: 1 });
+    if (loose) out.push({ mesh: place(ball(rN * 0.92, 0.035, rN * 0.92 * zs, 10, 4), (x, y, z) => [x, y, z], 0, yN + rN * 0.55, 0), mat: MAT.cloth, color: lin(k.capColor || '#8a5a44'), bone: 0 });
   }
-  if (k.face2) { const [fx, fy, fz, fr] = k.face2; out.push({ d: ellipsoid(fx, fy, fz, fr, fr * 0.95, fr * 0.9), box: pad([fx - fr, fy - fr, fz - fr, fx + fr, fy + fr, fz + fr], 0.03), cell: c(0.026), mat: MAT.skin, color: col.skin, bone: 0 }); }
+  if (k.face2) { const [fx, fy, fz, fr] = k.face2; out.push({ mesh: place(ball(fr, fr * 0.95, fr * 0.9, 12, 8), (x, y, z) => [x, y, z], fx, fy, fz), mat: MAT.skin, color: col.skin, bone: 0 }); }
+  const armLen = Math.hypot(hx - sx, hy - sy, hz - sz);
+  const sleeve = lathe([[0.001, -ar * 0.6], [ar * 0.75, -ar * 0.3], [ar, 0], [ar * 0.88, armLen]], 8, { smooth: true });
   for (const s of [1, -1]) {
-    const arm = s > 0 ? armL : armR, reach = roundCone(s * sx, sy, sz, s * hx, hy, hz, ar + 0.04, ar + 0.02);
-    out.push({ d: (x, y, z) => Math.max(skin(x, y, z), reach(x, y, z)), box: pad([Math.min(s * sx, s * hx), Math.min(sy, hy), Math.min(sz, hz), Math.max(s * sx, s * hx), Math.max(sy, hy), Math.max(sz, hz)], ar + 0.07),
-      cell: c(0.02), mat: coat ? MAT.cloth : MAT.skin, color: garb || col.skin, // whatever lies under the body's surface belongs to the body, or a raised arm would swing its hidden end out through the belly
+    const arm = s > 0 ? armL : armR;
+    out.push({ mesh: along(sleeve, [s * sx, sy, sz], [s * hx, hy, hz]), occ: arm, mat: coat ? MAT.cloth : MAT.skin, color: garb || col.skin,
+      // whatever lies under the body's surface belongs to the body, or a raised arm would swing its hidden end out through the belly
       bones: [{ part: s > 0 ? 2 : 3, d: (x, y, z) => arm(x, y, z) + Math.max(0, -trunk(x, y, z)) * 5 }, { part: 0, d: (x, y, z) => trunk(x, y, z) + 0.02 }], soft: 0.035 });
   }
 
-  // ---- mittens: a rounded paw, a thumb and a knitted cuff
+  // ---- mittens: a rounded paw with a thumb (soft: sculpted) and a knitted cuff (a tube)
   {
     const L = Math.hypot(hx - sx, hy - sy, hz - sz), dx = (hx - sx) / L, dy = (hy - sy) / L, dz = (hz - sz) / L;
     const paw = roundCone(hx + dx * mr * 0.1, hy + dy * mr * 0.1, hz + dz * mr * 0.1, hx + dx * mr * 1.05, hy + dy * mr * 1.05, hz + dz * mr * 1.05, mr * 0.8, mr);
     const thumb = sphere(hx + dx * mr * 0.35 - 0.25 * mr, hy + dy * mr * 0.35 + 0.25 * mr, hz + dz * mr * 0.35 + 0.85 * mr, mr * 0.42);
     const mitt = (x, y, z) => smin(paw(x, y, (z - hz) / 0.72 + hz) * 0.72, thumb(x, y, z), 0.02);
-    const cuff = capsule(hx - dx * mr * 0.35, hy - dy * mr * 0.35, hz - dz * mr * 0.35, hx + dx * mr * 0.05, hy + dy * mr * 0.05, hz + dz * mr * 0.05, Math.max(mr * 0.62, ar + 0.012));
+    const rc = Math.max(mr * 0.66, ar + 0.014), cl = mr * 0.5, cuff = lathe([[rc * 0.78, 0], [rc, cl * 0.25], [rc, cl * 0.75], [rc * 0.78, cl]], 8, { smooth: true }); // a short ribbed tube
     const b = pad([hx, hy, hz, hx + dx * mr, hy + dy * mr, hz + dz * mr].map((v, i, a) => (i < 3 ? Math.min(v, a[i + 3]) : Math.max(v, a[i - 3]))), mr * 1.25);
     for (const s of [1, -1]) {
       const bb = s > 0 ? b : [-b[3], b[1], b[2], -b[0], b[4], b[5]], f = (d) => (s > 0 ? d : mirrorX(d));
       out.push({ d: f(mitt), box: bb, cell: c(0.02), mat: MAT.mitten, color: col.mitten, bone: s > 0 ? 2 : 3 });
-      out.push({ d: f(cuff), box: bb, cell: c(0.02), mat: MAT.cuff, color: col.cuff || col.mitten.map((v) => v * 0.72), bone: s > 0 ? 2 : 3 });
+      out.push({ mesh: along(cuff, [s * (hx - dx * mr * 0.42), hy - dy * mr * 0.42, hz - dz * mr * 0.42], [s * hx, hy, hz]), mat: MAT.cuff, color: col.cuff || col.mitten.map((v) => v * 0.72), bone: s > 0 ? 2 : 3 });
     }
   }
 
-  // ---- legs and boots
+  // ---- legs (plain tubes) and boots (soft: sculpted)
   {
-    const [lx, ly, lr0, top] = k.leg, lr = Math.max(lr0, MIN_LIMB);
-    const leg = capsule(lx, ly + 0.04, 0, lx, 0.06, 0, lr), shaft = roundCone(lx, top, 0, lx, lr * 1.2, 0, lr * 1.42, lr * 1.5), foot = ellipsoid(lx, lr * 1.15, lr * 1.5, lr * 1.75, lr * 1.25, lr * 2.9);
+    const [lx, ly, lr, top] = k.leg;
+    const leg = lathe([[0.001, 0.045], [lr, 0.06], [lr, ly + 0.04], [0.001, ly + 0.06]], 8, { smooth: true }), shaft = roundCone(lx, top, 0, lx, lr * 1.2, 0, lr * 1.42, lr * 1.5), foot = ellipsoid(lx, lr * 1.15, lr * 1.5, lr * 1.75, lr * 1.25, lr * 2.9);
     const boot = (x, y, z) => Math.max(smin(shaft(x, y, z), foot(x, y, z), 0.02), -y, y - top);
     for (const s of [1, -1]) {
       const f = (d) => (s > 0 ? d : mirrorX(d)), x0 = s * lx - lr * 2.2, x1 = s * lx + lr * 2.2;
-      out.push({ d: f(leg), box: [x0, top * 0.6, -lr * 2, x1, ly + 0.04 + lr * 1.5, lr * 2], cell: c(0.022), mat: MAT.leg, color: col.leg, bone: s > 0 ? 4 : 5 });
+      out.push({ mesh: place(leg, (x, y, z) => [x, y, z], s * lx, 0, 0), mat: MAT.leg, color: col.leg, bone: s > 0 ? 4 : 5 });
       out.push({ d: f(boot), box: [x0, -0.02, -lr * 2.4, x1, top + 0.02, lr * 4.8], cell: c(0.022), mat: MAT.boot, color: col.boot, bone: s > 0 ? 4 : 5 });
     }
   }
@@ -93,7 +93,8 @@ export function humanPieces(k, q = 1) {
     const [ys, R, t, len] = k.scarf, torn = !!k.torn, TAU = Math.PI * 2;
     const tube = (R0, y0, r, amp, ph) => lathe(Array.from({ length: 7 }, (_, i) => [R0 + r * Math.cos((i / 7) * TAU), y0 + r * Math.sin((i / 7) * TAU)]), 16,
       { smooth: true, closed: true, zs, lift: (ring, a) => -amp * Math.sin(a * 2 + ph) });
-    out.push({ mesh: merge(tube(R, ys, t, 0.012, 0.6), tube(R * 1.06, ys - t * 1.05, t * 0.9, -0.014, 2.2)), mat: MAT.scarf, color: col.scarf, bone: 0 });
+    out.push({ mesh: merge(tube(R, ys, t, 0.012, 0.6), tube(R * 1.06, ys - t * 1.05, t * 0.9, -0.014, 2.2)), occ: (x, y, z) => Math.hypot(Math.hypot(x, z / zs) - R * 1.03, y - ys + t * 0.5) - t * 1.5,
+      mat: MAT.scarf, color: col.scarf, bone: 0 });
     // where the belly's front surface is at (x, y); below the belly the cloth just hangs
     const front = (x, y, last) => {
       if (belly(x, y, 0) > 0.03) return last;
@@ -135,29 +136,31 @@ export function humanPieces(k, q = 1) {
       const prof = [[cr * 0.85, -0.012], [brim, -0.012], [brim + 0.007, -0.002], [brim, 0.008], [cr * 0.85, 0.008]];
       parts.push(lathe(prof, 16, { smooth: true, lift: (ring, a) => { const r = prof[ring][0], x = r * Math.sin(a), z = r * Math.cos(a); return 0.32 * x * x - 0.12 * z * z; } }));
     }
-    out.push({ mesh: set(merge(...parts)), mat: knit ? MAT.knit : MAT.felt, color: col.hat, bone: 1 });
+    const shade = ellipsoid(ho[0], hb + ho[1], ho[2], Math.max(cr, brim), knit ? ch : 0.03, Math.max(cr, brim)); // the hat darkens the brow under it
+    out.push({ mesh: set(merge(...parts)), occ: (x, y, z) => Math.max(shade(x, y, z), hb + ho[1] - 0.02 - y), mat: knit ? MAT.knit : MAT.felt, color: col.hat, bone: 1 });
     const bandR = (knit ? cr * Math.sqrt(Math.max(1 - (bh * 0.5 / ch) ** 2, 0)) : cr * 0.97) + bp, y0 = 0.012, y1 = 0.012 + bh, rr = Math.min(bh * 0.3, 0.014);
     const frayed = k.torn ? (ring, a) => (ring < 2 ? 0.016 * noise3(a * 3.1 + 4, 0.5, 0.5) - 0.008 : 0) : undefined; // a moth-eaten lower edge
     out.push({ mesh: set(lathe([[bandR - 0.02, y0], [bandR, y0 + rr], [bandR, y1 - rr], [bandR - 0.02, y1]], 14, { smooth: true, lift: frayed })), mat: knit ? MAT.cuff : MAT.felt, color: col.band, bone: 1 });
-    if (pom > 0) { const py = hb + ch + pom * 0.55, s = sphere(0, py, 0, pom), tilt = (d) => turned(d, 0, hb, 0, 0, 0, 0.07); out.push({ d: moved(tilt((x, y, z) => s(x, y, z) - 0.012 * noise3(x * 45, y * 45, z * 45)), ...ho), box: shift(pad([-pom, py - pom, -pom, pom, py + pom, pom], 0.035), ...ho), cell: c(0.02), mat: MAT.fluff, color: col.pom || col.hat, bone: 1 }); }
+    if (pom > 0) out.push({ mesh: set(place(ball(pom, pom, pom, 10, 6), (x, y, z) => [x, y, z], 0, ch + pom * 0.55, 0)), mat: MAT.fluff, color: col.pom || col.hat, bone: 1 }); // the fluff is paint
   }
 
   if (!k.face) { // the living have a little button of a nose
-    const n = ellipsoid(0, yH - rH * 0.1, rH * zs * 0.98, rH * 0.17, rH * 0.15, rH * 0.24);
-    out.push({ d: moved(n, ...ho), box: shift(pad([-rH * 0.2, yH - rH * 0.3, rH * zs * 0.7, rH * 0.2, yH + rH * 0.1, rH * zs * 1.25], 0.02), ...ho), cell: c(0.015), mat: MAT.nose, color: col.nose, bone: 1 });
+    out.push({ mesh: place(ball(rH * 0.17, rH * 0.15, rH * 0.24, 8, 5), (x, y, z) => [x, y, z], ho[0], yH - rH * 0.1 + ho[1], rH * zs * 0.98 + ho[2]), mat: MAT.nose, color: col.nose, bone: 1 });
   }
-  if (k.hair) {
-    const e = ellipsoid(0, yH - rH * 0.25, -0.012, rH + 0.034, rH * 1.35, (rH + 0.03) * zs);
-    out.push({ d: moved((x, y, z) => Math.max(e(x, y, z), z - rH * 0.34), ...ho), box: shift(pad([-rH, yH - rH * 1.6, -rH * zs, rH, yH + rH * 1.1, rH * 0.4], 0.05), ...ho), cell: c(0.026), mat: MAT.hair, color: col.hair, bone: 1 });
-    if (k.bun) { const b = sphere(0, yH + rH * 0.25, -rH * 1.05, rH * 0.42); out.push({ d: b, box: pad([-rH * 0.45, yH - rH * 0.2, -rH * 1.5, rH * 0.45, yH + rH * 0.7, -rH * 0.6], 0.03), cell: c(0.018), mat: MAT.hair, color: col.hair, bone: 1 }); }
+  if (k.hair) { // a cap of hair over the back of the head, cut away in front so the face shows
+    const hairAt = [ho[0], yH - rH * 0.25 + ho[1], -0.012 + ho[2]];
+    const cap = clip(place(ball(rH + 0.034, rH * 1.35, (rH + 0.03) * zs, 12, 8), (x, y, z) => [x, y, z], ...hairAt), (x, y, z) => z - ho[2] < rH * 0.36);
+    out.push({ mesh: cap, mat: MAT.hair, color: col.hair, bone: 1 });
+    if (k.bun) out.push({ mesh: place(ball(rH * 0.42, rH * 0.42, rH * 0.42, 8, 5), (x, y, z) => [x, y, z], 0, yH + rH * 0.25, -rH * 1.05), mat: MAT.hair, color: col.hair, bone: 1 });
   }
 
   // ---- the odd ones' extras
-  if (k.shawl) { // a cloth over the shoulders with a scalloped edge, knotted in front
-    const top = yN - 0.03, low = yN - 0.2;
-    const cloth = (x, y, z) => Math.max(Math.abs(belly(x, y, z) - 0.034) - 0.022, y - top, low + 0.03 * Math.cos(Math.atan2(x, z) * 7) - y);
-    const knot = sphere(0, top - 0.07, rN * zs + 0.075, 0.042);
-    out.push({ d: (x, y, z) => Math.min(cloth(x, y, z), knot(x, y, z)), box: pad([-rB, low - 0.04, -rB * zs, rB, top, rB * zs + 0.06], 0.06), cell: c(0.02), mat: MAT.cloth, color: lin(k.shawl), bone: 0 });
+  if (k.shawl) { // a cloth over the shoulders: a band that follows the body's outline, with a scalloped lower edge and a knot in front
+    const top = yN - 0.03, low = yN - 0.2, rAt = (y) => { let a = 0, b = 2; for (let n = 0; n < 24; n++) { const m = (a + b) / 2; if (belly(m, y, 0) < 0) a = m; else b = m; } return a; };
+    const ys4 = [0, 1, 2, 3].map((i) => low + ((top - low) * i) / 3), outer = ys4.map((y) => [rAt(y) + 0.05, y]), inner = ys4.map((y) => [rAt(y) + 0.012, y]).reverse();
+    const band = lathe([...outer, ...inner], 21, { smooth: true, closed: true, zs, lift: (ring, a) => (ring === 0 || ring === 7 ? 0.03 * Math.cos(a * 7) : 0) });
+    const knot = place(ball(0.042, 0.042, 0.042, 8, 5), (x, y, z) => [x, y, z], 0, top - 0.07, rAt(top - 0.07) * zs + 0.045);
+    out.push({ mesh: merge(band, knot), mat: MAT.cloth, color: lin(k.shawl), bone: 0 });
   }
   // Hard, simple things are primitives: a few rings of a solid of revolution. Their planks, hoops and rivets are
   // paint (see the wood and iron materials in material.js), not geometry.

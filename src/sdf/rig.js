@@ -3,7 +3,7 @@ import * as CANNON from 'cannon-es';
 
 // Runtime for one six-part puppet: procedural animation (idle, walk in place), a tidy five-joint ragdoll,
 // and a blend back onto its feet. Every part is a rigid frame (position + quaternion at the part's rest center);
-// the splat cloud gets one matrix per part.
+// whoever draws it gets one matrix per part.
 export const PART = { body: 0, head: 1, armL: 2, armR: 3, legL: 4, legR: 5 };
 const G_GROUND = 1, G_LIMB = 2;
 const v = (a) => new THREE.Vector3(a[0], a[1], a[2]);

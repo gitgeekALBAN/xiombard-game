@@ -1,5 +1,5 @@
 import { smin, sphere, ellipsoid, roundCone, capsule, turned, mirrorX, noise3, sstep } from './sdf.js';
-import { lathe, merge, place, ribbon } from './prims.js';
+import { lathe, merge, place, ribbon, ball } from './prims.js';
 import { MAT, lin } from './human.js';
 
 // Body plans that are not the crew's bean: the knuckle-dragger and the zombie dogs. Same contract as
@@ -80,9 +80,9 @@ export function dogPieces(k, q = 1) {
   const zTip = sz0 + sl + sr, top = Math.max(hy + hr, tb[1] + tr);
   out.push({ d: et === 2 ? lumpy(fur, 0.012, 38) : fur, box: pad([-Math.max(r, hr), h - r, Math.min(-L, tb[2] - tr), Math.max(r, hr), top, zTip], 0.035), cell: c(0.026), mat: MAT.fur, color: col.skin,
     bones: [{ part: 0, d: bodyD }, { part: 1, d: (x, y, z) => headD(x, y, z) + 0.02 }], soft: 0.04 });
-  out.push({ d: sphere(0, sx0 - sl * 0.12 + sr * 0.45, sz0 + sl + sr * 0.55, sr * 0.66), box: pad([-sr, sx0 - sl * 0.2 - sr * 0.3, sz0 + sl - sr * 0.2, sr, sx0 + sr * 1.2, zTip + sr * 0.5], 0.02), cell: c(0.014), mat: MAT.nose, color: col.nose, bone: 1 });
+  out.push({ mesh: place(ball(sr * 0.66, sr * 0.66, sr * 0.66, 8, 5), (x, y, z) => [x, y, z], 0, sx0 - sl * 0.12 + sr * 0.45, sz0 + sl + sr * 0.55), mat: MAT.nose, color: col.nose, bone: 1 });
   // the tongue lolls out of one side
-  out.push({ d: ellipsoid(sr * 0.5, sx0 - sr * 1.5 - 0.02, sz0 + sl * 0.62, 0.022, 0.05, 0.014), box: pad([sr * 0.5 - 0.03, sx0 - sr * 1.5 - 0.08, sz0 + sl * 0.62 - 0.02, sr * 0.5 + 0.03, sx0 - sr * 1.3, sz0 + sl * 0.62 + 0.02], 0.02), cell: c(0.012), mat: MAT.tongue, color: col.hair, bone: 1 });
+  out.push({ mesh: place(ball(0.022, 0.05, 0.014, 6, 4), (x, y, z) => [x, y, z], sr * 0.5, sx0 - sr * 1.5 - 0.02, sz0 + sl * 0.62), mat: MAT.tongue, color: col.hair, bone: 1 });
 
   // ears: a dachshund's flaps, a spaniel's long wavy curtains, a poodle's pompoms
   let ear;

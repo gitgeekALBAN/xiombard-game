@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "build:showcase": "vite build --config vite.showcase.config.js",
     "build:sdf": "vite build --config vite.sdf.config.js",
     "build:cast": "vite build --config vite.cast.config.js",
     "preview": "vite preview"

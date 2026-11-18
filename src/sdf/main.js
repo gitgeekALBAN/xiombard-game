@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { isTouchDevice } from '../touch.js';
-import { Puppet } from '../showcase/rig.js';
+import { Puppet } from './rig.js';
 import { SdfCharacter } from './shader.js';
 import { TEAM } from '../shared/crew.js';
 
 // Shader crew: five characters with no meshes and no textures. Each one is a signed distance function raymarched
-// in a box, posed by the same six-part skeleton and ragdoll as the splat puppets.
+// in a box, posed by a six-part skeleton and ragdoll (rig.js). This is the older technique; the game sculpts meshes instead.
 const $ = (id) => document.getElementById(id);
 const GAP = 1.16;
 const MODES = {
@@ -64,7 +64,7 @@ floor.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
 world.addBody(floor);
 
 // ---------- the crew ----------
-const frames = { parts: Array.from({ length: TEAM.length * 6 }, () => new THREE.Matrix4()) }; // stands in for the splat cloud
+const frames = { parts: Array.from({ length: TEAM.length * 6 }, () => new THREE.Matrix4()) }; // one matrix per part, per puppet
 const puppets = TEAM.map((def, i) => new Puppet(def, i, frames, world, mat, new THREE.Vector3((i - 2) * GAP, 0, 0), (2 - i) * 0.1));
 const crew = TEAM.map((def) => { const c = new SdfCharacter(def, camera); scene.add(c.mesh); return c; });
 const shadows = TEAM.map((def) => {

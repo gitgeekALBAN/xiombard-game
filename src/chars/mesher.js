@@ -46,7 +46,8 @@ export function surfaceNets(d, box, cell) {
 // bone (two part indices), weight (share of the first)
 export function meshPieces(pieces) {
   const P = [], N = [], C = [], FX = [], B = [], W = [], I = [];
-  const all = (x, y, z) => { let m = Infinity; for (const p of pieces) { if (!p.d) continue; const v = p.d(x, y, z); if (v < m) m = v; } return m; };
+  // what crowds a point: every sculpted piece, and every primitive that brought a formula of its own shape (`occ`)
+  const all = (x, y, z) => { let m = Infinity; for (const p of pieces) { const f = p.d || p.occ; if (!f) continue; const v = f(x, y, z); if (v < m) m = v; } return m; };
   for (const p of pieces) {
     const prim = p.mesh, { pos, idx } = prim ? prim : surfaceNets(p.d, p.box, p.cell), base = P.length / 3, e = (p.cell || 0.02) * 0.5, d = p.d;
     const start = I.length;

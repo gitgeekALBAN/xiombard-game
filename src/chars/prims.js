@@ -77,3 +77,36 @@ export function ribbon(rows, thick) {
   for (let e = 0; e < rim.length; e++) { const a = rim[e], b = rim[(e + 1) % rim.length]; idx.push(F(...a), B(...a), F(...b), F(...b), B(...a), B(...b)); }
   return { pos, nrm, idx };
 }
+
+// A solid of revolution found from its formula. d(r, y) < 0 inside; yMid is any height on the axis that is inside.
+// Rings are spaced closer near the two poles, so the ends come out round with few of them.
+export function revolve(d, yMid, rings, seg, opts = {}) {
+  const pole = (dir) => { let a = yMid, b = yMid + dir * 4; for (let i = 0; i < 32; i++) { const m = (a + b) / 2; if (d(0.0005, m) < 0) a = m; else b = m; } return a; };
+  const y0 = pole(-1), y1 = pole(1), profile = [];
+  for (let i = 0; i <= rings; i++) {
+    const y = y0 + (y1 - y0) * (0.5 - 0.5 * Math.cos((Math.PI * i) / rings));
+    let a = 0, b = 3;
+    if (i > 0 && i < rings) for (let n = 0; n < 28; n++) { const m = (a + b) / 2; if (d(m, y) < 0) a = m; else b = m; }
+    profile.push([Math.max(a, 0.001), y]);
+  }
+  return lathe(profile, seg, { smooth: true, ...opts });
+}
+// an ellipsoid centered on the origin
+export const ball = (rx, ry, rz, seg = 10, rings = 6) => lathe(Array.from({ length: rings + 1 }, (_, i) => { const a = -Math.PI / 2 + (Math.PI * i) / rings; return [Math.max(rx * Math.cos(a), 0.001), ry * Math.sin(a)]; }), seg, { smooth: true, zs: rz / rx });
+// lay a primitive built along +y onto the segment from a toward b: y = 0 lands on a, and +y points at b
+export function along(m, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], l = Math.hypot(dx, dy, dz) || 1, ux = dx / l, uy = dy / l, uz = dz / l;
+  // rotate +y onto u about the axis y x u = (uz, 0, -ux)
+  const s = Math.hypot(ux, uz), kx = s > 1e-6 ? uz / s : 1, kz = s > 1e-6 ? -ux / s : 0, c = uy;
+  const rot = (x, y, z) => { const dot = kx * x + kz * z, cx = -kz * y, cy = kz * x - kx * z, cz = kx * y; return [x * c + cx * s + kx * dot * (1 - c), y * c + cy * s, z * c + cz * s + kz * dot * (1 - c)]; };
+  return place(m, rot, a[0], a[1], a[2]);
+}
+// keep only the triangles whose three corners all pass the test (a cap of hair that leaves the face free)
+export function clip(m, keep) {
+  const idx = [];
+  for (let t = 0; t < m.idx.length; t += 3) {
+    const ok = [0, 1, 2].every((k) => { const i = m.idx[t + k] * 3; return keep(m.pos[i], m.pos[i + 1], m.pos[i + 2]); });
+    if (ok) idx.push(m.idx[t], m.idx[t + 1], m.idx[t + 2]);
+  }
+  return { pos: m.pos, nrm: m.nrm, idx };
+}

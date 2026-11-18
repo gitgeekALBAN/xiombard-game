@@ -62,11 +62,11 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - Branch from `main`, open a PR, one review, merge. Push to `main` auto-deploys via `.github/workflows/deploy.yml`.
 - Keep the page working at phone width; check FPS on a mid-range laptop before merging heavy shaders.
 
-## Decision: Gaussian splatting
-- **Not core.** Possible later for 1–2 hero locations or distant backdrops, via Spark (`@sparkjsdev/spark`), which mixes splats with three.js meshes.
-- To respect the asset rule, splats should be **generated from code** (from our noise/SDF functions), or captured by the team ourselves.
-- Known limits: baked lighting (no dynamic shadows), needs a separate collision mesh, hard to animate. Budget: compressed `.spz` ≈ 6 MB per 1M splats; phones struggle above ~1–2M splats.
-- Riskiest assumption: splats run fast enough on target devices and match the toon shader style. Cheapest test before any design commitment: drop one `.spz` scene into the current page and measure FPS on a mid-range laptop and a phone.
+## How graphics are made (decided)
+- **One rule.** Hard, simple shapes are plain primitives (boxes, solids of revolution, tubes, ribbons) with only as many triangles as the silhouette needs. Small relief is never geometry: planks, seams, hoops, rivets, stitches, knitting, fringe, cracks, engravings and dirt are painted by the fragment shader from the object's own coordinates. Only soft shapes that have to melt into each other are sculpted (mittens, boots, fur, pompoms on dogs).
+- **Ink outlines** are an inverted hull, and a hull doubles every triangle it covers: keep it for real silhouettes, paint the lines inside a shape.
+- **Gaussian splatting: tried and dropped.** We built a splat renderer and a set of splat puppets; it cost a second rendering path, was heavy, hard to animate, and did not look better than painted meshes. Do not bring it back without a concrete reason.
+- **Raymarching whole characters per pixel: tried and replaced.** `src/sdf/` and `sdf.html` are the old demo of it; the game does not use it.
 
 ## Product thinking
 Product, segment and value decisions follow Advanced Jobs To Be Done / Next Move Theory (Ivan Zamesin). Treat new features as value hypotheses with a named riskiest assumption and the cheapest test before building.
