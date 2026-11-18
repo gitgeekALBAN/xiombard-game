@@ -47,13 +47,13 @@ vec2 tuftLayer(vec2 p, float cs, float lean, float seed, float bw, float px) {
   for (int j = 0; j < 4; j++) {
     vec2 cell = c0 + vec2(float(j & 1), float(j >> 1));
     vec3 h = hash32(cell + seed);
-    float a = lean + (h.z - 0.5) * 2.0;
+    float a = lean + (h.z - 0.5) * 1.8;
     vec2 dir = vec2(sin(a), cos(a));
-    float L = cs * (0.75 + 0.35 * h.x);
+    float L = cs * (0.95 + 0.45 * h.x);
     vec2 d = p - (cell + 0.5 + (h.xy - 0.5) * 0.6) * cs + dir * (L * 0.5);
     float y = dot(d, dir);
     if (y <= 0.0 || y >= L) continue;
-    float s = (dir.y * d.x - dir.x * d.y) / y * 1.9; // slope across the fan, +-1 at its sides
+    float s = (dir.y * d.x - dir.x * d.y) / y * 1.6; // slope across the fan, +-1 at its sides
     if (abs(s) >= 1.0) continue;
     float sl = (s * 0.5 + 0.5) * 7.0;
     float bi = floor(sl);
@@ -61,7 +61,7 @@ vec2 tuftLayer(vec2 p, float cs, float lean, float seed, float bw, float px) {
     float bl = L * (0.4 + 0.6 * bh);
     float t = y / bl;
     if (t >= 1.0) continue;
-    float slot = y * (2.0 / 7.0 / 1.9);
+    float slot = y * (2.0 / 7.0 / 1.6);
     float off = (fract(sl) - 0.5) * slot + (bh - 0.5) * 0.5 * slot * t;
     float hw = bw * (1.0 - t * t * 0.3) * (1.0 - t);
     float c = smoothstep(hw + px * 0.75, hw - px * 0.75, abs(off));
@@ -99,25 +99,27 @@ vec3 lawnOn(vec2 p, float px, vec3 earth, float bare) {
   float dp = dayPaint();
   float n1 = fbm3(p * 0.045);
   float n2 = vnoise(p * 0.16 + 5.3);
-  float n3 = vnoise(p * 0.11 - 7.3);
+  float n3 = vnoise(p * 0.21 - 7.3);
   float lit = smoothstep(0.3, 0.72, n1);       // big lighter and darker patches
   float yel = smoothstep(0.55, 0.8, n2);       // yellower green
-  float dry = smoothstep(0.74, 0.88, n3);      // dry straw over bare earth
-  vec3 gap = mix(${dn('#13201f', '#3a5822')}, ${dn('#1a2b2b', '#50742e')}, lit);
-  vec3 bBase = mix(${dn('#1c2e2e', '#46692a')}, ${dn('#243a38', '#5c8234')}, lit);
-  vec3 bTip = mix(${dn('#48666a', '#86a846')}, ${dn('#62827f', '#a4c25a')}, lit);
+  float dry = smoothstep(0.72, 0.88, n3);      // dry straw over bare earth
+  vec3 gap = mix(${dn('#0e1819', '#3c5524')}, ${dn('#142223', '#566e30')}, lit);
+  vec3 bBase = mix(${dn('#16262a', '#4a6628')}, ${dn('#1c3032', '#647e36')}, lit);
+  vec3 bTip = mix(${dn('#48666a', '#90a64e')}, ${dn('#62827f', '#b0c066')}, lit);
   bBase = mix(bBase, ${dn('#26322e', '#6a7630')}, yel * 0.55);
   bTip = mix(bTip, ${dn('#6e8078', '#c0bc62')}, yel * 0.55);
-  gap = mix(gap, ${dn('#262226', '#8c7250')}, dry * 0.85);
+  gap = mix(gap, ${dn('#262226', '#8c7250')}, dry * 0.7);
   bBase = mix(bBase, ${dn('#35362f', '#94824c')}, dry);
   bTip = mix(bTip, ${dn('#7e8278', '#d4c080')}, dry);
   float bareG = smoothstep(0.3, 0.6, bare);
   vec3 col = mix(gap, earth, bareG);
   float lean = vnoise(p * 0.04 + 3.0) * 7.0; // clumps lean along slow swirls
+  float dab = smoothstep(0.35, 0.8, vnoise(rot2(p, lean) * vec2(2.2, 7.0)));
+  gap *= 1.0 + (dab - 0.45) * 0.4 * aaFade(7.0, px);
   // big clumps, then clover, then small clumps on top
   float fA = aaFade(16.0, px);
-  vec2 tA = vec2(0.36, 0.45);
-  if (fA > 0.0) tA = mix(tA, tuftLayer(p, 0.45, lean, 0.0, 0.032, px), fA);
+  vec2 tA = vec2(0.5, 0.42);
+  if (fA > 0.0) tA = mix(tA, tuftLayer(p, 0.38, lean, 0.0, 0.03, px), fA);
   tA.x *= smoothstep(0.62, 0.42, bare - 0.45 * tA.y) * (1.0 - dry * 0.3);
   col = mix(col, mix(bBase * 0.9, bTip, smoothstep(0.05, 1.0, tA.y)), tA.x);
   if (px < 0.022) {
@@ -134,8 +136,8 @@ vec3 lawnOn(vec2 p, float px, vec3 earth, float bare) {
     }
   }
   float fB = aaFade(31.0, px);
-  vec2 tB = vec2(0.36, 0.45);
-  if (fB > 0.0) tB = mix(tB, tuftLayer(p, 0.23, lean + 0.5, 17.0, 0.016, px), fB);
+  vec2 tB = vec2(0.5, 0.42);
+  if (fB > 0.0) tB = mix(tB, tuftLayer(p, 0.2, lean + 0.5, 17.0, 0.015, px), fB);
   tB.x *= smoothstep(0.62, 0.42, bare - 0.45 * tB.y) * (1.0 - dry * 0.3);
   col = mix(col, mix(bBase, bTip * 1.08, smoothstep(0.05, 1.0, tB.y)), tB.x * 0.9);
   // a few white and pink flower dots
@@ -155,7 +157,7 @@ vec3 lawnOn(vec2 p, float px, vec3 earth, float bare) {
   if (px < 0.039) {
     vec2 g = p / 0.9, cell = floor(g);
     vec3 h = hash32(cell + 87.0);
-    if (h.z < 0.1) {
+    if (h.z < 0.1 * (1.0 - bareG)) {
       vec2 d = rot2((g - cell - 0.5 - (h.xy - 0.5) * 0.7) * 0.9, h.x * 6.28);
       float a = d.x / 0.07;
       float w = 0.028 * (1.0 - a * a) * (1.0 + 0.15 * sin(a * 9.0));
@@ -198,7 +200,7 @@ vec3 pathEarth(vec2 p, vec4 sg, float wn, float px) {
   if (px < 0.055) {
     vec3 pb = lumps(p, 0.24, 0.17, 0.26, 3.0, px);
     float f = aaFade(10.0, px);
-    vec3 stone = mix(${dn('#34323e', '#6a6058')}, ${dn('#7c7a90', '#c4baa8')}, pb.y);
+    vec3 stone = mix(${dn('#34323e', '#6a6058')}, ${dn('#6e6c82', '#a89e8e')}, pb.y);
     col *= 1.0 - pb.z * 0.5 * f;
     col = mix(col, stone, pb.x * f);
   }
@@ -218,10 +220,10 @@ vec3 soilTop(vec2 p, float px) {
     vec3 c2 = lumps(p + 0.07, 0.13, 0.5, 0.3, 23.0, px);
     col *= 1.0 - c2.z * 0.4 * f2;
     col = mix(col, mix(${dn('#1a1416', '#2e2018')}, ${dn('#342a2e', '#5c4230')}, c2.y), c2.x * f2);
-    vec3 c3 = lumps(p, 0.17, 0.13, 0.2, 37.0, px);
+    vec3 c3 = lumps(p, 0.17, 0.06, 0.2, 37.0, px);
     float f3 = aaFade(12.0, px);
     col *= 1.0 - c3.z * 0.5 * f3;
-    col = mix(col, mix(${dn('#3a3848', '#6a6458')}, ${dn('#8a88a0', '#c8c0b0')}, c3.y), c3.x * f3);
+    col = mix(col, mix(${dn('#2e2c3a', '#5a544a')}, ${dn('#646278', '#958c7e')}, c3.y), c3.x * f3);
   }
   return col;
 }
@@ -251,12 +253,13 @@ vec4 road(vec2 p, float px, out float bare) {
     col = mix(col, mix(${dn('#221a1e', '#4e3422')}, ${dn('#4a3c3e', '#9a7450')}, c.y), c.x * fc);
   }
   // standing puddles in the ruts that mirror the sky, with a pale rim
-  float pn = vnoise(p * vec2(0.3, 1.2) + 4.0) * 0.7 + e1 * 0.3;
+  float pn = vnoise(p * vec2(0.45, 1.0) + 4.0) * 0.7 + e1 * 0.3;
   float pw = max(px * 1.5, 0.01);
-  float wet = rut * smoothstep(0.58 - pw, 0.58 + pw, pn);
-  float edge = rut * smoothstep(0.54, 0.575, pn) * (1.0 - smoothstep(0.585, 0.62, pn));
-  vec3 sky = mix(${dn('#4a4272', '#7c9ec4')}, ${dn('#7e74a8', '#aac6de')}, smoothstep(0.3, 0.8, streak));
-  col = mix(col, ${dn('#a8a0cc', '#e2eaee')}, edge * 0.55);
+  float pr = smoothstep(0.36, 0.12, rd);
+  float wet = pr * smoothstep(0.58 - pw, 0.58 + pw, pn);
+  float edge = pr * smoothstep(0.54, 0.575, pn) * (1.0 - smoothstep(0.585, 0.62, pn));
+  vec3 sky = mix(${dn('#36305a', '#7c9ec4')}, ${dn('#544c80', '#aac6de')}, smoothstep(0.3, 0.8, streak));
+  col = mix(col, ${dn('#8c84b4', '#e2eaee')}, edge * 0.55);
   col = mix(col, sky, wet);
   // the hump between the ruts keeps a ragged strip of grass
   float hump = smoothstep(0.55, 0.2, abs(dz)) * smoothstep(0.35, 0.6, vnoise(p * vec2(0.6, 2.0) + 2.0));
