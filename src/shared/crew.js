@@ -114,7 +114,7 @@ export function humanRig(def, S, index = 0) {
     height: (k.head[0] + k.head[1]) * S, back: k.bean[1] * k.head[2] * S };
 }
 
-const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matrix4(), _b = new THREE.Matrix4(), _r = new THREE.Matrix4();
+const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matrix4(), _b = new THREE.Matrix4(), _r = new THREE.Matrix4(), _hop = new THREE.Matrix4();
 const _e = new THREE.Euler(), _v = new THREE.Vector3(), _q = new THREE.Quaternion();
 const _rot = Array.from({ length: NCREW }, () => [0, 0, 0]);
 const set = (r, x, y, z) => { r[0] = x; r[1] = y; r[2] = z; };
@@ -126,10 +126,13 @@ const about = (out, parent, j, r) => out.copy(parent).multiply(_a.makeTranslatio
 // body keeps its feet under it; head and arms ride on the body.
 export function crewPose(rig, root, s, out, off = 0) {
   const k = Math.min(s.speed / 4, 1.4), sw = Math.sin(s.phase), t = s.t, idle = 1 - Math.min(k, 1), R = _rot;
-  set(R[0], 0.07 * k + Math.sin(t * 1.7) * 0.02, sw * 0.1 * k, sw * 0.07 * k + Math.sin(t * 0.9) * 0.02 * idle);
-  set(R[1], -0.07 * k + Math.sin(t * 1.1) * 0.04, Math.sin(t * 0.7) * 0.2 * idle, Math.sin(t * 1.3) * 0.06);
-  set(R[2], -sw * 0.7 * k, 0, 0.06 + Math.sin(t * 1.6) * 0.03);
-  set(R[3], sw * 0.7 * k, 0, -0.06 - Math.sin(t * 1.6) * 0.03);
+  // A cartoon walk: the whole figure hops up between footfalls and rocks from side to side over the standing leg,
+  // the head rolls back the other way and nods, the arms flap out a little. Running does more of all of it.
+  const wad = s.dig || s.air ? 0 : k * (s.carry ? 0.55 : 1), bounce = Math.abs(Math.cos(s.phase));
+  set(R[0], 0.09 * k + Math.sin(t * 1.7) * 0.02, sw * 0.1 * k, -sw * 0.17 * wad + Math.sin(t * 0.9) * 0.02 * idle);
+  set(R[1], -0.07 * k + Math.cos(s.phase * 2) * 0.05 * wad + Math.sin(t * 1.1) * 0.04, Math.sin(t * 0.7) * 0.2 * idle, sw * 0.1 * wad + Math.sin(t * 1.3) * 0.06);
+  set(R[2], -sw * 0.7 * k, 0, 0.06 + 0.12 * wad * bounce + Math.sin(t * 1.6) * 0.03);
+  set(R[3], sw * 0.7 * k, 0, -0.06 - 0.12 * wad * bounce - Math.sin(t * 1.6) * 0.03);
   set(R[4], sw * 0.75 * k, 0, 0);
   set(R[5], -sw * 0.75 * k, 0, 0);
   if (s.carry) { // both mittens out in front: low for a coffin, up high for a body
@@ -157,6 +160,7 @@ export function crewPose(rig, root, s, out, off = 0) {
     set(R[5], -0.2, 0, 0);
     if (!s.carry) { R[2][2] = 0.9; R[3][2] = -0.9; }
   }
+  if (wad > 0.01) root = _hop.copy(root).multiply(_a.makeTranslation(sw * 0.045 * wad, bounce * 0.085 * wad, 0)); // feet and all
   return rigPose(rig, root, R, out, off);
 }
 

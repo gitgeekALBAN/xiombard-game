@@ -270,11 +270,17 @@ export class View {
     if (fp) {
       // eye in the head, nudged forward so the near plane clears the face; smoothed so ragdoll jitter and the
       // walk cycle give a gentle bob instead of a shake
-      const head = me.groups[CP.head].position;
+      // The walk hops and rocks from side to side, and a camera in the head would swing with every step. So the
+      // eye stands over the middle of the two legs (which hardly rocks) and takes its height from the head slowly:
+      // what is left is a gentle bob.
+      const head = me.groups[CP.head].position, la = me.groups[CP.legL].position, lb = me.groups[CP.legR].position;
       const fx = Math.sin(look.yaw), fz = Math.cos(look.yaw);
-      this.eye.set(head.x + fx * 0.14, head.y + 0.06, head.z + fz * 0.14);
+      this.eye.set((la.x + lb.x) / 2 + fx * 0.14, head.y + 0.06, (la.z + lb.z) / 2 + fz * 0.14);
       if (this.eyeFresh) { this.camTarget.copy(this.eye); this.eyeFresh = false; }
-      this.camTarget.lerp(this.eye, 1 - Math.exp(-dt * 22));
+      const kh = 1 - Math.exp(-dt * 22), kv = 1 - Math.exp(-dt * 7);
+      this.camTarget.x += (this.eye.x - this.camTarget.x) * kh;
+      this.camTarget.z += (this.eye.z - this.camTarget.z) * kh;
+      this.camTarget.y += (this.eye.y - this.camTarget.y) * kv;
       const cp = Math.cos(look.pitch), dir = new THREE.Vector3(fx * cp, -Math.sin(look.pitch), fz * cp);
       this.camera.position.copy(this.camTarget);
       this.camera.lookAt(this.camTarget.x + dir.x, this.camTarget.y + dir.y, this.camTarget.z + dir.z);

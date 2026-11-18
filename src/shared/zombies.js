@@ -150,7 +150,9 @@ export function zombiePose(rig, root, s, out, off = 0) {
   const k = Math.min(s.speed / 2.2, 1.3), sw = Math.sin(s.phase), t = s.t, R = _rot, drag = type === ZTYPE.dragger;
   const a = s.attack || 0, wind = a ? Math.sin(Math.min(a / 0.55, 1) * Math.PI * 0.5) : 0, slam = a > 0.55 ? ease(Math.min((a - 0.55) / 0.2, 1)) : 0;
   // a lurching body, a head hanging to one side, stiff little steps
-  set(R[0], (drag ? 0.2 : 0.14) + Math.sin(t * 1.3) * 0.03 - wind * 0.25 + slam * 0.5, sw * 0.12 * k, sw * 0.13 * k + Math.sin(t * 0.8) * 0.03);
+  // the same hop and side-to-side rock as the crew's walk, heavier and slower (see crewPose)
+  const wad = Math.min(k, 1.2) * (drag ? 0.5 : 1) * (a ? 0.3 : 1), bounce = Math.abs(Math.cos(s.phase));
+  set(R[0], (drag ? 0.2 : 0.14) + Math.sin(t * 1.3) * 0.03 - wind * 0.25 + slam * 0.5, sw * 0.12 * k, -sw * 0.2 * wad + Math.sin(t * 0.8) * 0.03);
   set(R[1], drag ? -0.3 : 0.05, Math.sin(t * 0.6) * 0.15, 0.38 + Math.sin(t * 1.1) * 0.06);
   set(R[4], sw * 0.5 * k, 0, 0.04);
   set(R[5], -sw * 0.5 * k, 0, -0.04);
@@ -159,6 +161,7 @@ export function zombiePose(rig, root, s, out, off = 0) {
   set(R[2], up + Math.sin(t * 2.3) * 0.08, 0, -0.42);
   set(R[3], up + Math.sin(t * 2.3 + 1.7) * 0.08, 0, 0.42);
   const look = rig.def.look;
+  if (!look.bounce && wad > 0.01) root = _hop.copy(root).multiply(_a.makeTranslation(sw * 0.05 * wad, bounce * 0.06 * wad, 0));
   if (look.bounce) { // a ball of a zombie gets about in little hops
     root = _hop.copy(root).multiply(_a.makeTranslation(0, Math.abs(sw) * 0.2 * Math.min(k * 1.6, 1) + 0.02, 0));
     R[0][0] = 0.06 + sw * 0.08; R[4][0] *= 0.5; R[5][0] *= 0.5;
@@ -211,12 +214,12 @@ export function zombiePose(rig, root, s, out, off = 0) {
 function dogPose(rig, root, s, out, off) {
   const k = Math.min(s.speed / 4, 1.2), sw = Math.sin(s.phase), cw = Math.cos(s.phase), t = s.t, R = _rot;
   const a = s.attack || 0, lunge = a ? Math.sin(Math.min(a, 1) * Math.PI) : 0;
-  set(R[0], -sw * 0.1 * k - lunge * 0.35, 0, cw * 0.05 * k);
+  set(R[0], -sw * 0.14 * k - lunge * 0.35, 0, cw * 0.1 * k); // a rocking-horse gallop
   set(R[1], cw * 0.12 * k + Math.sin(t * 3.1) * 0.06 - lunge * 0.3, Math.sin(t * 0.9) * 0.2 * (1 - Math.min(k, 1)), 0.25 + Math.sin(t * 1.7) * 0.08);
   const am = 0.8 * k;
   set(R[2], sw * am, 0, 0); set(R[5], sw * am * 0.9, 0, 0);
   set(R[3], -sw * am, 0, 0); set(R[4], -sw * am * 0.9, 0, 0);
-  _a.makeTranslation(0, Math.abs(cw) * 0.03 * k + lunge * 0.12, 0);
+  _a.makeTranslation(0, Math.abs(cw) * 0.07 * k + lunge * 0.12, 0);
   _m.copy(root).multiply(_a);
   about(_body, _m, rig.pivot[0], R[0]);
   write(rig, 0, _body, out, off);

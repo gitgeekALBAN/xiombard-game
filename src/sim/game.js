@@ -1062,7 +1062,7 @@ export class Sim {
   // ---------- transforms / snapshots ----------
   diggerPose(p, out) {
     const b = p.body.position;
-    this._root.makeRotationY(p.yaw).setPosition(b.x, b.y + (p.grounded ? Math.abs(Math.sin(p.phase)) * 0.05 * Math.min(1, (p.speed || 0) / 3) : 0), b.z);
+    this._root.makeRotationY(p.yaw).setPosition(b.x, b.y, b.z); // the bounce of the walk is part of the pose
     this._pose.speed = p.speed || 0; this._pose.phase = p.phase; this._pose.t = this.time + p.id;
     this._pose.carry = p.grab ? (p.grab.coffin ? 'coffin' : 'corpse') : null; this._pose.dig = p.digging; this._pose.air = !p.grounded;
     this._pose.swing = this.swinging(p) ? (this.time - p.swingT) / SWING_TIME : 0;

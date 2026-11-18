@@ -1,4 +1,5 @@
-import { smin, sphere, ellipsoid, roundCone, capsule, torus, turned, mirrorX, noise3, sstep } from './sdf.js';
+import { smin, sphere, ellipsoid, roundCone, capsule, turned, mirrorX, noise3, sstep } from './sdf.js';
+import { lathe, merge, place, ribbon } from './prims.js';
 import { MAT, lin } from './human.js';
 
 // Body plans that are not the crew's bean: the knuckle-dragger and the zombie dogs. Same contract as
@@ -6,6 +7,8 @@ import { MAT, lin } from './human.js';
 const pad = (b, m) => [b[0] - m, b[1] - m, b[2] - m, b[3] + m, b[4] + m, b[5] + m];
 const mixc = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const lumpy = (d, amp, f) => (x, y, z) => d(x, y, z) - amp * noise3(x * f, y * f, z * f);
+// a tube bent into a ring around the y axis, centered on the origin: a collar, one wrap of a scarf
+const tube = (R, r, seg) => lathe(Array.from({ length: 7 }, (_, i) => [R + r * Math.cos((i / 7) * Math.PI * 2), r * Math.sin((i / 7) * Math.PI * 2)]), seg, { smooth: true, closed: true });
 
 // ---------- the knuckle-dragger: a hunched boulder with a face sunk between its shoulders and fists like anvils
 export function brutePieces(k, q = 1) {
@@ -30,11 +33,22 @@ export function brutePieces(k, q = 1) {
       color: (x, y, z) => mixc(col.skin, dirt, 0.75 * sstep(hy + fr * 1.1, hy - fr * 0.6, y) * (0.5 + 0.5 * noise3(x * 30, y * 30, z * 30))),
       bones: [{ part: s > 0 ? 2 : 3, d: (x, y, z) => limb(x, y, z) + Math.max(0, -body(x, y, z)) * 5 }, { part: 0, d: (x, y, z) => body(x, y, z) + 0.03 }], soft: 0.05 });
   }
-  // what is left of a scarf, wound once under the chin
-  const ring = turned(torus(0, yH - rH * 0.8, fz * 0.6, rH * 1.45, 0.05), 0, yH - rH * 0.8, fz * 0.6, 0.55, 0, 0);
-  const end = roundCone(rH * 0.5, yH - rH * 1.05, fz + rH * 0.55, rH * 0.62, yH - rH * 2.3, fz + rH * 0.62, 0.04, 0.036);
-  const rag = (x, y, z) => Math.max(end(x, y, (z - fz) / 0.5 + fz) * 0.5, yH - rH * 2.25 + 0.05 * noise3(x * 40, 2, 3) - y);
-  out.push({ d: (x, y, z) => Math.min(ring(x, y, z), rag(x, y, z)) + 0.003 * Math.sin(x * 60 + y * 45), box: pad([-rH * 1.6, yH - rH * 2.5, fz - rH * 1.7, rH * 1.6, yH + rH * 0.3, fz + rH * 1.8], 0.06), cell: c(0.022), mat: MAT.scarf, color: col.scarf, bone: 0 });
+  // what is left of a scarf: a tube wound once under the chin and a ragged end lying on the chest (primitives;
+  // the stitches are paint)
+  const sy0 = yH - rH * 0.8, sz0 = fz * 0.6, tilt = 0.55, ct = Math.cos(tilt), st = Math.sin(tilt);
+  const ring = place(tube(rH * 1.45, 0.05, 16), (x, y, z) => [x, y * ct - z * st, y * st + z * ct], 0, sy0, sz0);
+  const chest = (x, y, last) => { // the front of the trunk at (x, y)
+    if (trunk(x, y, 0) > 0.03) return last;
+    let lo = 0, hi = rB + 0.4;
+    for (let n = 0; n < 16; n++) { const m = (lo + hi) / 2; if (trunk(x, y, m) < 0.045) lo = m; else hi = m; }
+    return lo;
+  };
+  const zc = [rB, rB, rB, rB];
+  const rag = ribbon(Array.from({ length: 6 }, (_, i) => Array.from({ length: 4 }, (_, j) => {
+    const x = rH * 0.3 + (0.1 * j) / 3, y = yH - rH * 1.25 - (rH * 1.15 * i) / 5 + (i === 5 ? 0.06 * noise3(j * 1.9 + 2, 0.5, 0.5) : 0);
+    return [x, y, (zc[j] = chest(x, y, zc[j]))];
+  })), 0.03);
+  out.push({ mesh: merge(ring, rag), mat: MAT.scarf, color: col.scarf, bone: 0 });
   // stumpy legs in small boots
   const [lx, ly, lr, top] = k.leg;
   const leg = capsule(lx, ly + 0.05, 0, lx, 0.06, 0, lr), shaft = roundCone(lx, top, 0, lx, lr * 1.1, 0, lr * 1.3, lr * 1.38), foot = ellipsoid(lx, lr * 1.05, lr * 1.2, lr * 1.6, lr * 1.15, lr * 2.4);
@@ -82,17 +96,21 @@ export function dogPieces(k, q = 1) {
     out.push({ d: hair, box: pad([-pomH * 1.3, hy + hr * 0.2, hz - hr * 0.1 - pomH, pomH * 1.3, hy + hr * 0.85 + pomH, hz + hr * 0.4 + pomH * 0.7], 0.04), cell: c(0.02), mat: MAT.fluff, color: col.hat, bone: 1 });
     out.push({ d: lumpy(sphere(tb[0], tb[1], tb[2], pomT), 0.018, 40), box: pad([-pomT, tb[1] - pomT, tb[2] - pomT, pomT, tb[1] + pomT, tb[2] + pomT], 0.04), cell: c(0.018), mat: MAT.fluff, color: col.hat, bone: 0 });
   }
-  // legs, paws in dark socks, and for the poodle a ball of fluff at each ankle
-  const legD = (zs) => capsule(lx, h, zs * lz, lx, lr * 1.1, zs * lz, lr), pawD = (zs) => ellipsoid(lx, lr * 0.95, zs * lz + lr * 0.55, lr * 1.4, lr * 1.0, lr * 1.9);
+  // legs are plain tubes (primitives); paws in dark socks and the poodle's ankle fluff are soft, so they are sculpted
+  const pawD = (zs) => ellipsoid(lx, lr * 0.95, zs * lz + lr * 0.55, lr * 1.4, lr * 1.0, lr * 1.9);
+  const legTube = lathe([[0.001, lr * 0.1], [lr * 0.72, lr * 0.4], [lr, lr * 1.1], [lr, h]], 8, { smooth: true });
   [[1, 1, 2], [-1, 1, 3], [1, -1, 4], [-1, -1, 5]].forEach(([s, zs, part]) => {
     const f = (d) => (s > 0 ? d : mirrorX(d)), bx = [s * lx - lr * 2.4, -0.02, zs * lz - lr * 2.4, s * lx + lr * 2.4, h + lr, zs * lz + lr * 3.2];
-    out.push({ d: f(legD(zs)), box: bx, cell: c(0.016), mat: MAT.fur, color: col.leg, bone: part });
+    out.push({ mesh: place(legTube, (x, y, z) => [x, y, z], s * lx, 0, zs * lz), mat: MAT.fur, color: col.leg, bone: part });
     out.push({ d: f((x, y, z) => Math.max(pawD(zs)(x, y, z), -y)), box: [bx[0], -0.02, bx[2], bx[3], lr * 2.6, bx[5]], cell: c(0.014), mat: MAT.boot, color: col.boot, bone: part });
     if (pomA > 0) out.push({ d: f(lumpy(sphere(lx, lr * 2 + pomA, zs * lz, pomA), 0.016, 42)), box: pad([s * lx - pomA, lr * 2, zs * lz - pomA, s * lx + pomA, lr * 2 + pomA * 2, zs * lz + pomA], 0.03), cell: c(0.016), mat: MAT.fluff, color: col.hat, bone: part });
   });
-  // a scrap of knitted scarf for a collar, with one end hanging
-  const ny = (h + r * 0.3 + hy - hr * 0.3) / 2 + r * 0.1, nz = (L - r * 0.7 + hz - hr * 0.4) / 2 + 0.01, nr = (r * 0.72 + hr * 0.7) / 2 + 0.012;
-  const ring = turned(torus(0, ny, nz, nr + 0.012, 0.038), 0, ny, nz, 0.75, 0, 0), end = roundCone(nr * 0.5, ny - nr * 0.7, nz + nr * 0.75, nr * 0.62, ny - nr * 0.7 - 0.13, nz + nr * 0.8, 0.03, 0.027);
-  out.push({ d: (x, y, z) => Math.min(ring(x, y, z), Math.max(end(x, y, (z - nz) / 0.55 + nz) * 0.55, ny - nr * 0.7 - 0.115 + 0.04 * noise3(x * 50, 1, 2) - y)), box: pad([-nr, ny - nr - 0.16, nz - nr, nr, ny + nr, nz + nr * 1.3], 0.045), cell: c(0.016), mat: MAT.scarf, color: col.scarf, bone: 0 });
+  // a scrap of knitted scarf for a collar: a tube around the neck, tipped forward, and one ragged end hanging in front
+  const ny = (h + r * 0.3 + hy - hr * 0.3) / 2 + r * 0.1, nz = (L - r * 0.7 + hz - hr * 0.4) / 2 + 0.01, nr = (r * 0.72 + hr * 0.7) / 2 + 0.024;
+  const ct = Math.cos(0.75), st = Math.sin(0.75);
+  const collar = place(tube(nr, 0.038, 14), (x, y, z) => [x, y * ct - z * st, y * st + z * ct], 0, ny, nz);
+  const end = ribbon(Array.from({ length: 4 }, (_, i) => Array.from({ length: 3 }, (_, j) => [
+    nr * 0.3 + 0.03 * j, ny - nr * 0.62 - 0.045 * i + (i === 3 ? 0.035 * noise3(j * 2.3 + 1, 0.5, 0.5) : 0), nz + nr * 0.86 + 0.012 * i])), 0.024);
+  out.push({ mesh: merge(collar, end), mat: MAT.scarf, color: col.scarf, bone: 0 });
   return out;
 }
