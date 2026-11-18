@@ -45,6 +45,7 @@ export class Character {
     if (k.face2) uniforms.uHeadC2.value.set(k.face2[0], k.face2[1], k.face2[2] + k.face2[3] * 0.2, k.face2[3]);
     uniforms.uBellyR.value = k.bean ? k.bean[1] : 0.2;
     uniforms.uGrime.value = k.grime || 0;
+    if (k.barrel) uniforms.uBarrel.value.set(k.barrel.y0, k.barrel.y1, k.barrel.staves || 10, k.head[2]);
     (k.patches || []).slice(0, 4).forEach((p, i) => { uniforms.uPatch.value[i].set(p[0], p[1], p[2], p[3]); uniforms.uPatchCol.value[i].setRGB(...lin(p[4])); });
     const geo = characterGeometry(k, opts.q || QUALITY.value);
     this.group = new THREE.Group();

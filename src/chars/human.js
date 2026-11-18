@@ -1,4 +1,5 @@
-import { smin, sphere, ellipsoid, roundCone, capsule, cylinder, torus, turned, mirrorX, squashZ, noise3 } from './sdf.js';
+import { smin, sphere, ellipsoid, roundCone, capsule, cylinder, turned, mirrorX, squashZ, noise3 } from './sdf.js';
+import { lathe, merge, place } from './prims.js';
 
 // A two-legged character as a list of pieces for the mesher, sculpted from the numbers of its look (see
 // shared/crew.js for what each array means). Rest pose: feet on y = 0, facing +Z, +X is the character's left.
@@ -20,7 +21,7 @@ const shift = (b, ox, oy, oz) => [b[0] + ox, b[1] + oy, b[2] + oz, b[3] + ox, b[
 //   headAt      [x, y, z]: the head is not on the shoulders but carried there (the neck gets a stitched cap)
 //   face2       [x, y, z, r]: a second head peeking out of the body
 //   shawl, bun  a cloth over the shoulders, a knot of hair
-//   barrel      { y0, y1 }: staves and hoops around the belly
+//   barrel      { y0, y1, staves }: a barrel around the belly (a primitive; staves, hoops and rivets are painted)
 //   prop 'pin'  a rolling pin in the right mitten
 export function humanPieces(k, q = 1) {
   const [yB, rB, yN, rN] = k.bean, [yH, rH, zs] = k.head, col = Object.fromEntries(Object.entries(k.colors).map(([n, h]) => [n, lin(h)]));
@@ -147,23 +148,21 @@ export function humanPieces(k, q = 1) {
     const knot = sphere(0, top - 0.07, rN * zs + 0.075, 0.042);
     out.push({ d: (x, y, z) => Math.min(cloth(x, y, z), knot(x, y, z)), box: pad([-rB, low - 0.04, -rB * zs, rB, top, rB * zs + 0.06], 0.06), cell: c(0.02), mat: MAT.cloth, color: lin(k.shawl), bone: 0 });
   }
-  if (k.barrel) { // what is left of a coffin: staves around the belly with a splintered rim, held by two iron hoops
-    const { y0, y1 } = k.barrel, R = rB + 0.045;
-    const staves = (x, y, z) => { // solid below, hollow only near the rim: nobody sees further in, and it halves the mesh
-      const qz = z / zs, ang = Math.atan2(x, qz), rr = Math.hypot(x, qz), rim = y1 + 0.07 * noise3(ang * 2.2 + 9, 0.5, 0.5) - 0.02;
-      const solid = Math.max(rr - R - 0.026 - 0.006 * Math.cos(ang * 14), y0 - y, y - rim), cup = Math.max(rr - (R - 0.03), y1 - 0.13 - y);
-      return Math.max(solid, -cup) * zs;
-    };
-    out.push({ d: staves, box: pad([-R, y0, -R * zs, R, y1 + 0.06, R * zs], 0.045), cell: c(0.028), mat: MAT.wood, color: lin(k.barrel.color || '#7a5a3a'), bone: 0 });
-    for (const hy of [y0 + (y1 - y0) * 0.22, y0 + (y1 - y0) * 0.72]) {
-      const hoop = torus(0, hy, 0, R + 0.042, 0.022);
-      out.push({ d: (x, y, z) => hoop(x, y, z / zs) * zs, box: pad([-R, hy, -R * zs, R, hy, R * zs], 0.08), cell: c(0.022), mat: MAT.iron, color: lin('#4b4a55'), bone: 0 });
-    }
+  // Hard, simple things are primitives: a few rings of a solid of revolution. Their planks, hoops and rivets are
+  // paint (see the wood and iron materials in material.js), not geometry.
+  if (k.barrel) { // what is left of a coffin, worn like a barrel: a bulging wall, a splintered rim, a short way in
+    const { y0, y1, staves = 10 } = k.barrel, R = rB + 0.07, H = y1 - y0, seg = staves * 2;
+    const jag = Array.from({ length: staves }, (_, i) => 0.14 * noise3(i * 1.7 + 3, 0.5, 0.5) - 0.04);
+    const rim = (ring, a) => jag[Math.floor(((a / (Math.PI * 2)) * staves + 0.5) % staves)]; // each stave broke off at its own height
+    const wall = lathe([0, 0.25, 0.5, 0.75, 1].map((t) => [R * (0.93 + 0.07 * Math.sin(Math.PI * t)), y0 + H * t]), seg, { smooth: true, zs, lift: (ring, a) => (ring === 4 ? rim(ring, a) : 0) });
+    const top = lathe([[R * 0.93 - 0.04, y1], [R * 0.93, y1]], seg, { zs, lift: rim });
+    const inside = lathe([[R * 0.93 - 0.04, y1 - 0.16], [R * 0.93 - 0.04, y1]], seg, { zs, flip: true, lift: (ring, a) => (ring === 1 ? rim(ring, a) : 0) });
+    const floor = lathe([[0.001, y1 - 0.16], [R * 0.93 - 0.04, y1 - 0.16]], seg, { zs }), bottom = lathe([[0.001, y0], [R * 0.93, y0]], seg, { zs, flip: true });
+    out.push({ mesh: merge(wall, top, inside, floor, bottom), mat: MAT.wood, color: lin(k.barrel.color || '#8a6238'), bone: 0 });
   }
-  if (k.prop === 'pin') { // a rolling pin in the right mitten
-    const px = -hx, py = hy - 0.01, pz = hz + mr * 1.2;
-    const pin = (x, y, z) => Math.min(capsule(px - 0.02, py, pz, px + 0.3, py, pz, 0.042)(x, y, z), capsule(px - 0.1, py, pz, px + 0.38, py, pz, 0.017)(x, y, z));
-    out.push({ d: pin, box: pad([px - 0.1, py, pz, px + 0.38, py, pz], 0.07), cell: c(0.016), mat: MAT.wood, color: lin('#b08a5a'), bone: 3 });
+  if (k.prop === 'pin') { // a rolling pin lying across the right mitten
+    const pin = lathe([[0.001, -0.25], [0.015, -0.245], [0.017, -0.17], [0.04, -0.16], [0.044, 0], [0.04, 0.16], [0.017, 0.17], [0.015, 0.245], [0.001, 0.25]], 10, { smooth: true });
+    out.push({ mesh: place(pin, (x, y, z) => [y, -x, z], -hx + 0.14, hy - 0.01, hz + mr * 1.2), mat: MAT.wood, color: lin('#b08a5a'), bone: 3 });
   }
   return out;
 }

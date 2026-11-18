@@ -36,6 +36,7 @@ uniform vec4 uHeadC2;    // a second face (two zombies in one coat); radius 0 = 
 uniform float uBellyR;   // for laying patches around the belly
 uniform vec4 uPatch[4];  // stitched-on patches: angle around the body, height, half width, half height (0 = none)
 uniform vec3 uPatchCol[4];
+uniform vec4 uBarrel;    // a worn barrel: bottom y, top y, staves around, head depth squash (staves 0 = none)
 uniform float uGrime;    // 0 clean .. 1 fresh out of the ground
 uniform float uGrain;
 #ifdef USE_FOG
@@ -148,7 +149,28 @@ void main() {
     col = mix(col * (1.0 - fc.z), vec3(0.93, 0.92, 0.84), fc.y);
     ink = max(ink, fc.x);
   }
-  else if (id == 13) col *= 0.8 + 0.25 * vnoise(vec3(p.x * 8.0, p.y * 70.0, p.z * 8.0));            // wood grain
+  else if (id == 13) { // wood
+    if (uBarrel.z > 0.0 && p.y > uBarrel.x - 0.01) {
+      // a barrel is all paint: every stave its own shade with grain running up it, dark seams between staves,
+      // two iron hoops with a highlight and a rivet on each stave
+      float a = atan(p.x, p.z / uBarrel.w) / 6.2831853 * uBarrel.z + 0.5, stave = floor(a), fa = fract(a) - 0.5;
+      float h = (p.y - uBarrel.x) / (uBarrel.y - uBarrel.x);
+      col *= 0.82 + 0.3 * hash1(vec3(stave, 3.0, 7.0));
+      col *= 0.86 + 0.2 * vnoise(vec3(stave * 7.0 + fa * 5.0, p.y * 55.0, 1.0)) - 0.1 * smoothstep(0.75, 1.0, vnoise(vec3(stave * 3.0, p.y * 9.0, fa * 6.0)));
+      ink = max(ink, 0.85 * smoothstep(0.455, 0.49, abs(fa)));          // the seam between two staves
+      col *= 1.0 - 0.25 * smoothstep(0.3, 0.46, abs(fa));               // each stave rounds off toward its edges
+      for (int i = 0; i < 2; i++) {
+        float hy = (i == 0 ? 0.2 : 0.7), d = abs(h - hy) * (uBarrel.y - uBarrel.x), w = 0.028;
+        if (d < w) {
+          col = vec3(0.105, 0.1, 0.13) * (0.8 + 0.5 * vnoise(p * 40.0)) + vec3(0.16, 0.16, 0.2) * smoothstep(0.4, 0.0, abs(d / w - 0.35));
+          float rv = length(vec2(fa * 0.2, (h - hy) * (uBarrel.y - uBarrel.x)));
+          col = mix(col, vec3(0.34, 0.33, 0.4), smoothstep(0.011, 0.007, rv));   // rivet head
+          ink = max(ink, 0.8 * smoothstep(0.011, 0.013, rv) * smoothstep(0.016, 0.013, rv));
+        }
+        ink = max(ink, 0.9 * smoothstep(0.006, 0.002, abs(d - w)));     // the hoop's edge
+      }
+    } else col *= 0.8 + 0.25 * vnoise(vec3(p.x * 8.0, p.y * 70.0, p.z * 8.0)); // plain turned wood
+  }
   else if (id == 15) col *= 0.9 + 0.1 * sin(p.x * 300.0) * sin(p.y * 300.0);                        // woven cloth
   else if (id == 16) col *= 0.85 + 0.5 * pow(max(dot(N, normalize(uLightDir + vec3(0.0, 0.4, 0.0))), 0.0), 6.0);    // iron: a dull glint
 
@@ -213,7 +235,7 @@ export function characterMaterials(opts = {}) {
     uRimCol: { value: new THREE.Color(0, 0, 0) }, uInk: { value: new THREE.Color(INK) },
     uFace: { value: 0 }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uHeadC2: { value: new THREE.Vector4(0, 0, 0, 0) }, uBellyR: { value: 0.25 },
     uPatch: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uPatchCol: { value: Array.from({ length: 4 }, () => new THREE.Color()) },
-    uGrime: { value: 0 }, uGrain: { value: 0.05 }, uThick: { value: 0.0075 },
+    uBarrel: { value: new THREE.Vector4(0, 0, 0, 1) }, uGrime: { value: 0 }, uGrain: { value: 0.05 }, uThick: { value: 0.0075 },
   };
   const fog = opts.fog !== false;
   const paint = new THREE.ShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag, fog });
