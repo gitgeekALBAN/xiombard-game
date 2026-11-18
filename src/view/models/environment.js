@@ -9,7 +9,7 @@ import { outlineGeo } from './common.js';
 // Everything static is written into a Batch and merged per material, so the whole yard costs a few dozen draw calls.
 
 export const MAT = {
-  bark: toon('#2c2338', { mottle: 0.55, gradColor: '#18121f', gradY: [-0.1, 1.4], rim: 1.3 }),
+  bark: toon('#2c2338', { mottle: 0.55, gradColor: '#18121f', gradY: [-0.1, 1.4], rim: 1.3, dayColor: '#54424a' }),
   wood: toon(PAL.wood, { mottle: 0.6, rim: 0.8 }),
   woodDark: toon('#33243a', { mottle: 0.6, rim: 0.8 }),
   woodLight: toon(PAL.woodLight, { mottle: 0.5 }),
@@ -18,11 +18,11 @@ export const MAT = {
   stone: toon('#8e88a6', { mottle: 0.7, gradColor: PAL.stoneDark, gradY: [0, 0.7] }),
   bone: toon(PAL.bone),
   ink: toon(PAL.ink, { rim: 0.6 }),
-  glass: toon(PAL.amber, { emissive: 0.88 }),
-  flame: toon(PAL.amberHot, { emissive: 1 }),
+  glass: toon(PAL.amber, { emissive: 0.88, lamp: true }),
+  flame: toon(PAL.amberHot, { emissive: 1, lamp: true }),
   shroom: toon('#b9a6d6', { gradColor: '#efe6ff', gradY: [0, 0.12], emissive: 0.25 }),
   stem: toon(PAL.boneShade, { rim: 0.5 }),
-  grass: toon(PAL.grassLight, { gradColor: '#1e2430', gradY: [0, 0.32], side: THREE.DoubleSide, rim: 0.4 }),
+  grass: toon(PAL.grassLight, { gradColor: '#1e2430', gradY: [0, 0.32], side: THREE.DoubleSide, rim: 0.4, dayColor: '#6f9a4c' }),
 };
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { groundMaterial } from '../shaders/ground.js';
-import { outlineMat, LANTERN_Y } from '../shaders/toon.js';
+import { outlineMat, LANTERN_Y, lampsOn } from '../shaders/toon.js';
 import { buildHeadstone, geo } from './models.js';
 import { outlineGeo } from './models/common.js';
 import {
@@ -14,7 +14,7 @@ import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, PILE, PLOTS, PL
 
 // The static graveyard: ground, old headstones, trees, shed, fence, gates, lanterns, and the backdrop beyond the fence.
 // Positions and sizes come from shared/layout.js because the host's colliders use the same numbers.
-// buildWorld(scene) returns { groundMat, update(time, dt, camera) }.
+// buildWorld(scene) returns { groundMat, update(time, dt, camera), setDay(k) }.
 // Any mesh with userData.billboard = true is turned to face the camera every frame by the view.
 // Static set pieces go into one Batch, merged per material at the end (see models/environment.js).
 export function buildWorld(scene) {
@@ -213,12 +213,18 @@ export function buildWorld(scene) {
   s.add(statics);
 
   const backdrop = buildBackdrop(s);
+  let lamps = 1; // lantern and window glow sprites: 1 at night, out by day
   return {
     groundMat,
+    setDay(k) {
+      lamps = lampsOn(k);
+      for (const g of glows) g.visible = lamps > 0;
+      backdrop.setDay(k);
+    },
     update(time, dt, camera) {
       glows.forEach((g, i) => {
         const f = 0.88 + 0.08 * Math.sin(time * 11 + i * 1.7) * Math.sin(time * 6.3 + i * 2.9) + 0.04 * Math.sin(time * 2.1 + i);
-        g.material.uniforms.uStrength.value = g.userData.base * f;
+        g.material.uniforms.uStrength.value = g.userData.base * f * lamps;
         g.scale.setScalar(0.96 + f * 0.05);
       });
       // crows jerk their heads to a new direction every few seconds

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { outlineMat, lightingGLSL } from '../../shaders/toon.js';
+import { outlineMat, lightingGLSL, DAY } from '../../shaders/toon.js';
 import { noise } from '../../shaders/noise.glsl.js';
 import { NPARTS, P } from '../../shared/skeleton.js';
 import { rng } from '../../shared/rng.js';
@@ -49,9 +49,12 @@ void main() {
   #include <fog_fragment>
 }`;
 let MAT = null;
-const charMat = () => MAT || (MAT = new THREE.ShaderMaterial({
-  uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: vert, fragmentShader: frag, fog: true,
-}));
+const charMat = () => {
+  if (MAT) return MAT;
+  MAT = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: vert, fragmentShader: frag, fog: true });
+  MAT.uniforms.uDay = DAY; // shared day/night uniform (see toon.js)
+  return MAT;
+};
 
 // ---------- geometry helpers ----------
 const TAU = Math.PI * 2;

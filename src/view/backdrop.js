@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { lightingGLSL, MOON_DIR } from '../shaders/toon.js';
+import { lightingGLSL, dayGLSL, MOON_DIR, DAY, dayColor } from '../shaders/toon.js';
 import { groundGLSL } from '../shaders/ground.js';
 import { noise } from '../shaders/noise.glsl.js';
 import { rng } from '../shared/rng.js';
@@ -14,7 +14,9 @@ import { ROAD_Z, FENCE } from '../shared/layout.js';
 // plus slow mist bands between the layers. Players never get there, so nothing here needs colliders.
 // The ground slab ends at +-80 m: the terrain covers everything beyond ~31 m from the yard centre (it sits at y = 0
 // along the road, drawn with a polygon offset so it wins over the slab) and the ridges close the horizon all round.
-// buildBackdrop(scene) returns { update(time, dt, camera) }.
+// buildBackdrop(scene) returns { update(time, dt, camera), setDay(k) }.
+// Day/night: the shaders read the shared uDay uniform (toon.js); flat layer colors are given as
+// [night, dusk, day] sRGB triples and blended on the CPU in setDay.
 
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const hash = (x, y) => { const h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return h - Math.floor(h); };
@@ -93,11 +95,19 @@ const baseVert = /* glsl */ `
     #include <fog_vertex>
   }`;
 const lin = (hex) => new THREE.Color(hex);
+// color uniforms that follow the day: [uniform value, [night, dusk, day]]
+const dayColors = [];
+const dc = (hex) => { const c = lin(hex[0]); dayColors.push([c, hex]); return c; };
 function mat(frag, uniforms, extra = {}) {
-  return new THREE.ShaderMaterial({
+  const m = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, uniforms]),
     vertexShader: baseVert, fragmentShader: frag, fog: true, ...extra,
   });
+  m.uniforms.uDay = DAY; // shared day/night uniform (see toon.js)
+  // merge clones values: re-link the day-following colors so setDay can update them in place
+  for (const [k, u] of Object.entries(uniforms)) if (u.value && u.value.isColor && dayColors.some(([c]) => c === u.value)) m.uniforms[k].value = u.value;
+  if (uniforms.uTime) m.uniforms.uTime = uniforms.uTime; // the shared clock, also cloned by merge
+  return m;
 }
 
 // Near hills: the yard's lawn and road run on over them, hazing toward lavender with distance, mist in the dips.
@@ -117,12 +127,12 @@ const terrainFrag = /* glsl */ `
     vec3 col = groundTop(p, px);
     // steep flanks lose their grass to bare earth streaks, like dry-brushed paint
     float steep = smoothstep(0.88, 0.7, N.y) * smoothstep(0.4, 0.6, vnoise(p * vec2(0.12, 0.5)));
-    col = mix(col, vec3(0.045, 0.03, 0.04), steep * 0.6);
-    col = mix(col, uHaze, smoothstep(40.0, 175.0, r) * 0.35);
+    col = mix(col, mix(vec3(0.045, 0.03, 0.04), vec3(0.2, 0.12, 0.07), dayPaint()), steep * 0.6);
+    col = mix(col, uHaze, smoothstep(40.0, 175.0, r) * mix(0.35, 0.25, dayPaint()));
     vec3 lit = toonShade(col, N, vW);
     float mn = vnoise(p * 0.035 + vec2(uTime * 0.03, uTime * 0.011));
     float mist = smoothstep(2.5, -0.5, vW.y - mn * 3.0) * smoothstep(40.0, 70.0, r);
-    lit = mix(lit, uMist, mist * 0.35);
+    lit = mix(lit, uMist, mist * 0.35 * (1.0 - 0.7 * dayPaint())); // only wisps by day
     gl_FragColor = vec4(lit, 1.0);
     #include <colorspace_fragment>
     ${fogFrag}
@@ -140,7 +150,7 @@ const silFrag = /* glsl */ `
   void main() {
     vec3 N = normalize(vN);
     if (!gl_FrontFacing) N = -N;
-    vec3 col = uColor * (0.82 + 0.4 * smoothstep(0.0, 0.6, dot(N, MOON)));
+    vec3 col = uColor * (0.82 + 0.4 * smoothstep(0.0, 0.6, dot(N, keyDir())));
     float a = atan(vW.z, vW.x);
     col *= 0.9 + 0.2 * vnoise(vec2(a * 60.0, vW.y * 0.15));
     float m = smoothstep(uMistY.y, uMistY.x, vW.y + (vnoise(vec2(a * 18.0 + uTime * 0.02, 1.0)) - 0.5) * (uMistY.y - uMistY.x) * 0.6);
@@ -174,16 +184,21 @@ const propFrag = /* glsl */ `
   }`;
 
 // Lit windows: bright enough (above 1 before output) for bloom; each flickers on its own phase.
+// By day the lamps are out and the panes go dark.
 const windowFrag = /* glsl */ `
   uniform float uFogMax; uniform float uTime;
   varying vec3 vW; varying vec3 vN; varying float vPhase;
   #include <common>
   #include <fog_pars_fragment>
+  ${dayGLSL}
   void main() {
     float t = uTime * (0.7 + fract(vPhase * 7.3)) + vPhase * 40.0;
     float fl = 0.86 + 0.08 * sin(t * 2.3) + 0.06 * sin(t * 5.7 + 1.3);
     fl *= 1.0 - 0.45 * smoothstep(0.92, 0.99, sin(t * 0.37));
     vec3 col = mix(vec3(1.0, 0.55, 0.2), vec3(1.0, 0.8, 0.45), fract(vPhase * 3.1)) * 2.6 * fl;
+    // each window goes out at its own moment through the dusk
+    float on = clamp(lampsOn() * 1.6 - fract(vPhase * 5.7) * 0.6, 0.0, 1.0);
+    col = mix(vec3(0.035, 0.03, 0.05), col, on);
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
     ${fogFrag}
@@ -379,7 +394,7 @@ export function buildBackdrop(scene) {
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx);
     g.computeVertexNormals();
-    const m = mat(terrainFrag, { uFogMax: { value: 0.42 }, uTime, uHaze: { value: lin('#2e2840') }, uMist: { value: lin('#544c78') } },
+    const m = mat(terrainFrag, { uFogMax: { value: 0.42 }, uTime, uHaze: { value: dc(['#2e2840', '#5a3a58', '#a9b89a']) }, uMist: { value: dc(['#544c78', '#9a6a86', '#efe6dc']) } },
       { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
     group.add(new THREE.Mesh(g, m));
   }
@@ -422,7 +437,7 @@ export function buildBackdrop(scene) {
     const pr = rng(i + 900);
     addNear((f) => cross(f, pr, r.range(1.8, 2.6)), x, z, 1, r.range(-0.35, 0.35));
   }
-  const nearMat = mat(silFrag, { uFogMax: { value: 0.42 }, uTime, uColor: { value: lin('#1a1424') }, uHaze: { value: lin('#3d3656') }, uMistY: { value: new THREE.Vector2(0, 3) } });
+  const nearMat = mat(silFrag, { uFogMax: { value: 0.42 }, uTime, uColor: { value: dc(['#1a1424', '#2a1c34', '#4a3f42']) }, uHaze: { value: dc(['#3d3656', '#6a4a6a', '#b8bca4']) }, uMistY: { value: new THREE.Vector2(0, 3) } });
   group.add(new THREE.Mesh(mergeGeometries(nearParts), nearMat));
 
   // ---------- chapel (3D, moonlit) ----------
@@ -487,7 +502,7 @@ export function buildBackdrop(scene) {
       g.setAttribute('aStripe', new THREE.BufferAttribute(st, 1));
       parts.push(g);
     });
-    const pm = mat(propFrag, { uFogMax: { value: 0.5 }, uHaze: { value: lin('#4a4266') } }, { vertexColors: true, defines: { STRIPE: 1 } });
+    const pm = mat(propFrag, { uFogMax: { value: 0.5 }, uHaze: { value: dc(['#4a4266', '#7a5070', '#c0c4b0']) } }, { vertexColors: true, defines: { STRIPE: 1 } });
     group.add(new THREE.Mesh(mergeGeometries(parts), pm));
     // windows: arched quads just proud of the walls
     const wr = rng(31);
@@ -523,9 +538,10 @@ export function buildBackdrop(scene) {
   // ---------- far ridges ----------
   const windmill = { hub: null };
   const layers = [
-    { R: 236, H: (a) => 13 + 20 * ringNoise(a, 2.2, 1) + 10 * ringNoise(a, 6, 4) ** 2, color: '#211b2e', haze: '#3a3452', fog: 0.32, mist: [4, 16] },
-    { R: 336, H: (a) => 26 + 34 * ringNoise(a, 1.8, 7) + 8 * ringNoise(a, 7, 2), color: '#382f50', haze: '#4d4570', fog: 0.5, mist: [10, 30] },
-    { R: 470, H: (a) => 48 + 50 * ringNoise(a, 1.5, 13) + 10 * ringNoise(a, 5, 3), color: '#564c80', haze: '#665e92', fog: 0.62, mist: [20, 50] },
+    // colors: [night, dusk, day]
+    { R: 236, H: (a) => 13 + 20 * ringNoise(a, 2.2, 1) + 10 * ringNoise(a, 6, 4) ** 2, color: ['#211b2e', '#3a2640', '#5e7c52'], haze: ['#3a3452', '#7a5070', '#b4c09e'], fog: 0.32, mist: [4, 16] },
+    { R: 336, H: (a) => 26 + 34 * ringNoise(a, 1.8, 7) + 8 * ringNoise(a, 7, 2), color: ['#382f50', '#5a3a5c', '#86a07e'], haze: ['#4d4570', '#8a5a78', '#c4cbb4'], fog: 0.5, mist: [10, 30] },
+    { R: 470, H: (a) => 48 + 50 * ringNoise(a, 1.5, 13) + 10 * ringNoise(a, 5, 3), color: ['#564c80', '#7a5078', '#a6b8bc'], haze: ['#665e92', '#9a6680', '#d2d6cc'], fog: 0.62, mist: [20, 50] },
   ];
   const VILLAGE_A = azOf(1, -0.32), MILL_A = azOf(-1, 0.3), TOWN2_A = azOf(-0.25, 1);
   layers.forEach((L, li) => {
@@ -582,7 +598,7 @@ export function buildBackdrop(scene) {
         geos.push(t.geometry().applyMatrix4(placeMatrix(x, y, z, r.range(-0.1, 0.1))));
       }
     }
-    const m = mat(silFrag, { uFogMax: { value: L.fog }, uTime, uColor: { value: lin(L.color) }, uHaze: { value: lin(L.haze) }, uMistY: { value: new THREE.Vector2(...L.mist) } }, { side: THREE.DoubleSide });
+    const m = mat(silFrag, { uFogMax: { value: L.fog }, uTime, uColor: { value: dc(L.color) }, uHaze: { value: dc(L.haze) }, uMistY: { value: new THREE.Vector2(...L.mist) } }, { side: THREE.DoubleSide });
     L.mat = m;
     group.add(new THREE.Mesh(mergeGeometries(geos), m));
   });
@@ -611,12 +627,15 @@ export function buildBackdrop(scene) {
   }
 
   // mist bands between the layers
-  for (const [R, y0, y1, alpha, color] of [[200, -6, 22, 0.3, '#5e5684'], [300, 0, 45, 0.3, '#6a6290']]) {
+  const mists = [];
+  for (const [R, y0, y1, alpha, color] of [[200, -6, 22, 0.3, ['#5e5684', '#a07090', '#f4ece2']], [300, 0, 45, 0.3, ['#6a6290', '#b07a94', '#f6efe6']]]) {
     const g = new THREE.CylinderGeometry(R, R, y1 - y0, 120, 1, true).translate(0, (y0 + y1) / 2, 0);
-    const m = mat(mistFrag, { uFogMax: { value: 0.6 }, uTime, uColor: { value: lin(color) }, uY: { value: new THREE.Vector2(y0, y1) }, uAlpha: { value: alpha } },
+    const m = mat(mistFrag, { uFogMax: { value: 0.6 }, uTime, uColor: { value: dc(color) }, uY: { value: new THREE.Vector2(y0, y1) }, uAlpha: { value: alpha } },
       { transparent: true, depthWrite: false, side: THREE.BackSide });
     const mesh = new THREE.Mesh(g, m);
     mesh.renderOrder = 2;
+    mesh.userData.alpha = alpha;
+    mists.push(mesh);
     group.add(mesh);
   }
 
@@ -628,6 +647,11 @@ export function buildBackdrop(scene) {
     update(time, dt) {
       uTime.value = time;
       if (sails) { sails.rotateZ(dt * 0.25); sails.updateMatrix(); }
+    },
+    setDay(k) {
+      for (const [c, hex] of dayColors) dayColor(hex, k, c);
+      // thinner mist by day
+      for (const m of mists) m.material.uniforms.uAlpha.value = m.userData.alpha * (1 - 0.45 * Math.min(1, Math.max(0, k)));
     },
   };
 }

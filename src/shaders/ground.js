@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { noise } from './noise.glsl.js';
-import { lightingGLSL } from './toon.js';
+import { lightingGLSL, dayGLSL, DAY } from './toon.js';
 import { PLOTS, PLOT_HALF, ROAD_Z, ROAD_HALF, PILE, TRUCK_STOP_X } from '../shared/layout.js';
 
 const f = (v) => v.toFixed(2);
@@ -19,7 +19,9 @@ const PATHS = [
 // Lawn, road and path colors as a GLSL library: the yard shader and the backdrop hills share it, so the grass
 // runs on past the fence without a seam. Colors are linear. `px` is the pixel footprint in meters (from fwidth):
 // every fine detail fades to its average as it shrinks below a pixel, instead of aliasing into shimmer.
+// By day (dayPaint() -> 1) the lawn greens up and earth and road warm and lighten.
 export const groundGLSL = /* glsl */ `
+${dayGLSL}
 ${noise}
 float fbm3(vec2 p) { return vnoise(p) * 0.57 + vnoise(p * 2.03 + 17.1) * 0.29 + vnoise(p * 4.1 + 31.7) * 0.14; }
 vec2 rot2(vec2 p, float a) { float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
@@ -36,9 +38,10 @@ vec3 lawn(vec2 p, float px) {
   float n1 = fbm3(p * 0.045);
   float n2 = fbm3(p * 0.13 + 5.3);
   float n3 = vnoise(p * 0.085 - 11.7) * 0.7 + vnoise(p * 0.3) * 0.3;
-  vec3 col = mix(${srgb('#232a2e')}, ${srgb('#36433f')}, smoothstep(0.32, 0.68, n1));
-  col = mix(col, ${srgb('#4a5440')}, smoothstep(0.55, 0.78, n2) * 0.55); // mossy lighter patches
-  col = mix(col, ${srgb('#382c40')}, smoothstep(0.56, 0.74, n3) * 0.65); // purple heather
+  float dp = dayPaint();
+  vec3 col = mix(mix(${srgb('#232a2e')}, ${srgb('#4a5f3c')}, dp), mix(${srgb('#36433f')}, ${srgb('#6b8152')}, dp), smoothstep(0.32, 0.68, n1));
+  col = mix(col, mix(${srgb('#4a5440')}, ${srgb('#9c9f6a')}, dp), smoothstep(0.55, 0.78, n2) * 0.55); // mossy lighter patches
+  col = mix(col, mix(${srgb('#382c40')}, ${srgb('#6e5a72')}, dp), smoothstep(0.56, 0.74, n3) * mix(0.65, 0.45, dp)); // purple heather
   // brush strokes: elongated noise whose direction swirls slowly across the lawn
   float a = vnoise(p * 0.04 + 3.0) * 7.0;
   vec2 q = rot2(p, a);
@@ -50,9 +53,9 @@ vec3 lawn(vec2 p, float px) {
   col *= 1.0 + m;
   // pale grass tips catching the moon, only up close
   float tip = smoothstep(0.82, 0.95, vnoise(rot2(p, a + 0.3) * vec2(14.0, 34.0)));
-  col += ${srgb('#7d8670')} * tip * 0.14 * aaFade(34.0, px);
-  // drifts of low mist
-  col = mix(col, ${srgb('#4a4466')}, smoothstep(0.55, 0.8, vnoise(p * 0.025 + 21.0)) * 0.15);
+  col += mix(${srgb('#7d8670')}, ${srgb('#d6dc8a')}, dp) * tip * 0.14 * aaFade(34.0, px);
+  // drifts of low mist (by night)
+  col = mix(col, ${srgb('#4a4466')}, smoothstep(0.55, 0.8, vnoise(p * 0.025 + 21.0)) * 0.15 * (1.0 - dp));
   return col;
 }
 
@@ -61,7 +64,8 @@ vec3 dirt(vec2 p, float px) {
   vec3 col = mix(${srgb('#35262a')}, ${srgb('#4f3a33')}, smoothstep(0.3, 0.7, fbm3(p * 0.6)));
   col = mix(col, ${srgb('#5e4740')}, smoothstep(0.6, 0.8, vnoise(p * 3.1)) * 0.5 * aaFade(3.1, px));
   float pebble = smoothstep(0.86, 0.93, vnoise(p * 11.0)) * aaFade(11.0, px);
-  return col + ${srgb('#6a5f74')} * pebble * 0.35;
+  col += ${srgb('#6a5f74')} * pebble * 0.35;
+  return col * mix(vec3(1.0), vec3(1.9, 1.6, 1.25), dayPaint()); // sunny earth is warm brown, not plum
 }
 
 // rutted dirt road along z = ROAD_Z; returns color, w = coverage
@@ -78,7 +82,8 @@ vec4 road(vec2 p, vec3 under, float px) {
   float rut = smoothstep(0.42, 0.12, rd + (vnoise(p * 0.9) - 0.5) * 0.12);
   col = mix(col, ${srgb('#2a2026')}, rut * 0.75);
   float puddle = rut * smoothstep(0.66, 0.74, fbm3(p * vec2(0.22, 0.9) + 4.0));
-  col = mix(col, ${srgb('#4c4868')}, puddle * 0.7);
+  col *= mix(vec3(1.0), vec3(1.8, 1.55, 1.3), dayPaint());
+  col = mix(col, mix(${srgb('#4c4868')}, ${srgb('#a9c2d8')}, dayPaint()), puddle * 0.7); // puddles mirror the sky
   // the hump between the ruts keeps a ragged strip of grass
   float hump = smoothstep(0.55, 0.15, abs(dz)) * smoothstep(0.4, 0.65, vnoise(p * vec2(0.6, 2.0) + 2.0));
   col = mix(col, under * 0.85, hump * 0.75);
@@ -106,7 +111,7 @@ vec3 groundTop(vec2 p, float px) {
 // open plots, and layered soil (strata, stones, roots) below y = 0 on the walls and floor of the holes.
 export function groundMaterial() {
   const PH = [PLOT_HALF.x, PLOT_HALF.z];
-  return new THREE.ShaderMaterial({
+  const m = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uPlotState: { value: new Float32Array(PLOTS.length) } }]),
     vertexShader: /* glsl */ `
       varying vec3 vW; varying vec3 vN;
@@ -209,4 +214,6 @@ export function groundMaterial() {
       }`,
     fog: true,
   });
+  m.uniforms.uDay = DAY; // shared day/night uniform (see toon.js)
+  return m;
 }

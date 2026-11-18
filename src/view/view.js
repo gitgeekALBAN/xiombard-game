@@ -10,13 +10,17 @@ import { buildCrew } from './crew.js';
 import { sfx } from '../audio.js';
 import { isTouchDevice } from '../touch.js';
 import { Post } from './post.js';
+import { DAY, day3, dayColor } from '../shaders/toon.js';
 
 // Fog and sky horizon share this color (sRGB): a dark saturated violet, so distance reads as depth, not milk.
 // FogExp2 at 0.0145 gives about 16% fog at 30 m, 50% at 57 m and 95% at 120 m.
 const FOG_COLOR = '#2a2344';
 const FOG_DENSITY = 0.0145;
+// Day/night keys [night, dusk, day] for setDay; the night entries are the look above.
+const FOG_DAY = [FOG_COLOR, '#7a4a66', '#eed6c2'], FOG_DENSITY_DAY = [FOG_DENSITY, 0.0125, 0.0062];
+const SHADOW_DAY = ['#07040d', '#1a0c22', '#2a1f3c'];
 
-const _q = new THREE.Quaternion(), _size = new THREE.Vector2();
+const _q = new THREE.Quaternion(), _size = new THREE.Vector2(), _rgb = { r: 0, g: 0, b: 0 };
 
 export class View {
   constructor(container) {
@@ -124,6 +128,26 @@ export class View {
       this.camera.updateProjectionMatrix();
       r.setSize(innerWidth, innerHeight);
     });
+    // ?day=0..1 previews the day/night look (0 = night, the default)
+    const dq = new URLSearchParams(location.search).get('day');
+    if (dq !== null) this.setDay(Number(dq));
+  }
+
+  // ---------- day/night (visual only) ----------
+  // k: 0 deep night (the default look) .. 0.5 dusk/dawn .. 1 full day. Sets the shared uDay uniform (toon.js) and
+  // everything that is not a plain uniform read: fog + sky horizon (kept equal), glows, backdrop, post, blob shadows.
+  setDay(k) {
+    k = Math.min(1, Math.max(0, Number(k) || 0));
+    DAY.value = k;
+    const fog = this.scene.fog;
+    dayColor(FOG_DAY, k, fog.color);
+    fog.density = day3(...FOG_DENSITY_DAY, k);
+    const hz = fog.color.getRGB(_rgb, THREE.SRGBColorSpace);
+    this.sky.material.uniforms.uHorizon.value.set(hz.r, hz.g, hz.b);
+    this.world.setDay(k);
+    this.post.setDay(k);
+    dayColor(SHADOW_DAY, k, this.shadowMat.uniforms.uColor.value);
+    this.shadowMat.uniforms.uOpacity.value = day3(0.62, 0.56, 0.5, k);
   }
 
   // ---------- entities ----------
