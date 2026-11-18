@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { SdfCharacter } from '../sdf/shader.js';
 import { CP, NCREW } from '../shared/crew.js';
-import { MOON_DIR, INK } from '../shaders/toon.js';
+import { INK, keyLight } from '../shaders/toon.js';
 import { buildShovel } from './models/characters.js';
 import { isTouchDevice } from '../touch.js';
 
@@ -17,12 +17,8 @@ export function buildCrew(rig, camera, opts = {}) {
   const groups = Array.from({ length: NCREW }, () => new THREE.Group());
   const sdf = new SdfCharacter(rig.def, camera, { scale: S, fog: true, lanterns: true, lite: isTouchDevice() });
   const u = sdf.material.uniforms;
-  // the same cold moon and purple shadows as the toon shader, so the crew sits in the scene
-  u.uLightDir.value.copy(MOON_DIR);
-  u.uLightCol.value.setRGB(0.7, 0.74, 0.93); // dimmer than the toon key: these bodies are almost white all over
-  u.uShadeCol.value.setRGB(0.3, 0.27, 0.52);
+  // the key light (moon, low sun or high sun) is copied from the toon shader every frame, so the crew sits in the scene
   u.uRimDir.value.copy(RIM_DIR);
-  u.uRimCol.value.setRGB(0.16, 0.2, 0.36);
   u.uInk.value.set(INK);
   u.uLine.value = 0.013;
   u.uGrain.value = 0.05;
@@ -52,6 +48,11 @@ export function buildCrew(rig, camera, opts = {}) {
       _hi.max(_c.copy(g.position).addScalar(r));
     }
     sdf.update(parts, 0, _c.addVectors(_lo, _hi).multiplyScalar(0.5), _h.subVectors(_hi, _lo).multiplyScalar(0.5));
+    const key = keyLight();
+    u.uLightDir.value.copy(key.dir);
+    u.uLightCol.value.copy(key.lit).multiplyScalar(0.78); // dimmer than the toon key: these bodies are almost white all over
+    u.uShadeCol.value.copy(key.shade);
+    u.uRimCol.value.copy(key.shade).multiplyScalar(0.55);
     u.uPix.value = pix;
     u.uNoHead.value = noHead ? 1 : 0;
   }

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lightingGLSL } from '../shaders/toon.js';
+import { lightingGLSL, DAY } from '../shaders/toon.js';
 
 // A whole character as one signed distance function, drawn by raymarching inside a box.
 // There is no mesh and no texture: the body is two round cones, the limbs are capsules, the hat and scarf are a
@@ -365,7 +365,7 @@ export class SdfCharacter {
       defines: { ...(opts.lanterns ? { LANTERNS: 1 } : {}), ...(opts.lite ? { LITE: 1 } : {}), ...(g ? { DOG: 1 } : {}) },
       fog: !!opts.fog,
       uniforms: {
-        ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uScale: { value: opts.scale || 1 }, uNoHead: { value: 0 },
+        ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uDay: DAY, uScale: { value: opts.scale || 1 }, uNoHead: { value: 0 },
         uInv: { value: this.inv }, uProj: { value: camera.projectionMatrix }, uBoxC: { value: new THREE.Vector3() }, uBoxH: { value: this.half },
         uFace: { value: k.face || 0 },
         ...(g ? { uDog: { value: new THREE.Vector4(g.len, g.r, g.h, 0) }, uDogHead: { value: v4(g.head) }, uDogLeg: { value: v4(g.leg) },
