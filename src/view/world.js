@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { groundMaterial } from '../shaders/ground.js';
 import { outlineMat, LANTERN_Y, lampsOn } from '../shaders/toon.js';
 import { glowSprites, paintMat, paintAttrs } from '../shaders/paint-env.js';
-import { buildHeadstone, geo } from './models.js';
+import { buildHeadstoneField, geo } from './models.js';
 import { outlineGeo } from './models/common.js';
 import {
   Batch, MAT, TOON, G, M, treeParts, crowParts, buildCrowHead, lanternPostParts, lanternParts, pillarParts,
@@ -19,32 +19,6 @@ import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, PILE, PLOTS, PL
 // Any mesh with userData.billboard = true is turned to face the camera every frame by the view.
 // Static set pieces go into one Batch: one painted mesh plus its ink hulls (see models/environment.js).
 
-// Bake a set of static groups into one mesh per material (the old headstones: each is built on its own, then
-// they are merged so the whole row costs a few draw calls instead of three each).
-function mergeStatic(groups, name) {
-  const lists = new Map();
-  for (const g of groups) {
-    g.updateMatrixWorld(true);
-    g.traverse((o) => {
-      if (!o.isMesh) return;
-      const c = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
-      for (const k of Object.keys(c.attributes)) if (k !== 'position' && k !== 'normal') c.deleteAttribute(k);
-      if (!c.attributes.normal) c.computeVertexNormals();
-      c.applyMatrix4(o.matrixWorld);
-      if (!lists.has(o.material)) lists.set(o.material, []);
-      lists.get(o.material).push(c);
-    });
-  }
-  const out = new THREE.Group();
-  out.name = name;
-  for (const [mat, list] of lists) {
-    const m = new THREE.Mesh(mergeGeometries(list), mat);
-    m.geometry.computeBoundingSphere();
-    out.add(m);
-  }
-  return out;
-}
-
 export function buildWorld(scene) {
   const s = scene;
   const groundMat = groundMaterial();
@@ -53,12 +27,10 @@ export function buildWorld(scene) {
   ground.name = 'ground';
   s.add(ground);
 
-  s.add(mergeStatic(DECOR.stones.map((st) => {
-    const g = buildHeadstone(st.kind, st.w, st.h, st.seed);
-    g.position.set(st.x, 0, st.z);
-    g.rotation.set(st.rx, st.ry, st.rz);
-    return g;
-  }), 'headstones'));
+  // the old headstones: one painted mesh and one ink hull for the whole yard
+  const stones = buildHeadstoneField(DECOR.stones);
+  stones.name = 'headstones';
+  s.add(stones);
 
   const R = rng(4242);
   const batch = new Batch();
