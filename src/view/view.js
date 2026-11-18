@@ -16,7 +16,7 @@ import { DAY, day3, dayColor } from '../shaders/toon.js';
 const FOG_COLOR = '#2a2344';
 const FOG_DENSITY = 0.0145;
 // Day/night keys [night, dusk, day] for setDay; the night entries are the look above.
-const FOG_DAY = [FOG_COLOR, '#9e5c74', '#e6d6c6'], FOG_DENSITY_DAY = [FOG_DENSITY, 0.012, 0.0085];
+const FOG_DAY = [FOG_COLOR, '#7a4a66', '#eed6c2'], FOG_DENSITY_DAY = [FOG_DENSITY, 0.0125, 0.0062];
 const SHADOW_DAY = ['#07040d', '#1a0c22', '#2a1f3c'];
 
 const _q = new THREE.Quaternion(), _size = new THREE.Vector2(), _rgb = { r: 0, g: 0, b: 0 };

@@ -9,7 +9,7 @@ import { outlineGeo } from './common.js';
 // Everything static is written into a Batch and merged per material, so the whole yard costs a few dozen draw calls.
 
 export const MAT = {
-  bark: toon('#2c2338', { mottle: 0.55, gradColor: '#18121f', gradY: [-0.1, 1.4], rim: 1.3 }),
+  bark: toon('#2c2338', { mottle: 0.55, gradColor: '#18121f', gradY: [-0.1, 1.4], rim: 1.3, dayColor: '#54424a' }),
   wood: toon(PAL.wood, { mottle: 0.6, rim: 0.8 }),
   woodDark: toon('#33243a', { mottle: 0.6, rim: 0.8 }),
   woodLight: toon(PAL.woodLight, { mottle: 0.5 }),

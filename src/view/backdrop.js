@@ -128,11 +128,11 @@ const terrainFrag = /* glsl */ `
     // steep flanks lose their grass to bare earth streaks, like dry-brushed paint
     float steep = smoothstep(0.88, 0.7, N.y) * smoothstep(0.4, 0.6, vnoise(p * vec2(0.12, 0.5)));
     col = mix(col, mix(vec3(0.045, 0.03, 0.04), vec3(0.2, 0.12, 0.07), dayPaint()), steep * 0.6);
-    col = mix(col, uHaze, smoothstep(40.0, 175.0, r) * 0.35);
+    col = mix(col, uHaze, smoothstep(40.0, 175.0, r) * mix(0.35, 0.25, dayPaint()));
     vec3 lit = toonShade(col, N, vW);
     float mn = vnoise(p * 0.035 + vec2(uTime * 0.03, uTime * 0.011));
     float mist = smoothstep(2.5, -0.5, vW.y - mn * 3.0) * smoothstep(40.0, 70.0, r);
-    lit = mix(lit, uMist, mist * 0.35);
+    lit = mix(lit, uMist, mist * 0.35 * (1.0 - 0.7 * dayPaint())); // only wisps by day
     gl_FragColor = vec4(lit, 1.0);
     #include <colorspace_fragment>
     ${fogFrag}

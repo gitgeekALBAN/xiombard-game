@@ -39,8 +39,8 @@ vec3 lawn(vec2 p, float px) {
   float n2 = fbm3(p * 0.13 + 5.3);
   float n3 = vnoise(p * 0.085 - 11.7) * 0.7 + vnoise(p * 0.3) * 0.3;
   float dp = dayPaint();
-  vec3 col = mix(mix(${srgb('#232a2e')}, ${srgb('#3f6234')}, dp), mix(${srgb('#36433f')}, ${srgb('#5f8a44')}, dp), smoothstep(0.32, 0.68, n1));
-  col = mix(col, mix(${srgb('#4a5440')}, ${srgb('#8fa255')}, dp), smoothstep(0.55, 0.78, n2) * 0.55); // mossy lighter patches
+  vec3 col = mix(mix(${srgb('#232a2e')}, ${srgb('#4a5f3c')}, dp), mix(${srgb('#36433f')}, ${srgb('#6b8152')}, dp), smoothstep(0.32, 0.68, n1));
+  col = mix(col, mix(${srgb('#4a5440')}, ${srgb('#9c9f6a')}, dp), smoothstep(0.55, 0.78, n2) * 0.55); // mossy lighter patches
   col = mix(col, mix(${srgb('#382c40')}, ${srgb('#6e5a72')}, dp), smoothstep(0.56, 0.74, n3) * mix(0.65, 0.45, dp)); // purple heather
   // brush strokes: elongated noise whose direction swirls slowly across the lawn
   float a = vnoise(p * 0.04 + 3.0) * 7.0;
@@ -53,7 +53,7 @@ vec3 lawn(vec2 p, float px) {
   col *= 1.0 + m;
   // pale grass tips catching the moon, only up close
   float tip = smoothstep(0.82, 0.95, vnoise(rot2(p, a + 0.3) * vec2(14.0, 34.0)));
-  col += mix(${srgb('#7d8670')}, ${srgb('#d6dc8a')}, dp) * tip * mix(0.14, 0.2, dp) * aaFade(34.0, px);
+  col += mix(${srgb('#7d8670')}, ${srgb('#d6dc8a')}, dp) * tip * 0.14 * aaFade(34.0, px);
   // drifts of low mist (by night)
   col = mix(col, ${srgb('#4a4466')}, smoothstep(0.55, 0.8, vnoise(p * 0.025 + 21.0)) * 0.15 * (1.0 - dp));
   return col;

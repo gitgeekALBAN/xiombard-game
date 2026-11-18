@@ -70,10 +70,9 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         float side = pow(max(dot(normalize(d.xz + 1e-5), normalize(uMoon.xz)), 0.0), 2.0);
         float k = dayK(), dusk = duskAmt();
         vec3 sun = sunDir();
-        vec3 key = keyDir(); // what lights the clouds: the moon by night, the sun by day
         float sunSide = pow(max(dot(normalize(d.xz + 1e-5), normalize(sun.xz)), 0.0), 2.0);
         float keySide = mix(side, sunSide, smoothstep(0.2, 0.55, k));
-        float moonVis = 1.0 - smoothstep(0.3, 0.75, k);
+        float moonVis = 1.0 - smoothstep(0.35, 0.85, k);
 
         // ---- gradient (display space) ----
         vec3 zen = day3(vec3(0.028, 0.024, 0.07), vec3(0.13, 0.11, 0.3), vec3(0.4, 0.62, 0.86));
@@ -133,7 +132,7 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
           mc *= mix(0.78, 1.0, pow(z, 0.45));
           mc = mix(mc, mc * vec3(0.9, 0.88, 1.06), 1.0 - z);
           // a daytime moon is a pale ghost of itself
-          mc = mix(mc, mix(col, vec3(0.97, 0.97, 1.0), 0.55), smoothstep(0.2, 0.6, k));
+          mc = mix(mc, mix(col, vec3(0.97, 0.97, 1.0), 0.55), smoothstep(0.5, 0.85, k));
           col = mix(col, mc, disc);
           alphaBloom = disc * 0.3 * moonVis;
         }
@@ -144,13 +143,13 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         float sAng = acos(clamp(dot(d, sun), -1.0, 1.0));
         float sr = SR * (1.0 + 0.25 * dusk);
         float sOff = max(sAng - sr, 0.0);
-        vec3 sunHalo = mix(vec3(1.0, 0.82, 0.55), vec3(1.0, 0.5, 0.25), dusk);
-        col += sunHalo * (exp(-sOff / 0.04) * 0.45 + exp(-sOff / 0.18) * 0.22 + exp(-sOff / 0.6) * 0.1) * sunVis;
+        vec3 sunHalo = mix(vec3(1.0, 0.9, 0.72), vec3(1.0, 0.5, 0.25), dusk);
+        col += sunHalo * (exp(-sOff / 0.03) * 0.35 + exp(-sOff / 0.18) * 0.18 + exp(-sOff / 0.6) * 0.08) * sunVis;
         float sAa = fwidth(sAng) * 1.5;
         float sDisc = (1.0 - smoothstep(sr - sAa, sr, sAng)) * sunVis;
         if (sDisc > 0.0) {
           float sq = sAng / sr;
-          vec3 sc = mix(vec3(1.0, 0.97, 0.86), vec3(1.0, 0.84, 0.55), smoothstep(0.3, 1.0, sq));
+          vec3 sc = mix(vec3(1.0, 0.99, 0.94), vec3(1.0, 0.94, 0.78), smoothstep(0.4, 1.0, sq));
           sc = mix(sc, mix(vec3(1.0, 0.78, 0.5), vec3(1.0, 0.5, 0.3), smoothstep(0.2, 1.0, sq)), dusk);
           sc *= 0.96 + 0.06 * vnoise(vec2(dot(d, normalize(cross(sun, vec3(0.0, 1.0, 0.0)))), d.y) * 60.0); // brushed
           col = mix(col, sc, sDisc);
@@ -160,28 +159,36 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         // ---- flat curly clouds ----
         vec2 base = d.xz / (hh + 0.3) * 1.6;
         vec2 cp = base + vec2(uTime * 0.01, uTime * 0.003);
-        vec2 moonP = key.xz / (key.y + 0.3) * 1.6;
-        vec2 toL = normalize(moonP - base + 1e-4);
-        float kOff = max(acos(clamp(dot(d, key), -1.0, 1.0)) - MR, 0.0);
-        float near = exp(-kOff / 0.35); // moonlit (sunlit) zone
-        // fewer clouds right on the moon so it stays readable, a denser bank low in the sky; by day only a few
-        float thr = 0.5 - 0.08 * smoothstep(0.45, 0.12, h) + 0.25 * exp(-kOff / 0.1) + day3(0.0, 0.02, 0.05);
+        // the clouds are lit by the moon at night and by the sun from dusk on
+        float sunW = smoothstep(0.2, 0.55, k);
+        vec2 moonP = uMoon.xz / (uMoon.y + 0.3) * 1.6;
+        vec2 sunP = sun.xz / (max(sun.y, 0.0) + 0.3) * 1.6;
+        vec2 toL = normalize(mix(normalize(moonP - base + 1e-4), normalize(sunP - base + 1e-4), sunW) + 1e-4);
+        float near = max(exp(-off / 0.35) * (1.0 - sunW), exp(-sOff / 0.35) * sunW * day3(1.0, 1.0, 0.35)); // moonlit (sunlit) zone
+        // fewer clouds right on the moon so it stays readable (clouds thin out over the sun instead, see below),
+        // a denser bank low in the sky; by day only a few
+        float thr = 0.5 - 0.08 * smoothstep(0.45, 0.12, h) + 0.25 * exp(-off / 0.1) * moonVis + day3(0.0, 0.02, 0.16);
         float rBig, rSmall;
-        vec4 big = lobes(cp, 1.0, thr, rBig);
-        vec4 small = lobes(cp + 0.37, 2.3, thr + 0.04, rSmall);
+        // the big flat night banks become smaller puffy cumulus by day; the switch hides inside a short gap at
+        // k = 0.62 where the clouds thin out to nothing, so no cloud ever pops
+        float cs = k < 0.62 ? 1.0 : 1.9;
+        float cGap = smoothstep(0.07, 0.0, abs(k - 0.62));
+        vec4 big = lobes(cp, cs, thr, rBig);
+        vec4 small = lobes(cp + 0.37, 2.3 * cs, thr + 0.04, rSmall);
         bool useBig = big.x >= small.x;
         float csd = max(big.x, small.x);
         vec2 nrm = useBig ? big.yz : small.yz;
         nrm = normalize(nrm + 1e-5);
         // high up the planar projection blows lobes up into huge arcs, so clouds keep to the lower sky
-        float cover = smoothstep(0.02, 0.14, h) * smoothstep(0.62, 0.3, h);
-        float aw = fwidth(csd) * 1.2 + 1e-4;
+        float cover = smoothstep(day3(0.02, 0.03, 0.1), day3(0.14, 0.16, 0.22), h) * smoothstep(0.62, 0.3, h);
+        // by day the bright clouds show the blocky derivative at lobe-cell seams, so the edge width is capped
+        float aw = min(fwidth(csd) * 1.2, mix(1e3, 0.03, smoothstep(0.3, 0.7, k))) + 1e-4;
         float shape = smoothstep(-aw, aw, csd) * cover;
         // each lobe is shaded like a flat paper disc tilted to the moon: a bright crescent on the moon side
         float ndl = dot(nrm, toL);
         float rim = 1.0 - clamp(csd / (useBig ? rBig : rSmall) * 2.2, 0.0, 1.0); // 1 at the lobe edge
-        vec3 body = mix(day3(vec3(0.085, 0.065, 0.15), vec3(0.34, 0.2, 0.36), vec3(0.8, 0.8, 0.9)),
-                        day3(vec3(0.15, 0.115, 0.25), vec3(0.62, 0.34, 0.42), vec3(0.93, 0.9, 0.92)), keySide * 0.5 + near * 0.6);
+        vec3 body = mix(day3(vec3(0.085, 0.065, 0.15), vec3(0.34, 0.2, 0.36), vec3(0.76, 0.78, 0.9)),
+                        day3(vec3(0.15, 0.115, 0.25), vec3(0.62, 0.34, 0.42), vec3(0.88, 0.88, 0.95)), keySide * day3(0.5, 0.5, 0.25) + near * 0.6);
         body *= day3(0.85, 0.85, 0.9) + day3(0.3, 0.3, 0.2) * smoothstep(-0.6, 0.6, nrm.y); // a little darker underneath
         vec3 litCol = mix(day3(vec3(0.24, 0.2, 0.37), vec3(0.85, 0.5, 0.42), vec3(1.0, 0.97, 0.92)),
                           day3(vec3(0.62, 0.58, 0.82), vec3(1.0, 0.7, 0.45), vec3(1.0, 0.98, 0.9)), near);
@@ -196,9 +203,10 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         }
         // outline: silver lining beside the moon, an ink line elsewhere (matches the outlined models)
         float line = smoothstep(-aw, aw, csd) - smoothstep(aw, aw * 3.0 + 0.004, csd);
-        body = mix(body, day3(vec3(0.05, 0.035, 0.09), vec3(0.2, 0.1, 0.2), vec3(0.5, 0.52, 0.7)), line * (1.0 - near) * day3(0.4, 0.4, 0.5));
+        body = mix(body, day3(vec3(0.05, 0.035, 0.09), vec3(0.2, 0.1, 0.2), vec3(0.52, 0.52, 0.72)), line * (1.0 - near) * day3(0.4, 0.4, 0.6));
         body += day3(vec3(0.6, 0.55, 0.8), vec3(0.6, 0.4, 0.25), vec3(0.1, 0.08, 0.05)) * line * near * (0.5 + 0.5 * max(ndl, 0.0));
-        float ca = shape * 0.95;
+        float ca = shape * 0.95 * (1.0 - cGap);
+        ca *= 1.0 - sunVis * smoothstep(sr + 0.08, sr, sAng) * 0.8; // the sun shines through thin cloud
         col = mix(col, body, ca);
         star *= 1.0 - shape;
         alphaBloom *= 1.0 - ca * 0.85;

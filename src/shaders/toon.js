@@ -70,7 +70,7 @@ float dayK() { return clamp(uDay, 0.0, 1.0); }
 float day3(float n, float d, float y) { float k = dayK(); return k < 0.5 ? mix(n, d, smoothstep(0.0, 0.5, k)) : mix(d, y, smoothstep(0.5, 1.0, k)); }
 vec3 day3(vec3 n, vec3 d, vec3 y) { float k = dayK(); return k < 0.5 ? mix(n, d, smoothstep(0.0, 0.5, k)) : mix(d, y, smoothstep(0.5, 1.0, k)); }
 // how much surfaces wear their daytime colors (dusk is mostly a change of light, not of paint)
-float dayPaint() { return smoothstep(0.25, 0.85, dayK()); }
+float dayPaint() { return smoothstep(0.35, 0.9, dayK()); }
 // 1 at dusk/dawn, 0 at full night and full day
 float duskAmt() { return 1.0 - abs(dayK() * 2.0 - 1.0); }
 float lampsOn() { return 1.0 - smoothstep(0.45, 0.8, dayK()); }
@@ -172,7 +172,7 @@ void main() {
     base *= 1.0 + uMottle * (n - 0.5) * 1.2;
   }
   float em = uEmissive;
-  if (uLamp > 0.0) { float on = lampsOn(); em *= on; base *= mix(0.6, 1.0, on); } // lamps go out by day
+  if (uLamp > 0.0) { float on = lampsOn(); em *= on; base *= mix(0.4, 1.0, on); } // lamps go out by day
   vec3 col = mix(toonShadeRim(base, N, vW, uRim), base, em);
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>
