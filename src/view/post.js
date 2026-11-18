@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
+import { day3 } from '../shaders/toon.js';
 
 // Small post pipeline: scene -> multisampled target, a dual-filter bloom chain at half resolution or lower,
 // and ONE final full-screen pass that adds bloom, grades, vignettes, adds grain and encodes to sRGB.
@@ -17,6 +18,9 @@ import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 // while moonlit bone-white faces sit near 0.85 but are not warm, so they stay crisp), and (c) 1 - alpha, which
 // only the sky writes, to glow the moon.
 //
+// Day/night (setDay): by day the bloom is weaker and its warm key threshold rises (sunlit bone and peach sky are
+// warm too and must not glow like lanterns), the indigo lift fades and the vignette turns from plum to warm sepia.
+//
 // Quality:  'high' — 4x MSAA half-float scene target, bloom 1/2 .. 1/32 (9 small passes), grain.
 //           'low'  — 4x MSAA scene target, bloom 1/4 .. 1/16 (5 tiny passes), no grain.
 //           'off'  — plain renderer.render to the canvas (canvas MSAA only if the renderer was created with it).
@@ -27,14 +31,14 @@ const vert = /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position =
 const luma = /* glsl */ `float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }`;
 
 const prefilterFrag = /* glsl */ `
-uniform sampler2D tScene; uniform vec2 uTexel; uniform float uThr;
+uniform sampler2D tScene; uniform vec2 uTexel; uniform float uThr; uniform float uWarmThr;
 varying vec2 vUv;
 ${luma}
 vec3 key(vec4 s) {
   vec3 c = s.rgb;
   float l = luma(c);
   float warm = clamp((c.r - c.b) / max(c.r, 1e-3), 0.0, 1.0) * step(0.25 * c.r, c.g);
-  float t = mix(uThr, 0.4, smoothstep(0.5, 0.8, warm));
+  float t = mix(uThr, uWarmThr, smoothstep(0.5, 0.8, warm));
   float w = max(l - t, 0.0) / max(l, 1e-3);
   w = w * w / (w + 0.15) + clamp(1.0 - s.a, 0.0, 1.0) * 1.2;
   // Karis-style weight keeps single bright pixels from flickering
@@ -73,6 +77,7 @@ void main() {
 const finalFrag = /* glsl */ `
 uniform sampler2D tScene; uniform sampler2D tBloom;
 uniform float uBloom; uniform float uGrain; uniform float uTime; uniform float uAspect; uniform float uFlat;
+uniform float uLift; uniform vec3 uVigCol; uniform float uVig;
 varying vec2 vUv;
 ${luma}
 vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -90,11 +95,11 @@ void main() {
   float l = luma(g);
   g = mix(vec3(l), g, 1.1);
   g = mix(g, g * g * (3.0 - 2.0 * g), 0.18);
-  g += vec3(0.022, 0.012, 0.05) * (1.0 - smoothstep(0.0, 0.35, l));
+  g += vec3(0.022, 0.012, 0.05) * uLift * (1.0 - smoothstep(0.0, 0.35, l));
   // vignette toward deep plum, a touch stronger at the bottom so the HUD reads
   vec2 v = (vUv - 0.5) * vec2(uAspect, 1.0);
   float vig = smoothstep(0.35, 1.05, length(v * vec2(0.82, 1.0) + vec2(0.0, 0.04)));
-  g = mix(g, g * vec3(0.32, 0.26, 0.42), vig * 0.75);
+  g = mix(g, g * uVigCol, vig * uVig);
   // fine grain, also dithers away banding in the dark gradients
   float n = hash(gl_FragCoord.xy + fract(uTime * 7.13) * 431.0) - 0.5;
   g += n * (uGrain + 1.0 / 255.0) * (1.0 - l * 0.5);
@@ -110,18 +115,31 @@ export class Post {
     this.size = new THREE.Vector2();
     this.flat = false; // debug: composer path without bloom/grade, for comparing against a direct render
     this.strength = 0.85;
+    this.thr = this.float ? 1.0 : 0.9;
     this.quad = new FullScreenQuad();
-    this.prefilter = mat(prefilterFrag, { tScene: { value: null }, uTexel: { value: new THREE.Vector2() }, uThr: { value: this.float ? 1.0 : 0.9 } });
+    this.prefilter = mat(prefilterFrag, { tScene: { value: null }, uTexel: { value: new THREE.Vector2() }, uThr: { value: this.thr }, uWarmThr: { value: 0.4 } });
     this.down = mat(downFrag, { tSrc: { value: null }, uTexel: { value: new THREE.Vector2() } });
     this.up = mat(upFrag, { tSrc: { value: null }, tSame: { value: null }, uTexel: { value: new THREE.Vector2() }, uScatter: { value: 0.9 } });
     this.final = mat(finalFrag, {
       tScene: { value: null }, tBloom: { value: null }, uBloom: { value: this.strength }, uGrain: { value: 0 },
       uTime: { value: 0 }, uAspect: { value: 1 }, uFlat: { value: 0 },
+      uLift: { value: 1 }, uVigCol: { value: new THREE.Vector3(0.32, 0.26, 0.42) }, uVig: { value: 0.75 },
     });
     this.sceneRT = null;
     this.down_ = [];
     this.up_ = [];
     this.setQuality(quality);
+  }
+
+  // k: 0 night .. 0.5 dusk .. 1 day (see toon.js DAY)
+  setDay(k) {
+    this.strength = day3(0.85, 0.75, 0.4, k);
+    this.prefilter.uniforms.uThr.value = this.thr * day3(1, 1, 1.5, k);
+    this.prefilter.uniforms.uWarmThr.value = day3(0.4, 0.45, 1.1, k);
+    const f = this.final.uniforms;
+    f.uLift.value = day3(1, 0.8, 0.15, k);
+    f.uVigCol.value.set(day3(0.32, 0.4, 0.62, k), day3(0.26, 0.26, 0.5, k), day3(0.42, 0.42, 0.44, k));
+    f.uVig.value = day3(0.75, 0.7, 0.45, k);
   }
 
   setQuality(q) {

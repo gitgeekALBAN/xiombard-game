@@ -18,11 +18,11 @@ export const MAT = {
   stone: toon('#8e88a6', { mottle: 0.7, gradColor: PAL.stoneDark, gradY: [0, 0.7] }),
   bone: toon(PAL.bone),
   ink: toon(PAL.ink, { rim: 0.6 }),
-  glass: toon(PAL.amber, { emissive: 0.88 }),
-  flame: toon(PAL.amberHot, { emissive: 1 }),
+  glass: toon(PAL.amber, { emissive: 0.88, lamp: true }),
+  flame: toon(PAL.amberHot, { emissive: 1, lamp: true }),
   shroom: toon('#b9a6d6', { gradColor: '#efe6ff', gradY: [0, 0.12], emissive: 0.25 }),
   stem: toon(PAL.boneShade, { rim: 0.5 }),
-  grass: toon(PAL.grassLight, { gradColor: '#1e2430', gradY: [0, 0.32], side: THREE.DoubleSide, rim: 0.4 }),
+  grass: toon(PAL.grassLight, { gradColor: '#1e2430', gradY: [0, 0.32], side: THREE.DoubleSide, rim: 0.4, dayColor: '#6f9a4c' }),
 };
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
