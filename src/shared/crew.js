@@ -133,6 +133,7 @@ const about = (out, parent, j, r) => out.copy(parent).multiply(_a.makeTranslatio
 // in the body's own frame; writeArm turns that into the forearm part's transform.
 const _S = new THREE.Vector3(), _H = new THREE.Vector3(), _E = new THREE.Vector3(), _F = new THREE.Vector3(), _pd = new THREE.Vector3(), _pp = new THREE.Vector3();
 const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _hop = new THREE.Matrix4();
+const _inv = new THREE.Matrix4(), _w = new THREE.Vector3();
 export function solveArm(rig, i, h, pole) {
   const side = i === 2 ? 1 : -1, L = rig.armLen, l = L / 2;
   _H.set(h[0] * side, h[1], h[2]);
@@ -164,7 +165,8 @@ const HOLD = [0.05, -0.42, 0.62], HOLD_POLE = [0.5, -0.6, -0.6];
 export function shovelHoldDir(rig) { solveArm(rig, 3, HOLD, HOLD_POLE); return _F.clone(); }
 const _lh = [0, 0, 0], _lp = [0, 0, 0], _rh = [0, 0, 0], _rp = [0, 0, 0];
 
-// Procedural digger animation, straight to part transforms. s = { speed, phase, t, carry, dig, air, swing 0..1 }.
+// Procedural digger animation, straight to part transforms. s = { speed, phase, t, carry, hold, dig, air, swing 0..1 }.
+// carry: 'corpse' | 'coffin' (alone) | 'coffin2' (one of two); hold: two world points for the mittens.
 // Writes 7 floats per part (px,py,pz,qx,qy,qz,qw) into `out` from `off`. The legs hang from the root, so a leaning
 // body keeps its feet under it; head and arms ride on the body.
 export function crewPose(rig, root, s, out, off = 0) {
@@ -182,11 +184,15 @@ export function crewPose(rig, root, s, out, off = 0) {
   mix3([0.2, -0.93, 0.1 - sw * 0.5 * k], _lh, 0, _lh); mix3([0.3, -0.2, -1], _lp, 0, _lp);
   mix3(HOLD, _rh, 0, _rh); mix3(HOLD_POLE, _rp, 0, _rp);
   _rh[1] += Math.sin(s.phase * 2) * 0.03 * k + Math.sin(t * 1.4) * 0.01;
-  if (s.carry) { // both mittens out in front: low and bent for a coffin, up and forward for a body
-    const low = s.carry === 'coffin';
-    mix3(low ? [-0.1, -0.6, 0.62] : [-0.12, 0.05, 0.88], _lh, 0, _lh); mix3(_lh, _rh, 0, _rh);
+  if (s.carry) { // both mittens on the load (s.hold says where); without it: out in front, low for a coffin
+    const low = s.carry !== 'corpse';
+    mix3(low ? [-0.1, -0.6, 0.62] : [-0.12, -0.3, 0.8], _lh, 0, _lh); mix3(_lh, _rh, 0, _rh);
     mix3(low ? [0.7, -0.3, -0.6] : [0.6, -0.7, -0.3], _lp, 0, _lp); mix3(_lp, _rp, 0, _rp);
-    R[0][0] += low ? 0.3 : -0.08;
+    R[0][0] += s.carry === 'coffin' ? 0.26 : s.carry === 'coffin2' ? 0.1 : -0.1;
+    if (s.carry === 'coffin') { // too heavy for one: the whole figure rocks under it
+      R[0][2] += Math.sin(t * 2.3) * 0.13 + Math.sin(t * 3.7) * 0.06;
+      R[1][2] -= Math.sin(t * 2.3) * 0.1;
+    }
   } else {
     if (s.dig) { // a jab forward and down into the ground with both mittens on the shovel, the body leaning into it
       const push = 0.5 + 0.5 * Math.sin(t * 7);
@@ -213,6 +219,13 @@ export function crewPose(rig, root, s, out, off = 0) {
   if (wad > 0.01) root = _hop.copy(root).multiply(_a.makeTranslation(sw * 0.045 * wad, bounce * 0.085 * wad, 0)); // feet and all
   rigPose(rig, root, R, out, off);
   if (!rig.elbow) return out;
+  if (s.carry && s.hold) { // the mittens reach for their spots on the load: the one further left is the left mitten's
+    _inv.copy(_body).invert();
+    _v.copy(s.hold[0]).applyMatrix4(_inv); _w.copy(s.hold[1]).applyMatrix4(_inv);
+    const swap = _v.x < _w.x, L = swap ? _w : _v, Rt = swap ? _v : _w;
+    L.sub(rig.pivot[2]).multiplyScalar(1 / rig.armLen); _lh[0] = L.x; _lh[1] = L.y; _lh[2] = L.z;
+    Rt.sub(rig.pivot[3]).multiplyScalar(1 / rig.armLen); _rh[0] = -Rt.x; _rh[1] = Rt.y; _rh[2] = Rt.z;
+  }
   solveArm(rig, 3, _rh, _rp);
   writeArm(rig, 3, _body, out, off);
   if (grip) { // the left mitten goes to a point on the shaft, a little way up from the right one

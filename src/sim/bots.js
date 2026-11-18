@@ -27,6 +27,7 @@
 // The optional second argument is for tests: createBots(sim, { log: (msg) => ..., inspect: {} }).
 import { PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, ROAD_Z, PILE, DECOR, LANTERNS, plotAt } from '../shared/layout.js';
 import { rng } from '../shared/rng.js';
+import { TRAIN } from './game.js';
 
 const PLAN_DT = 0.3;                 // seconds between decisions (jittered per bot)
 const YARD = 26;                     // stay well inside the fence (at 28)
@@ -656,9 +657,17 @@ export function createBots(sim, opts = {}) {
       case 'deliver': {
         const c = t.coffin;
         if (!alive(c)) return endTask(b, 'gone', t.stage === 'verify', 0), false;
-        if (heldByOthers(w, p, c)) return endTask(b, 'taken', false, 4), false;
+        if (heldByOthers(w, p, c) && !(p.grab && p.grab.ent === c)) return endTask(b, 'taken', false, 4), false; // someone on the other end of mine is welcome
         if (w.inPlot.get(c) && t.stage !== 'verify') return endTask(b, 'in a grave', true), false;
         if (age > 45 || T - t.t0 > 100) return endTask(b, 'too slow', false), false;
+        return true;
+      }
+      case 'help': {
+        const c = t.coffin, mine = p.grab && p.grab.ent === c;
+        if (!alive(c) || !alive(t.leader)) return endTask(b, 'gone', false, 0), false;
+        if (!(t.leader.grab && t.leader.grab.ent === c)) { if (mine) return true; return endTask(b, 'set down', true, 0), false; } // doHelp lets go first
+        if (!mine && sim.holders(c) > 1) return endTask(b, 'someone else has it', true, 0), false;
+        if (!mine && age > 20) return endTask(b, 'cannot get to the other end', false, 10), false;
         return true;
       }
       case 'dig': {
@@ -782,11 +791,57 @@ export function createBots(sim, opts = {}) {
         b.stats.fights++;
       }
     }
+    if (!p.grab && !(b.task && (b.task.kind === 'fight' || b.task.kind === 'help' || b.task.kind === 'fill'))) {
+      const h = helpWanted(b, p, w);
+      if (h) { startTask(b, h); b.pauseT = Math.min(b.pauseT, T + 0.2); }
+    }
     if (b.task && b.task.kind !== 'idle') validate(b, p, w);
     if (b.task && b.task.kind !== 'idle') return;
     const t = choose(b, p, w);
     if (t) startTask(b, t);
     else if (!b.task) startTask(b, { kind: 'idle' });
+  }
+
+  // ---------- lending a hand ----------
+  // A human carrying a coffin alone staggers and drops it; with someone on the other end it is easy. The nearest bot
+  // with free hands takes that end and then just walks in file behind (the sim keeps the two a coffin apart).
+  function helpWanted(b, p, w) {
+    const pos = p.body.position;
+    let best = null, bd = 16;
+    for (const d of w.diggers) {
+      const g = d.grab;
+      if (bots.has(d.id) || d.rag || !g || !g.coffin || sim.time - g.t0 < 0.8 || sim.holders(g.ent) > 1) continue;
+      const key = 'h' + g.ent.id;
+      if (!isFree(b, key) || banned(b, key)) continue;
+      const dd = hyp(d.body.position.x - pos.x, d.body.position.z - pos.z);
+      if (dd < bd) { bd = dd; best = { kind: 'help', coffin: g.ent, leader: d, keys: [key] }; }
+    }
+    return best;
+  }
+  function doHelp(b, p, t, dt) {
+    const c = t.coffin, lead = t.leader, pos = p.body.position, q = c.body.position;
+    const mine = p.grab && p.grab.ent === c;
+    if (p.grab && !mine) return dropSafely(b, p, dt);
+    const held = lead.grab && lead.grab.ent === c;
+    if (mine) {
+      b.wantMove = false;
+      if (!held) { if (toggle(b, 'g')) endTask(b, 'set down', true, 0); return; } // the leader let go: so do I
+      const lp = lead.body.position, d = hyp(lp.x - pos.x, lp.z - pos.z);
+      if (d > 0.05) turn(b, Math.atan2(lp.x - pos.x, lp.z - pos.z), b.persona.turn, dt);
+      b.inp.mz = clamp((d - TRAIN + 0.3) * 2.5, 0, 1);
+      b.inp.run = !!lead.input.run && d > TRAIN;
+      return;
+    }
+    if (!held) return;
+    // walk up to the nearer end and take hold
+    const a = coffinAxes(c), side = (pos.x - q.x) * a.lx + (pos.z - q.z) * a.lz >= 0 ? 1 : -1, off = COFFIN.hz + 0.8;
+    const gx = q.x + a.lx * side * off, gz = q.z + a.lz * side * off;
+    const r = go(b, p, gx, gz, { arrive: 0.25, slow: 0.8, run: true }, dt);
+    if (hyp(q.x - pos.x, q.z - pos.z) < 2.6) {
+      const g = sim.findGrab(p);
+      if (g && g.ent === c) { if (toggle(b, 'g')) b.stats.grabs++; }
+      else if (r < 0.4) face(b, p, q.x, q.z, dt);
+    }
   }
 
   // ---------- per-job behaviour ----------
@@ -932,6 +987,9 @@ export function createBots(sim, opts = {}) {
       return;
     }
     t.settleT = 0;
+    // alone with a coffin the arms give out: stop for a breather before it slips
+    if (sim.holders(c) < 2) { if (p.grab.grip < 0.22) t.rest = true; else if (p.grab.grip > 0.8) t.rest = false; } else t.rest = false;
+    if (t.rest) { b.wantMove = false; b.mode = 'rest'; return; }
     const ready = plotOk(w, pl);
     if (!t.spot || T > (t.spotT || 0)) { t.spot = pickSpot(b, p, pl, t, ready ? 0.1 : 1.6); t.spotT = T + 2.5; }
     const r = go(b, p, t.spot.x, t.spot.z, { arrive: ready ? 0.3 : 0.6, slow: 1.0, drag: c, targetPlot: pl.i }, dt);
@@ -1124,6 +1182,7 @@ export function createBots(sim, opts = {}) {
       if (!(sunk && !holeTarget && climb(b, p, dt)) && t) {
         if (t.kind === 'load') doLoad(b, p, t, dt);
         else if (t.kind === 'deliver') doDeliver(b, p, t, dt);
+        else if (t.kind === 'help') doHelp(b, p, t, dt);
         else if (t.kind === 'dig' || t.kind === 'fill') doWork(b, p, t, dt);
         else if (t.kind === 'flip') doFlip(b, p, t, dt);
         else if (t.kind === 'fight') doFight(b, p, t, dt);

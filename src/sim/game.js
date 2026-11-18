@@ -19,12 +19,12 @@ const STEP = 1 / 60;
 const CORPSE_MASS = 30, DIGGER_RAG_MASS = 45;
 const MAX_CORPSES = 9;
 const TRUCK_SPAWN_X = TRUCK_START_X - 25; // where a load appears on the road: inside the |x| < 45 cleanup bounds
-// Coffins are held low by one end: one digger drags it, two diggers carry it level.
-const COFFIN_HOLD_Y = 0.55;
-// Grip strength in newtons. cannon-es clamps constraint *impulse per step*, so these are multiplied by STEP.
-// Strong enough to feel snappy, weak enough that nothing gets launched. Coffins are held low, so they are dragged, not lifted.
-const CORPSE_GRIP_N = 1400, COFFIN_GRIP_N = 1100;
-const CORPSE_HOLD_Y = 1.3;
+// Whatever a digger picks up jumps into the mittens and rides there (no rubber band): the sim steers the load to a
+// spot in front of the carrier every step. A body lies across the arms. A coffin is a two-digger job: alone it is
+// carried across the chest, slowly, swaying, and the grip runs out; two diggers take an end each and walk in file.
+const HOP = 0.25;                 // seconds the jump into the hands takes
+const CORPSE_FWD = 0.62, COFFIN_FWD = 0.9, END_FWD = 0.55; // meters from the carrier to the load's center / to a coffin end
+export const TRAIN = 2 * (COFFIN.hz + END_FWD); // how far apart two diggers stand with a coffin between them
 // The shift has two halves. By day the truck delivers and the crew buries. At night nothing is delivered: zombies
 // climb out of the ground, every body left unburied gets up too, and the crew defends the yard with shovels.
 const DAY_LEN = 150, NIGHT_LEN = 80, TWILIGHT = 10; // seconds; the light fades over the last TWILIGHT of each half
@@ -74,6 +74,7 @@ export class Sim {
     this._ray = new CANNON.RaycastResult();
     this._pose = { speed: 0, phase: 0, t: 0, carry: null, dig: false, air: false, swing: 0, attack: 0 };
     this._root = new THREE.Matrix4();
+    this._mitts = [new THREE.Vector3(), new THREE.Vector3()];
 
     this.obstacles = staticBoxes().filter((b) => b.c[1] + b.h[1] > 0.2); // things a zombie must not spawn inside
     for (const b of staticBoxes()) {
@@ -262,9 +263,9 @@ export class Sim {
 
   feet(p) { return p.rag ? p.rag.bodies[0].position : p.body.position; } // part 0 is the belly
   fwd(p) { return new CANNON.Vec3(Math.sin(p.yaw), 0, Math.cos(p.yaw)); }
-  handPoint(p, hy) {
-    const f = this.fwd(p), b = p.body.position, d = hy === COFFIN_HOLD_Y ? 0.95 : 0.75;
-    return new CANNON.Vec3(b.x + f.x * d, b.y + hy, b.z + f.z * d);
+  handPoint(p, hy, d = 0.75, yaw = p.yaw) {
+    const b = p.body.position;
+    return new CANNON.Vec3(b.x + Math.sin(yaw) * d, b.y + hy, b.z + Math.cos(yaw) * d);
   }
 
   toRagdoll(p, extra) {
@@ -314,11 +315,14 @@ export class Sim {
       if (e === p) continue;
       if (e.z && e.z.mode !== 'down') continue; // on its feet: whack it first
       if (e.kind === 'corpse' || ((e.kind === 'digger' || e.kind === 'zombie') && e.rag)) {
-        for (const b of this.bodiesOf(e)) {
+        if (this.holders(e)) continue; // somebody has them already
+        const all = this.bodiesOf(e);
+        for (const b of all) { // reach for any part: the whole body comes, belly first
           const d = b.position.distanceTo(hand) - b.grabR + (boxed.has(e) ? 0.8 : 0);
-          if (d < bestD) { bestD = d; best = { body: b, ent: e, pivot: new CANNON.Vec3() }; }
+          if (d < bestD) { bestD = d; best = { body: all[0], ent: e, pivot: new CANNON.Vec3() }; }
         }
       } else if (e.kind === 'coffin') {
+        if (this.holders(e) > 1) continue; // a coffin has two ends
         const b = e.body;
         b.pointToLocalFrame(hand, loc);
         loc.x = Math.max(-COFFIN.hx, Math.min(COFFIN.hx, loc.x));
@@ -335,15 +339,26 @@ export class Sim {
     const g = this.findGrab(p);
     if (!g) return;
     const coffin = g.ent.kind === 'coffin';
-    const h = this.handPoint(p, coffin ? COFFIN_HOLD_Y : CORPSE_HOLD_Y);
-    p.hand.position.copy(h);
-    g.constraint = new CANNON.PointToPointConstraint(g.body, g.pivot, p.hand, new CANNON.Vec3(), (coffin ? COFFIN_GRIP_N : CORPSE_GRIP_N) * STEP);
-    this.world.addConstraint(g.constraint);
     g.coffin = coffin;
     g.grip = 1;
+    g.t0 = this.time;
+    g.from = g.body.position.clone();
+    g.end = 0;
+    g.yaw = p.yaw; // which way the load is held: it follows the carrier's turn with a lag, a coffin lazily
+    g.strT = 0;
+    if (coffin) {
+      const mate = this.holdersOf(g.ent)[0];
+      if (mate) { // the second pair of hands: an end each, whichever is nearer; nothing has to jump
+        g.end = g.body.pointToLocalFrame(p.body.position).z >= 0 ? 1 : -1;
+        mate.grab.end = -g.end;
+        g.t0 = mate.grab.t0 = this.time - HOP;
+      }
+    }
     p.grab = g;
-    // whatever you carry passes through you instead of wedging against your legs
-    for (const b of this.bodiesOf(g.ent)) { b.wakeUp(); b.collisionFilterMask &= ~p.bit; }
+    // whatever you carry passes through you instead of wedging against your legs; a body clears the truck's bed too
+    for (const b of this.bodiesOf(g.ent)) { b.wakeUp(); b.collisionFilterMask &= ~(coffin ? p.bit : p.bit | G_TRUCK); }
+    const h = this.holdTarget(g.ent, this.holdersOf(g.ent)).pos;
+    p.hand.position.copy(h);
     if (g.ent.kind === 'corpse' && !g.ent.greeted) {
       g.ent.greeted = true;
       this.emit('toast', { text: g.ent.name, pos: [h.x, h.y + 0.6, h.z] });
@@ -353,19 +368,105 @@ export class Sim {
   drop(p, assist = false) {
     const g = p.grab;
     if (!g) return;
-    this.world.removeConstraint(g.constraint);
     p.grab = null;
+    if (!g.coffin) for (const b of this.bodiesOf(g.ent)) b.collisionFilterMask |= G_TRUCK;
     this.restores.push({ ent: g.ent, p, t: this.time + 0.45 }); // collide with the carrier again once it has fallen clear
     if (g.contents) this.restores.push({ ent: g.contents, p, t: this.time + 0.45 });
+    let mate = g.coffin && this.holdersOf(g.ent)[0];
+    if (mate && assist && this.gravePlot(g.ent)) { this.drop(mate); mate = null; } // let go over a dug grave: both hands off, in it goes
+    if (mate) mate.grab.end = 0; // the one left holding it takes it across the chest again
     if (assist && g.ent.kind === 'corpse') this.coffinAssist(g.ent, p.hand.position);
-    if (assist && g.ent.kind === 'coffin' && !this.holders(g.ent)) this.graveAssist(g.ent);
+    if (assist && g.ent.kind === 'coffin' && !mate) this.graveAssist(g.ent);
+  }
+  // ---------- carrying ----------
+  holdersOf(ent) { return this.ents.filter((e) => e.kind === 'digger' && e.grab && e.grab.ent === ent); }
+  // how high a digger holds things: its own shoulders decide (feet + this)
+  carryY(p, coffin) {
+    const sh = crewRig(p.look).pivot[3].y;
+    return coffin ? Math.max(0.45, Math.min(0.9, sh - 0.4)) : sh - 0.05;
+  }
+  // Where a held thing should be right now: { pos, quat, firm }. hs = the diggers holding it.
+  holdTarget(ent, hs) {
+    const p = hs[0], g = p.grab, b = g.body, t = this.time + p.id * 1.7;
+    const q = new CANNON.Quaternion(), tilt = new CANNON.Quaternion();
+    if (!g.coffin) { // a body lies on its back across the arms, head to the carrier's right
+      const pos = this.handPoint(p, this.carryY(p, false) + Math.sin(p.phase * 2) * 0.02, CORPSE_FWD, g.yaw);
+      q.setFromEuler(0, g.yaw, 0);
+      q.mult(tilt.setFromEuler(-Math.PI / 2, 0, 0), q);
+      q.mult(tilt.setFromEuler(0, 0, -Math.PI / 2), q);
+      return { pos, quat: q, firm: 0.35 };
+    }
+    const fz = b.quaternion.vmult(new CANNON.Vec3(0, 0, 1)), yawNow = Math.atan2(fz.x, fz.z);
+    if (hs.length > 1) { // an end each: the coffin hangs level between the two, along the line from one to the other
+      const a = hs[0].grab.end > 0 ? hs[0] : hs[1], z = a === hs[0] ? hs[1] : hs[0];
+      const pa = a.body.position, pz = z.body.position;
+      const pos = new CANNON.Vec3((pa.x + pz.x) / 2, (pa.y + pz.y + this.carryY(a, true) + this.carryY(z, true)) / 2, (pa.z + pz.z) / 2);
+      q.setFromEuler(0, Math.atan2(pa.x - pz.x, pa.z - pz.z), 0);
+      return { pos, quat: q, firm: 1 };
+    }
+    // alone: across the chest, whichever way round is nearer, and it sways the more the faster you go
+    const k = Math.min(1, (p.speed || 0) / 1.8), w = 0.35 + 0.65 * k;
+    const pos = this.handPoint(p, this.carryY(p, true) + Math.sin(t * 4.2) * 0.03 * k, COFFIN_FWD, g.yaw);
+    let yaw = g.yaw + Math.PI / 2;
+    if (Math.cos(yaw - yawNow) < 0) yaw += Math.PI;
+    q.setFromEuler(0, yaw + Math.sin(t * 1.3) * 0.2 * w, 0);
+    q.mult(tilt.setFromEuler(Math.sin(t * 1.9 + 1) * 0.16 * w, 0, Math.sin(t * 3.1) * 0.1 * w), q);
+    return { pos, quat: q, firm: 0.5 };
+  }
+  // Steer every held thing toward its spot. The first quarter second is the jump: the thing (a coffin's passenger
+  // included) moves as one rigid piece; after that only the gripped part is led and the rest hangs from it.
+  driveHeld(h) {
+    const seen = new Set();
+    for (const p of this.ents) {
+      if (p.kind !== 'digger' || !p.grab || seen.has(p.grab.ent)) continue;
+      const ent = p.grab.ent, hs = this.holdersOf(ent), g = hs[0].grab, b = g.body;
+      seen.add(ent);
+      const t = this.holdTarget(ent, hs), tau = (this.time - g.t0) / HOP, hop = tau < 1;
+      const goal = t.pos.clone();
+      if (hop) {
+        const e = tau * tau * (3 - 2 * tau);
+        g.from.lerp(t.pos, e, goal);
+        goal.y += Math.sin(Math.PI * tau) * 0.3;
+      }
+      const v = goal.vsub(b.position);
+      v.scale(hop ? 1 / h : 14, v);
+      const sp = v.length(), cap = hop ? 13 : 10;
+      if (sp > cap) v.scale(cap / sp, v);
+      if (!hop) for (const hp of hs) v.addScaledVector(1 / hs.length, hp.body.velocity, v); // keep up with the carriers, do not trail behind
+      // rotation still to go, as an angular velocity
+      const qe = t.quat.mult(b.quaternion.conjugate());
+      if (qe.w < 0) qe.set(-qe.x, -qe.y, -qe.z, -qe.w);
+      const sn = Math.hypot(qe.x, qe.y, qe.z), ang = 2 * Math.atan2(sn, qe.w);
+      const w = new CANNON.Vec3(qe.x, qe.y, qe.z);
+      w.scale(sn > 1e-6 ? Math.min(ang * (hop ? 14 : 9), 9) / sn : 0, w);
+      const kv = hop ? 1 : 0.5 + 0.5 * t.firm, kw = hop ? 0.7 : 0.25 + 0.45 * t.firm;
+      b.velocity.lerp(v, kv, b.velocity);
+      b.angularVelocity.lerp(w, kw, b.angularVelocity);
+      b.wakeUp();
+      for (const hp of hs) hp.hand.position.copy(t.pos);
+      if (hop) { // everything that belongs to it comes along as one piece
+        const rest = this.bodiesOf(ent).filter((o) => o !== b);
+        if (g.coffin) { const inside = this.coffinContents(ent); if (inside) rest.push(...inside.bodies); }
+        for (const o of rest) {
+          const r = o.position.vsub(b.position);
+          b.angularVelocity.cross(r, o.velocity);
+          o.velocity.vadd(b.velocity, o.velocity);
+          o.angularVelocity.copy(b.angularVelocity);
+          o.wakeUp();
+        }
+      }
+    }
   }
   // A coffin let go over a dug grave is straightened and centered so it drops in (its passenger comes along).
+  gravePlot(coffin) { // the dug grave this coffin would go into if let go right now
+    const q = coffin.body.position;
+    if (this.coffinUp(coffin) < 0.6 || q.y < 0) return null;
+    return this.plots.find((pl) => !pl.buried && pl.depth >= 0.4 && Math.abs(q.x - pl.x) < PLOT_HALF.x + 1.2 && Math.abs(q.z - pl.z) < PLOT_HALF.z + 1.5) || null;
+  }
   graveAssist(coffin) {
     const b = coffin.body, q = b.position;
-    if (this.coffinUp(coffin) < 0.6) return;
-    const plot = this.plots.find((pl) => !pl.buried && pl.depth >= 0.4 && Math.abs(q.x - pl.x) < PLOT_HALF.x + 1.2 && Math.abs(q.z - pl.z) < PLOT_HALF.z + 1.5);
-    if (!plot || q.y < 0) return;
+    const plot = this.gravePlot(coffin);
+    if (!plot) return;
     const body = this.coffinContents(coffin);
     const fz = b.quaternion.vmult(new CANNON.Vec3(0, 0, 1)).z;
     const newQ = new CANNON.Quaternion().setFromEuler(0, fz >= 0 ? 0 : Math.PI, 0);
@@ -421,7 +522,7 @@ export class Sim {
   releaseGrabsOn(bodies) {
     for (const e of this.ents) if (e.kind === 'digger' && e.grab && bodies.has(e.grab.body)) this.drop(e);
   }
-  holders(ent) { return this.ents.filter((e) => e.kind === 'digger' && e.grab && e.grab.ent === ent).length; }
+  holders(ent) { return this.holdersOf(ent).length; }
 
   // ---------- coffins & graves ----------
   coffinContents(coffin) {
@@ -826,6 +927,7 @@ export class Sim {
     for (const e of [...this.ents]) if (e.z) this.updateWalker(e, h);
     for (const e of this.ents) if (e.kind === 'digger') this.updatePlayer(e, h);
     for (const e of this.ents) if (e.kind === 'digger' && e.grab) this.updateHand(e, h);
+    this.driveHeld(h);
     this.world.step(h);
     this.afterStep(h);
   }
@@ -859,17 +961,27 @@ export class Sim {
     let mx = inp.mx, mz = inp.mz;
     const len = Math.hypot(mx, mz);
     if (len > 1) { mx /= len; mz /= len; }
-    const soloCoffin = p.grab && p.grab.coffin && this.holders(p.grab.ent) < 2;
-    let speed = inp.run && !soloCoffin ? 6.2 : 3.6; // no sprinting while dragging a coffin alone
+    const mate = p.grab && p.grab.coffin ? this.holdersOf(p.grab.ent).find((o) => o !== p) : null;
+    const soloCoffin = p.grab && p.grab.coffin && !mate;
+    let speed = inp.run && !soloCoffin ? 6.2 : 3.6; // no sprinting with a coffin on your own
     if (p.grab) {
-      if (p.grab.coffin) speed *= this.holders(p.grab.ent) > 1 ? 0.85 : 0.5;
+      if (p.grab.coffin) speed *= mate ? 0.85 : 0.5;
       else speed *= 0.85;
       // a load that lags behind (stuck, heavy) holds you back instead of stretching forever
       speed *= Math.max(0.15, 1 - Math.max(0, (p.grab.stretch || 0) - 0.3) * 1.2);
     }
     p.digging = !!(inp.dig && !p.grab && p.grounded);
     if (p.digging) speed = 0;
-    const tx = (f.x * mz + r.x * mx) * speed, tz = (f.z * mz + r.z * mx) * speed;
+    let tx = (f.x * mz + r.x * mx) * speed, tz = (f.z * mz + r.z * mx) * speed;
+    if (soloCoffin) { // too heavy for one: the carrier staggers from side to side
+      const t = this.time + p.id * 1.7, sway = (Math.sin(t * 2.3) * 0.75 + Math.sin(t * 3.7) * 0.4) * Math.min(1, Math.hypot(mx, mz));
+      tx += r.x * sway; tz += r.z * sway;
+    }
+    if (mate) { // the coffin between two carriers keeps them a coffin apart: the one behind is towed, the one ahead held back
+      const o = mate.body.position, dx = o.x - b.position.x, dz = o.z - b.position.z, d = Math.hypot(dx, dz) || 1;
+      const pull = Math.max(-3, Math.min(3, (d - TRAIN) * 4));
+      tx += (dx / d) * pull; tz += (dz / d) * pull;
+    }
     const k = Math.min(1, h * (!p.grounded ? 3 : p.grab && p.grab.coffin ? 5 : 14));
     b.velocity.x += (tx - b.velocity.x) * k;
     b.velocity.z += (tz - b.velocity.z) * k;
@@ -894,22 +1006,24 @@ export class Sim {
   }
 
   updateHand(p, h) {
-    const g = p.grab;
-    // The hand eases toward its spot in front of the player, so whipping the camera around
-    // swings the load instead of teleporting it.
-    const goal = this.handPoint(p, g.coffin ? COFFIN_HOLD_Y : CORPSE_HOLD_Y);
-    const k = Math.min(1, h * 10), hp = p.hand.position;
-    const target = new CANNON.Vec3(hp.x + (goal.x - hp.x) * k, hp.y + (goal.y - hp.y) * k, hp.z + (goal.z - hp.z) * k);
-    p.hand.velocity.set((target.x - hp.x) / h, (target.y - hp.y) / h, (target.z - hp.z) / h);
-    p.hand.position.copy(target);
+    const g = p.grab, hs = this.holdersOf(g.ent), hop = this.time - g.t0 < HOP;
     for (const b of this.bodiesOf(g.ent)) b.wakeUp();
-    g.stretch = g.body.pointToWorldFrame(g.pivot).distanceTo(hp);
-    if (g.stretch > 2) { // yanked out of your hands
+    const lose = (text, sfx = 'slip') => {
+      const q = g.body.position;
       this.drop(p);
-      this.emit('toast', { text: 'Lost my grip!', pos: [hp.x, hp.y + 0.5, hp.z] });
-      this.emit('sfx', { name: 'slip', pos: [hp.x, hp.y, hp.z] });
-      return;
-    }
+      this.emit('toast', { text, pos: [q.x, q.y + 0.6, q.z] });
+      this.emit('sfx', { name: sfx, pos: [q.x, q.y, q.z] });
+    };
+    // how far the load is from where it should be: something is in the way, or the other carrier went elsewhere
+    if (hs.length > 1) {
+      const o = hs.find((e) => e !== p).body.position, q = p.body.position;
+      g.stretch = Math.max(0, Math.hypot(o.x - q.x, o.z - q.z) - TRAIN);
+    } else g.stretch = hop ? 0 : g.body.position.distanceTo(this.holdTarget(g.ent, hs).pos);
+    g.strT = g.stretch > 1.1 ? g.strT + h : 0;
+    if (g.strT > 0.35 || g.stretch > 2.4) return lose('Lost my grip!'); // it stayed behind (snagged, or the other carrier left)
+    // whipping the camera around swings the load after you instead of teleporting it
+    const dy = Math.atan2(Math.sin(p.yaw - g.yaw), Math.cos(p.yaw - g.yaw));
+    g.yaw += dy * Math.min(1, h * (g.coffin ? 5 : 10));
     if (g.coffin) {
       // the passenger of a held coffin must not collide with the carrier either, or walking into
       // the coffin would shove the body through its walls
@@ -919,27 +1033,25 @@ export class Sim {
         g.contents = inside;
       }
       if (inside) for (const b of inside.bodies) { b.wakeUp(); b.collisionFilterMask &= ~p.bit; } // a sleeping passenger would pin the coffin
-    }
-    if (g.coffin && !p.input.run) {
-      // A calmly held coffin resists tipping. Sprint with it and you are on your own.
-      const b = g.body, up = b.quaternion.vmult(new CANNON.Vec3(0, 1, 0)), w = b.angularVelocity;
-      if (up.y > 0.2) {
-        b.torque.x += -up.z * 320 - w.x * 40;
-        b.torque.z += up.x * 320 - w.z * 40;
+      if (hs.length > 1) { g.grip = Math.min(1, g.grip + 0.5 * h); return; } // two carriers: no trouble at all
+      // Alone the arms give out: walking wears the grip down (a full coffin faster), turning and hopping more;
+      // stand still to get it back.
+      const moving = (p.speed || 0) > 0.5 || !p.grounded;
+      const drain = moving ? (inside ? 0.11 : 0.08) + Math.min(p.turn, 8) * 0.03 + (!p.grounded ? 0.6 : 0) : -0.3;
+      g.grip = Math.min(1, g.grip - drain * h);
+      if (g.grip <= 0) {
+        const b = g.body, ax = b.quaternion.vmult(new CANNON.Vec3(0, 0, 1));
+        lose('Too heavy!', 'thud');
+        if (this.rand() < 0.4) ax.scale(this.rand() < 0.5 ? 3 : -3, ax), b.angularVelocity.vadd(ax, b.angularVelocity); // now and then it rolls over
       }
+      return;
     }
     if (g.ent.kind !== 'corpse') return;
-    // Corpses are slippery: running, spinning and jumping make them slide out of your hands.
-    const part = g.body.partIndex;
-    const partSlip = part === 0 ? 0.6 : part === 1 ? 1 : 1.4; // the belly is a good hold, a mitten or a boot is not
-    let drain = 0.09 + (p.input.run && p.speed > 3 ? 0.45 : 0) + Math.min(p.turn, 8) * 0.04 + (!p.grounded ? 0.4 : 0);
-    if (this.rand() < h * 0.18) drain += (0.45 / h) * this.rand(); // random butterfingers
-    g.grip -= drain * h * g.ent.slip * partSlip;
-    if (g.grip <= 0) {
-      this.drop(p);
-      this.emit('toast', { text: this.rand() < 0.5 ? 'Whoops!' : 'Butterfingers!', pos: [target.x, target.y + 0.5, target.z] });
-      this.emit('sfx', { name: 'slip', pos: [target.x, target.y, target.z] });
-    }
+    // A body in the arms stays put at a walk. Running, spinning and jumping make it slide out.
+    let drain = (p.input.run && p.speed > 3 ? 0.45 : 0) + Math.max(0, Math.min(p.turn, 8) - 2) * 0.04 + (!p.grounded ? 0.4 : 0);
+    if (drain > 0 && this.rand() < h * 0.18) drain += (0.45 / h) * this.rand(); // random butterfingers
+    g.grip = Math.min(1, g.grip - (drain > 0 ? drain * g.ent.slip : -0.25) * h);
+    if (g.grip <= 0) lose(this.rand() < 0.5 ? 'Whoops!' : 'Butterfingers!');
   }
 
   afterStep(h) {
@@ -1052,7 +1164,7 @@ export class Sim {
   hintFor(p) {
     if (p.rag) return this.holders(p) ? 'A friend is carrying you. Enjoy the ride.' : 'Press R to get up';
     if (p.grab) {
-      if (p.grab.coffin) return this.holders(p.grab.ent) > 1 ? 'Teamwork! Drop it into a dug grave.' : 'Heavy! Get a friend on the other end. Click to drop.';
+      if (p.grab.coffin) return this.holders(p.grab.ent) > 1 ? 'Teamwork! Walk in file and drop it into a dug grave.' : 'Heavy! Stand still to rest, or get a friend on the other end.';
       return 'Put them in a coffin · Click to drop · Right-click to throw';
     }
     if (this.whackable(p).length) return 'Click to whack!';
@@ -1067,9 +1179,29 @@ export class Sim {
     const b = p.body.position;
     this._root.makeRotationY(p.yaw).setPosition(b.x, b.y, b.z); // the bounce of the walk is part of the pose
     this._pose.speed = p.speed || 0; this._pose.phase = p.phase; this._pose.t = this.time + p.id;
-    this._pose.carry = p.grab ? (p.grab.coffin ? 'coffin' : 'corpse') : null; this._pose.dig = p.digging; this._pose.air = !p.grounded;
+    this._pose.carry = p.grab ? (p.grab.coffin ? (this.holders(p.grab.ent) > 1 ? 'coffin2' : 'coffin') : 'corpse') : null;
+    this._pose.hold = p.grab ? this.mittenSpots(p) : null;
+    this._pose.dig = p.digging; this._pose.air = !p.grounded;
     this._pose.swing = this.swinging(p) ? (this.time - p.swingT) / SWING_TIME : 0;
     return crewPose(crewRig(p.look), this._root, this._pose, out);
+  }
+  // where the two mittens go on what the digger holds (world space): under a body, on a coffin's side or end
+  mittenSpots(p) {
+    const g = p.grab, b = g.body, out = this._mitts;
+    if (!g.coffin) {
+      const f = this.fwd(p), c = b.position;
+      for (let i = 0; i < 2; i++) { const s = i ? 0.22 : -0.22; out[i].set(c.x - f.z * s - f.x * 0.1, c.y - 0.14, c.z + f.x * s - f.z * 0.1); }
+      return out;
+    }
+    const loc = new CANNON.Vec3(), w = new CANNON.Vec3();
+    for (let i = 0; i < 2; i++) {
+      const s = i ? 1 : -1;
+      if (g.end) loc.set(s * 0.3, 0.05, g.end * COFFIN.hz);
+      else loc.set(Math.sign(b.pointToLocalFrame(p.body.position).x || 1) * COFFIN.hx, 0.05, s * 0.42);
+      b.pointToWorldFrame(loc, w);
+      out[i].set(w.x, w.y, w.z);
+    }
+    return out;
   }
   writeXf(e) {
     if (e.kind === 'digger' && !e.rag) { this.diggerPose(e, e.xf); return; }
@@ -1103,7 +1235,7 @@ export class Sim {
       risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging, sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
-        grip: e.grab && !e.grab.coffin ? +e.grab.grip.toFixed(2) : -1,
+        grip: e.grab && !(e.grab.coffin && this.holders(e.grab.ent) > 1) ? +Math.max(0, e.grab.grip).toFixed(2) : -1, // two on a coffin: nothing to lose
       })),
       ev,
     };

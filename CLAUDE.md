@@ -5,7 +5,7 @@ Read this before changing anything. It records the decisions the team has alread
 ## What this is
 **XIOMBARD: Night Shift** — a co-op ragdoll gravedigging game ("friendslop"). A truck delivers floppy corpses;
 players unload them, put each one in a coffin, dig a grave, drop the coffin in and fill it. Corpses slip out of
-your hands, coffins tip over, players can go limp and carry each other.
+your arms when you run, a coffin is too heavy for one, players can go limp and carry each other.
 The shift has two halves: a cheerful **day** (the truck delivers, the crew buries) and a **night** when zombies climb out of the ground,
 unburied bodies get up too, and the crew whacks them with shovels (a click with empty hands). At dawn visitors crumble; risen bodies lie down, still unburied.
 Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, crooked shapes, big heads, purple night,
@@ -45,8 +45,9 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - No host migration: if the host leaves, the game ends for guests.
 
 ## Physics gotchas (learned the hard way)
-- cannon-es constraint `maxForce` clamps **impulse per step**, not newtons. Multiply a force in newtons by `STEP` (see `CORPSE_GRIP_N`).
-- Carried things (and a held coffin's passenger) are masked out of the carrier's collision bit so they cannot wedge against the player.
+- cannon-es constraint `maxForce` clamps **impulse per step**, not newtons. Multiply a force in newtons by `STEP`.
+- **Carrying (decided).** Whatever a digger picks up jumps into the mittens in a quarter second and rides there: no rubber band, no dragging. `driveHeld` in `game.js` steers the held part by velocity toward `holdTarget` every step. A body lies across the arms and stays put at a walk; running, spinning and jumping make it slip. A coffin is a two-digger job: alone it is carried across the chest at half speed, the carrier staggers and the grip runs out (stand still to get it back); two diggers take an end each and walk in file (`TRAIN` keeps them a coffin apart), steady and at normal speed. Bots rest when their arms give out and take the other end of a coffin a human carries alone (`help` job in `bots.js`).
+- Carried things (and a held coffin's passenger) are masked out of the carrier's collision bit so they cannot wedge against the player; a carried body ignores the truck too, so it never snags on the bed walls.
   Each player owns one collision bit (`PLAYER_BITS`).
 - The coffin's inner width must stay wider than the widest belly `corpses.js` can generate (0.74 m today), or bodies cannot lie in it.
 - Assists are deliberate: a body dropped at an open coffin is laid inside; a coffin dropped by a dug grave is aligned and falls in.
