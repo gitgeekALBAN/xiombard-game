@@ -37,7 +37,8 @@ uniform vec3 uLightDir, uLightCol, uShadeCol, uRimDir, uRimCol, uInk;
 uniform float uLine, uGrain, uPix;
 uniform float uScale;   // rest units -> world meters (the matrices carry the same scale)
 uniform float uNoHead;  // 1 = leave out the head and hat (your own digger seen from inside its head)
-uniform float uFace;    // 0 = happy crew, 1 = zombie, 2 = zombie dog
+uniform float uFace;    // 0 = happy crew, 1 = zombie, 2 = zombie dog, 3 = dead
+uniform vec4 uTint;     // skin is mixed toward rgb by a (a body that got up goes green)
 #ifdef DOG
 uniform vec4 uDog;      // half body length, body radius, body height
 uniform vec4 uDogHead;  // head radius, snout length, snout radius
@@ -177,9 +178,11 @@ vec3 map(vec3 pw) {
   float ring = length(vec2(rr - uScarf.y, qs.y + 0.012 * sin(ang * 2.0 + 0.6))) - uScarf.z;
   ring = smin(ring, length(vec2(rr - uScarf.y * 1.06, qs.y + uScarf.z * 1.05 - 0.014 * sin(ang * 2.0 + 2.2))) - uScarf.z * 0.9, 0.012);
   ring = (ring + 0.0035 * sin(ang * 11.0 + qs.y * 45.0)) * zs;
-  float scarf = min(ring, tail(p0, belly, uTail.x, uScarf.w));
-  if (uTail.y < 5.0) scarf = min(scarf, tail(p0, belly, uTail.y, uScarf.w * 0.82));
-  take(res, scarf, 2.0);
+  if (uScarf.z > 0.0) { // a tube radius of 0 means no scarf
+    float scarf = min(ring, tail(p0, belly, uTail.x, uScarf.w));
+    if (uTail.y < 5.0) scarf = min(scarf, tail(p0, belly, uTail.y, uScarf.w * 0.82));
+    take(res, scarf, 2.0);
+  }
 
   take(res, min(mitten(p2), mitten(p3)), 5.0);
   take(res, min(leg(p4), leg(p5)), 6.0);
@@ -252,6 +255,15 @@ vec4 face(vec3 p1) {
   float s = uHead.y; vec2 f = p1.xy - vec2(0.0, uHead.x);
   if (p1.z < 0.0) return vec4(0.0);
   float lw = 0.03 * s, ink = 0.0;
+  if (uFace > 2.5) { // at rest: both eyes crossed out, a small flat mouth
+    for (int i = 0; i < 2; i++) {
+      vec2 q = f - vec2(i == 0 ? -0.4 : 0.4, 0.36) * s;
+      if (max(abs(q.x), abs(q.y)) < 0.17 * s) ink = max(ink, smoothstep(lw * 1.3, lw * 0.5, min(abs(q.x - q.y), abs(q.x + q.y)) * 0.707));
+    }
+    vec2 q = f - vec2(0.02, -0.3) * s;
+    if (abs(q.x) < 0.2 * s) ink = max(ink, smoothstep(lw * 1.3, lw * 0.5, abs(q.y - 0.03 * s * sin(q.x / s * 14.0))));
+    return vec4(0.0, ink, 0.0, 0.0);
+  }
   if (uFace > 0.5) {
     ink = deadEyes(f, s, lw * 1.1);
     vec2 q = f - vec2(0.0, -0.3) * s; // a stitched zigzag of a mouth
@@ -308,6 +320,7 @@ void main() {
     vec3 pl = id == 1 || id == 2 ? p0 : p1;
     col *= 0.93 + 0.14 * fbm(pl * 7.0);
     if (id == 1) {
+      col = mix(col, uTint.rgb, uTint.a);
       float a = atan(pl.x, pl.z);
       float dash = noise(vec3(a * 4.0, pl.y * 60.0, 3.0)) * smoothstep(0.45, 0.75, noise(vec3(a * 2.3, pl.y * 7.0, 7.0)));
       col *= 1.0 - 0.11 * smoothstep(0.5, 0.72, dash);
@@ -367,7 +380,7 @@ export class SdfCharacter {
       uniforms: {
         ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uDay: DAY, uScale: { value: opts.scale || 1 }, uNoHead: { value: 0 },
         uInv: { value: this.inv }, uProj: { value: camera.projectionMatrix }, uBoxC: { value: new THREE.Vector3() }, uBoxH: { value: this.half },
-        uFace: { value: k.face || 0 },
+        uFace: { value: k.face || 0 }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) },
         ...(g ? { uDog: { value: new THREE.Vector4(g.len, g.r, g.h, 0) }, uDogHead: { value: v4(g.head) }, uDogLeg: { value: v4(g.leg) },
           uDogEar: { value: v4(g.ear) }, uDogTail: { value: v4(g.tail) }, uDogPom: { value: v4(g.pom) } } : {}),
         uBean: { value: v4(k.bean) }, uHead: { value: new THREE.Vector3(...(k.head || [0, 1, 1])) },

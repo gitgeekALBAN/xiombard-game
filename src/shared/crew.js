@@ -109,7 +109,8 @@ export function humanRig(def, S, index = 0) {
   const hatTop = k.hat ? (k.hat[0] - k.head[0] + k.hat[3] + k.hat2[3] * 1.6) * S : r.head.r * S;
   const radius = [r.body.r[1] * S + 0.12, Math.max(hatTop, k.hat ? k.hat[1] * S : 0, r.head.r * S) + 0.06, armLen / 2 + k.arm[1] * S * 2.4,
     armLen / 2 + k.arm[1] * S * 2.4, Math.hypot(r.hip[1] * S / 2 + 0.04, k.leg[2] * S * 4.6) + 0.03, Math.hypot(r.hip[1] * S / 2 + 0.04, k.leg[2] * S * 4.6) + 0.03];
-  return { index, def, S, rest, pivot, shapes, joints, radius, hatTop, armLen, belly: k.bean[1] * S, hand: v3(r.hand, S) };
+  return { index, def, S, rest, pivot, shapes, joints, radius, hatTop, armLen, belly: k.bean[1] * S, hand: v3(r.hand, S),
+    height: (k.head[0] + k.head[1]) * S, back: k.bean[1] * k.head[2] * S };
 }
 
 const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matrix4(), _b = new THREE.Matrix4(), _r = new THREE.Matrix4();
@@ -155,6 +156,11 @@ export function crewPose(rig, root, s, out, off = 0) {
     set(R[5], -0.2, 0, 0);
     if (!s.carry) { R[2][2] = 0.9; R[3][2] = -0.9; }
   }
+  return rigPose(rig, root, R, out, off);
+}
+
+// Six euler rotations (body about the hips, head and arms on the body, legs on the root) -> 7 floats per part.
+export function rigPose(rig, root, R, out, off = 0) {
   about(_body, root, rig.pivot[0], R[0]);
   for (let i = 0; i < NCREW; i++) {
     const m = i === 0 ? _body : about(_m, i < 4 ? _body : root, rig.pivot[i], R[i]), o = off + i * 7;

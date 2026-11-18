@@ -1,7 +1,7 @@
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
-import { PARTS, NPARTS, P, fk, animRots, restRots, limpRots } from '../shared/skeleton.js';
-import { CREW, NCREW, crewRig, crewPose } from '../shared/crew.js';
+import { CREW, NCREW, crewRig, crewPose, rigPose } from '../shared/crew.js';
+import { corpseRig, limpRots, REST_ROTS, COFFIN_ROTS } from '../shared/corpses.js';
 import { ZOMBIES, ZTYPE, Z_WALKERS, Z_DRAGGER, Z_DOGS, zombieRig, zombiePose } from '../shared/zombies.js';
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
@@ -35,7 +35,7 @@ const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it 
 const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
 
 const v3 = (a) => new CANNON.Vec3(a[0], a[1], a[2]);
-const PARTS_OF = { digger: NCREW, zombie: NCREW, corpse: NPARTS, coffin: 1, truck: 1 };
+const PARTS_OF = { digger: NCREW, zombie: NCREW, corpse: NCREW, coffin: 1, truck: 1 };
 
 export class Sim {
   // opts: { dayLen, nightLen } in seconds (for tests and tuning)
@@ -73,7 +73,6 @@ export class Sim {
     this.rand = rng(Date.now() & 0xffff);
     this._ray = new CANNON.RaycastResult();
     this._pose = { speed: 0, phase: 0, t: 0, carry: null, dig: false, air: false, swing: 0, attack: 0 };
-    this._rots = restRots();
     this._root = new THREE.Matrix4();
 
     this.obstacles = staticBoxes().filter((b) => b.c[1] + b.h[1] > 0.2); // things a zombie must not spawn inside
@@ -131,39 +130,8 @@ export class Sim {
   }
   emit(type, data) { this.events.push({ type, ...data }); }
 
-  makeRagdoll(xf, mass) {
-    const bodies = [], constraints = [];
-    for (let i = 0; i < NPARTS; i++) {
-      const part = PARTS[i], o = i * 7;
-      const b = new CANNON.Body({
-        mass: part.mass * mass, material: this.mProp, linearDamping: 0.08, angularDamping: 0.35,
-        collisionFilterGroup: G_PROP, collisionFilterMask: ALL,
-      });
-      b.addShape(part.r ? new CANNON.Sphere(part.r) : new CANNON.Box(new CANNON.Vec3(part.size[0] / 2, part.size[1] / 2, part.size[2] / 2)));
-      b.position.set(xf[o], xf[o + 1], xf[o + 2]);
-      b.quaternion.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]);
-      b.sleepSpeedLimit = 0.25;
-      b.sleepTimeLimit = 1.2;
-      b.partIndex = i;
-      b.grabR = part.r ? 0.25 : 0.12;
-      this.world.addBody(b);
-      bodies.push(b);
-    }
-    for (let i = 1; i < NPARTS; i++) {
-      const part = PARTS[i], par = PARTS[part.parent];
-      const axis = part.up ? new CANNON.Vec3(0, 1, 0) : new CANNON.Vec3(0, -1, 0);
-      const c = new CANNON.ConeTwistConstraint(bodies[part.parent], bodies[i], {
-        pivotA: new CANNON.Vec3(part.j[0] - par.c[0], part.j[1] - par.c[1], part.j[2] - par.c[2]),
-        pivotB: new CANNON.Vec3(part.j[0] - part.c[0], part.j[1] - part.c[1], part.j[2] - part.c[2]),
-        axisA: axis, axisB: axis.clone(), angle: part.cone, twistAngle: 0.45, collideConnected: false,
-      });
-      this.world.addConstraint(c);
-      constraints.push(c);
-    }
-    return { bodies, constraints };
-  }
-
-  // A digger gone limp: six bodies hanging off the belly by five cone joints (sizes come from the crew sheet).
+  // A limp character (a body, a digger gone limp, a zombie knocked down): six bodies hanging off the belly by five
+  // cone joints. Sizes come from the rig, so every character has a ragdoll of its own shape.
   makeCrewRagdoll(rig, xf, mass) {
     const bodies = [], constraints = [], up = new CANNON.Vec3(0, 1, 0);
     for (let i = 0; i < NCREW; i++) {
@@ -198,8 +166,8 @@ export class Sim {
   }
 
   spawnCorpse(root, rots, seed) {
-    const xf = fk(root, rots, new Float32Array(NPARTS * 7));
-    const { bodies, constraints } = this.makeRagdoll(xf, CORPSE_MASS);
+    const rig = corpseRig(seed), xf = rigPose(rig, root, rots, new Float32Array(NCREW * 7));
+    const { bodies, constraints } = this.makeCrewRagdoll(rig, xf, CORPSE_MASS);
     const e = this.addEnt({ kind: 'corpse', seed, bodies, constraints, name: corpseName(seed), slip: 0.8 + rng(seed)() * 0.7 });
     for (const b of bodies) b.ent = e;
     return e;
@@ -414,16 +382,12 @@ export class Sim {
       if (e.kind !== 'coffin' || this.coffinUp(e) < 0.7 || this.coffinContents(e)) continue;
       e.body.pointToLocalFrame(hand, loc);
       if (Math.abs(loc.x) > COFFIN.hx + 0.6 || Math.abs(loc.z) > COFFIN.hz + 0.6 || loc.y > 2 || loc.y < -0.5) continue;
-      const c = e.body.position, q = e.body.quaternion;
+      const c = e.body.position, q = e.body.quaternion, rig = corpseRig(corpse.seed);
       const m = new THREE.Matrix4().compose(new THREE.Vector3(c.x, c.y, c.z), new THREE.Quaternion(q.x, q.y, q.z, q.w), new THREE.Vector3(1, 1, 1))
-        .multiply(new THREE.Matrix4().makeTranslation(0, -COFFIN.hy + 0.36, -COFFIN.hz + 0.2))
+        .multiply(new THREE.Matrix4().makeTranslation(0, -COFFIN.hy + 0.12 + rig.back, -rig.height / 2)) // on its back, centered
         .multiply(new THREE.Matrix4().makeRotationY(Math.PI))
         .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
-      const rots = restRots();
-      rots[P.thighL][0] = rots[P.thighR][0] = -0.4; rots[P.shinL][0] = rots[P.shinR][0] = 0.8;
-      rots[P.uarmL][0] = rots[P.uarmR][0] = -0.3; rots[P.uarmL][2] = -0.2; rots[P.uarmR][2] = 0.2;
-      rots[P.farmL][0] = rots[P.farmR][0] = -1.2;
-      const xf = fk(m, rots, new Float32Array(NPARTS * 7));
+      const xf = rigPose(rig, m, COFFIN_ROTS, new Float32Array(NCREW * 7));
       corpse.bodies.forEach((b, i) => {
         const o = i * 7;
         b.position.set(xf[o], xf[o + 1], xf[o + 2]);
@@ -457,12 +421,8 @@ export class Sim {
     const b = coffin.body, loc = new CANNON.Vec3();
     for (const e of this.ents) {
       if (e.kind !== 'corpse' || (e.z && e.z.mode !== 'down')) continue;
-      let inside = true;
-      for (const i of [P.pelvis, P.chest]) {
-        b.pointToLocalFrame(e.bodies[i].position, loc);
-        if (Math.abs(loc.x) > COFFIN.hx || Math.abs(loc.z) > COFFIN.hz || loc.y < -COFFIN.hy - 0.05 || loc.y > COFFIN.hy + 0.35) { inside = false; break; }
-      }
-      if (inside) return e;
+      b.pointToLocalFrame(e.bodies[0].position, loc); // the belly is in the box: that body is in the coffin
+      if (Math.abs(loc.x) < COFFIN.hx && Math.abs(loc.z) < COFFIN.hz && loc.y > -COFFIN.hy - 0.05 && loc.y < COFFIN.hy + 0.45) return e;
     }
     return null;
   }
@@ -628,7 +588,7 @@ export class Sim {
   riseCorpse(e) {
     if (e.z || e.rested === this.nightN) return;
     this.releaseGrabsOn(new Set(e.bodies));
-    const q = e.bodies[P.pelvis].position;
+    const q = e.bodies[0].position;
     this.ghost(e, true);
     e.z = this.makeWalker(q.x, Math.max(q.y - 0.12, -PLOT_MAX_DEPTH - 0.1), q.z, RISEN);
     this.emit('sfx', { name: 'groan', pos: [q.x, 0.5, q.z] });
@@ -650,15 +610,11 @@ export class Sim {
     s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z);
     return zombiePose(zombieRig(e.look), this.walkerRoot(e), s, out);
   }
-  // a risen body: the old walk cycle with both arms out, written straight into its ghost bodies
+  // a risen body walks like any zombie; the pose is written straight into its ghost bodies
   poseRisen(e) {
-    const z = e.z, r = this._rots, a = this.attackOf(z);
-    animRots({ speed: z.speed * 1.6, phase: z.phase, t: this.time + e.id, carry: 'corpse', dig: false, air: false }, r);
-    const wind = a ? Math.sin(Math.min(a / 0.55, 1) * Math.PI * 0.5) : 0, slam = a > 0.55 ? Math.min((a - 0.55) / 0.2, 1) : 0;
-    r[P.uarmL][0] = r[P.uarmR][0] = -1.35 - wind * 1.1 + slam * 1.3;
-    r[P.head][2] = 0.4; r[P.head][0] = 0.15;
-    r[P.chest][0] += 0.14 + slam * 0.3; r[P.chest][2] = Math.sin(z.phase) * 0.1;
-    const xf = fk(this.walkerRoot(e), r, e.xf);
+    const z = e.z, s = this._pose;
+    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z);
+    const xf = zombiePose(corpseRig(e.seed), this.walkerRoot(e), s, e.xf);
     e.bodies.forEach((b, i) => {
       const o = i * 7;
       b.position.set(xf[o], xf[o + 1], xf[o + 2]);
@@ -794,7 +750,7 @@ export class Sim {
     plot.buried = false;
     this.score = Math.max(0, this.score - 1);
     const m = new THREE.Matrix4().makeTranslation(plot.x, 0.35, plot.z - 0.9).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
-    const e = this.spawnCorpse(m, restRots(), plot.seed);
+    const e = this.spawnCorpse(m, REST_ROTS, plot.seed);
     e.greeted = true;
     this.emit('toast', { text: `${plot.name} is back!`, pos: [plot.x, 2, plot.z], big: true });
     this.riseCorpse(e);
@@ -959,7 +915,7 @@ export class Sim {
     if (g.ent.kind !== 'corpse') return;
     // Corpses are slippery: running, spinning and jumping make them slide out of your hands.
     const part = g.body.partIndex;
-    const partSlip = part === P.chest || part === P.pelvis ? 0.6 : part === P.farmL || part === P.farmR || part === P.shinL || part === P.shinR ? 1.5 : 1;
+    const partSlip = part === 0 ? 0.6 : part === 1 ? 1 : 1.4; // the belly is a good hold, a mitten or a boot is not
     let drain = 0.09 + (p.input.run && p.speed > 3 ? 0.45 : 0) + Math.min(p.turn, 8) * 0.04 + (!p.grounded ? 0.4 : 0);
     if (this.rand() < h * 0.18) drain += (0.45 / h) * this.rand(); // random butterfingers
     g.grip -= drain * h * g.ent.slip * partSlip;
@@ -993,7 +949,7 @@ export class Sim {
         const pos = e.rag ? e.rag.bodies[0].position : e.z.body.position;
         if (pos.y < -8 || Math.abs(pos.x) > 45 || Math.abs(pos.z) > 45) this.removeEnt(e);
       } else if (e.kind === 'corpse' || e.kind === 'coffin') {
-        const pos = e.kind === 'corpse' ? e.bodies[P.pelvis].position : e.body.position;
+        const pos = e.kind === 'corpse' ? e.bodies[0].position : e.body.position;
         if (pos.y < -8 || Math.abs(pos.x) > 45 || Math.abs(pos.z) > 45) {
           this.emit('toast', { text: e.kind === 'corpse' ? `${e.name} got away...` : 'A coffin got away', pos: [0, 3, ROAD_Z] });
           this.removeEnt(e);
@@ -1039,7 +995,7 @@ export class Sim {
   corpsesInBed() {
     const tb = this.truck.body.position;
     return this.ents.filter((e) => e.kind === 'corpse' && !e.z).filter((e) => {
-      const q = e.bodies[P.pelvis].position;
+      const q = e.bodies[0].position;
       const lx = q.x - tb.x, lz = q.z - tb.z;
       return lx > TRUCK.bed.x0 - 0.2 && lx < TRUCK.bed.x1 + 0.3 && Math.abs(lz) < 1.1 && q.y > 0.6;
     });
@@ -1127,6 +1083,7 @@ export class Sim {
       // night flag, seconds left in this half, day number, light (1 day .. 0 night), zombies on their feet
       phase: [this.phase === 'night' ? 1 : 0, Math.ceil((this.phase === 'day' ? this.dayLen : this.nightLen) - this.phaseT), this.dayN, +this.light().toFixed(3),
         this.ents.filter((e) => e.z).length],
+      risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging || this.swinging(e),
         grip: e.grab && !e.grab.coffin ? +e.grab.grip.toFixed(2) : -1,

@@ -2,12 +2,13 @@ import * as THREE from 'three';
 import { SdfCharacter } from '../sdf/shader.js';
 import { CP, NCREW } from '../shared/crew.js';
 import { INK, keyLight } from '../shaders/toon.js';
-import { buildShovel } from './models/characters.js';
+import { buildShovel } from './models/shovel.js';
 import { isTouchDevice } from '../touch.js';
 
-// One shader character in the game (a digger of the crew, or a zombie): six empty groups that follow the snapshot
+// One shader character in the game (a digger of the crew, a zombie, or a body waiting to be buried): six empty groups that follow the snapshot
 // transforms (camera, labels and the shovel hang off them) and one raymarched SDF character drawn from those frames.
-// rig comes from crewRig() or zombieRig(); opts.shovel puts a shovel in the right mitten.
+// rig comes from crewRig(), zombieRig() or corpseRig(); opts.shovel puts a shovel in the right mitten,
+// opts.lite uses the cheaper march (bodies lie in piles, and there are many of them).
 const RIM_DIR = new THREE.Vector3(0.6, 0.3, 0.75).normalize(); // opposite the moon, so the shadow side keeps an edge
 const _lo = new THREE.Vector3(), _hi = new THREE.Vector3(), _c = new THREE.Vector3(), _h = new THREE.Vector3();
 const _t = new THREE.Matrix4();
@@ -15,7 +16,7 @@ const _t = new THREE.Matrix4();
 export function buildCrew(rig, camera, opts = {}) {
   const S = rig.S;
   const groups = Array.from({ length: NCREW }, () => new THREE.Group());
-  const sdf = new SdfCharacter(rig.def, camera, { scale: S, fog: true, lanterns: true, lite: isTouchDevice() });
+  const sdf = new SdfCharacter(rig.def, camera, { scale: S, fog: true, lanterns: true, lite: isTouchDevice() || !!opts.lite });
   const u = sdf.material.uniforms;
   // the key light (moon, low sun or high sun) is copied from the toon shader every frame, so the crew sits in the scene
   u.uRimDir.value.copy(RIM_DIR);
@@ -56,5 +57,11 @@ export function buildCrew(rig, camera, opts = {}) {
     u.uPix.value = pix;
     u.uNoHead.value = noHead ? 1 : 0;
   }
-  return { groups, mesh: sdf.mesh, rig, update };
+  // a body that got up at night wears a zombie's face and goes green until it lies down again
+  const face = rig.def.look.face || 0;
+  function setRisen(on) {
+    u.uFace.value = on ? 1 : face;
+    u.uTint.value.set(0.27, 0.52, 0.22, on ? 0.82 : 0);
+  }
+  return { groups, mesh: sdf.mesh, rig, update, setRisen };
 }

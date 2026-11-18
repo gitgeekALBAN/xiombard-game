@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { createSky } from '../shaders/sky.js';
-import { buildCharacter, buildCoffin, buildTruck } from './models.js';
+import { buildCoffin, buildTruck } from './models.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
 import { PLOTS, PLOT_HALF } from '../shared/layout.js';
 import { CP, crewRig } from '../shared/crew.js';
 import { zombieRig } from '../shared/zombies.js';
+import { corpseRig } from '../shared/corpses.js';
 import { buildCrew } from './crew.js';
 import { sfx } from '../audio.js';
 import { isTouchDevice } from '../touch.js';
@@ -161,9 +162,10 @@ export class View {
     this.order = list.map((d) => {
       let e = this.ents.get(d.id);
       if (!e) {
-        // diggers and zombies are shader characters (six frames + one raymarched SDF), everything else is built from meshes
-        const crew = d.kind === 'digger' ? buildCrew(crewRig(d.look), this.camera, { shovel: true }) : d.kind === 'zombie' ? buildCrew(zombieRig(d.look), this.camera) : null;
-        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed) : d.kind === 'truck' ? buildTruck() : buildCharacter(d.kind, d.seed, d.color);
+        // every character is a shader character (six frames + one raymarched SDF); coffins and the truck are meshes
+        const crew = d.kind === 'digger' ? buildCrew(crewRig(d.look), this.camera, { shovel: true }) : d.kind === 'zombie' ? buildCrew(zombieRig(d.look), this.camera)
+          : d.kind === 'corpse' ? buildCrew(corpseRig(d.seed), this.camera, { lite: true }) : null;
+        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed) : buildTruck();
         const root = new THREE.Group();
         for (const g of groups) root.add(g);
         if (crew) root.add(crew.mesh);
@@ -209,8 +211,9 @@ export class View {
       this.graves.setPlot(i, d, f, b, seed, name, this.time);
       this.groundMat.uniforms.uPlotState.value[i] = b;
     });
-    const pl = new Map(st.players.map((p) => [p.id, p]));
+    const pl = new Map(st.players.map((p) => [p.id, p])), risen = new Set(st.risen || []);
     for (const e of this.order) {
+      if (e.kind === 'corpse') { const up = risen.has(e.id); if (up !== e.up) { e.up = up; e.crew.setRisen(up); } }
       if (e.kind === 'digger') {
         const p = pl.get(e.id);
         const sh = e.groups[CP.armR].userData.shovel;

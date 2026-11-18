@@ -27,9 +27,9 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/net.js` — PeerJS rooms: 4-letter code → peer id `xiombard-gy-<CODE>`.
 - `src/sim/game.js` — **host-only** simulation: cannon-es world, ragdolls, grabbing/grip, digging, truck, scoring.
 - `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
-- `src/view/models.js` — every mesh model built from primitives in code (corpses, coffins, truck, headstones, trees).
-- `src/view/crew.js` + `src/sdf/shader.js` — the diggers: each one is a signed distance function raymarched in a box (no mesh, no texture).
-- `src/shared/` — data both sides need: `skeleton.js` (corpse part list + FK), `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs — same six parts, same shader), `layout.js` (level, colliders, decor), `rng.js`.
+- `src/view/models.js` — every mesh model built from primitives in code (coffins, truck, headstones, trees, the shovel).
+- `src/view/crew.js` + `src/sdf/shader.js` — **every character** (diggers, zombies, dogs, the dead): each one is a signed distance function raymarched in a box (no mesh, no texture), so they all share one style.
+- `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs — same six parts, same shader), `layout.js` (level, colliders, decor), `rng.js`.
 - `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `sky.js`, `ground.js`, `noise.glsl.js`.
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
 - `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard.
@@ -39,7 +39,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - **Host-authoritative P2P.** The host's browser runs `Sim`; guests only send input (30 Hz) and render snapshots (20 Hz).
 - Messages: guest→host `hello`, `in` (move, yaw, held buttons, and *counters* for one-shot actions: grab/throw/flop).
   Host→guest `welcome`, `ents` (entity list, sent when `sim.version` changes), `snap` (Float32Array of part transforms + small JSON state + events).
-- Every entity is "N parts × (pos, quat)": corpse 11 (see `PARTS`), digger and zombie 6 (see `CP` in `shared/crew.js`), coffin 1, truck 1. **Never reorder `PARTS`, `CP` or the `ZOMBIES` list** — they are the wire format.
+- Every entity is "N parts × (pos, quat)": every character 6 (see `CP` in `shared/crew.js`), coffin 1, truck 1. **Never reorder `CP` or the `ZOMBIES` list** — they are the wire format. A body's look comes from its seed alone (`corpseRig(seed)`), so changing the generator changes every body for host and guests alike.
 - Signaling: free PeerJS cloud broker. Some strict NATs need a TURN server (not set up yet). Local testing: run a PeerJS server on
   port 9000 and open `?peerhost=127.0.0.1&peerport=9000`.
 - No host migration: if the host leaves, the game ends for guests.
@@ -48,7 +48,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - cannon-es constraint `maxForce` clamps **impulse per step**, not newtons. Multiply a force in newtons by `STEP` (see `CORPSE_GRIP_N`).
 - Carried things (and a held coffin's passenger) are masked out of the carrier's collision bit so they cannot wedge against the player.
   Each player owns one collision bit (`PLAYER_BITS`).
-- The coffin's inner width must stay wider than the skeleton's shoulders, or bodies cannot lie in it.
+- The coffin's inner width must stay wider than the widest belly `corpses.js` can generate (0.74 m today), or bodies cannot lie in it.
 - Assists are deliberate: a body dropped at an open coffin is laid inside; a coffin dropped by a dug grave is aligned and falls in.
 - `afterStep` clamps prop speeds as a safety net against solver blow-ups.
 - Anything on its feet at night has a walker in `e.z` (a steered capsule + a pose). A risen corpse keeps its ragdoll bodies as kinematic ghosts that follow the pose, so `e.bodies[...]` stays valid everywhere; a whack turns them dynamic again.

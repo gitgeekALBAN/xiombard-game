@@ -26,7 +26,6 @@
 // Personality: per-bot pace, turn speed and hesitation, plus flops when bored, after a burial or wearing a coffin.
 // The optional second argument is for tests: createBots(sim, { log: (msg) => ..., inspect: {} }).
 import { PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, ROAD_Z, PILE, DECOR, LANTERNS, plotAt } from '../shared/layout.js';
-import { P } from '../shared/skeleton.js';
 import { rng } from '../shared/rng.js';
 
 const PLAN_DT = 0.3;                 // seconds between decisions (jittered per bot)
@@ -136,7 +135,7 @@ export function createBots(sim, opts = {}) {
     const holeBody = new Set(); // plots with a loose corpse lying down in the hole (a coffin dropped on it would tip)
     for (const k of corpses) {
       if (boxedIn.has(k)) continue;
-      for (const i of [P.pelvis, P.chest]) { const q = k.bodies[i].position; if (q.y < -0.1) { const pi = plotAt(q.x, q.z, 0.05); if (pi >= 0) holeBody.add(pi); } }
+      { const q = k.bodies[0].position; if (q.y < -0.1) { const pi = plotAt(q.x, q.z, 0.05); if (pi >= 0) holeBody.add(pi); } }
     }
     const obst = STATIC.slice();
     const tr = sim.truck, tx = tr.body.position.x;
@@ -294,8 +293,8 @@ export function createBots(sim, opts = {}) {
       if (g && g.ent !== ent && t.kind === 'load' && g.ent.kind === 'corpse' && T - t.st0 > 1.5 && swapCorpse(b, p, t, g.ent)) ent = g.ent; // any loose body in reach will do
       if (g && g.ent === ent) {
         // a torso grip lasts longest; take a limb only after fumbling for a moment
-        const part = g.body.partIndex, torso = part === P.chest || part === P.pelvis;
-        const limb = part === P.farmL || part === P.farmR || part === P.shinL || part === P.shinR;
+        const part = g.body.partIndex, torso = part === 0; // six parts: belly, head, arms, legs
+        const limb = part >= 2;
         t.pickT = (t.pickT || 0) + dt;
         if (torso || t.pickT > (limb ? 2.2 : 1.0)) {
           if (toggle(b, 'g')) { b.pauseT = T + 0.1 + b.r() * b.persona.hesitate * 0.6; t.pickT = 0; }
@@ -327,7 +326,7 @@ export function createBots(sim, opts = {}) {
     claims.delete('e' + t.corpse.id); b.claims.delete('e' + t.corpse.id);
     claim(b, 'e' + k.id);
     t.keys = ['e' + k.id, 'L' + t.coffin.id];
-    t.corpse = k; t.hole = holePlotOf(k.bodies[P.pelvis].position);
+    t.corpse = k; t.hole = holePlotOf(k.bodies[0].position);
     return true;
   }
   function swapCoffin(b, p, t, c) {
@@ -438,7 +437,7 @@ export function createBots(sim, opts = {}) {
   function corpseOnMovingTruck(k) {
     const tr = sim.truck;
     if (tr.state === 'wait') return false;
-    const q = k.bodies[P.pelvis].position, tb = tr.body.position;
+    const q = k.bodies[0].position, tb = tr.body.position;
     return q.y > 0.6 && Math.abs(q.z - tb.z) < 1.3 && q.x > tb.x + TRUCK_X0 - 0.3 && q.x < tb.x + TRUCK_X1 + 0.3;
   }
   function holePlotOf(q) {
@@ -496,7 +495,7 @@ export function createBots(sim, opts = {}) {
   }
   function plotCovered(pl, w) {
     const near = (q, m) => Math.abs(q.x - pl.x) < PLOT_HALF.x + m && Math.abs(q.z - pl.z) < PLOT_HALF.z + m && q.y > -0.3 && q.y < 2;
-    for (const k of w.corpses) if (near(k.bodies[P.pelvis].position, 0.2) || near(k.bodies[P.chest].position, 0.2)) return true;
+    for (const k of w.corpses) if (near(k.bodies[0].position, 0.2) || near(k.bodies[0].position, 0.2)) return true;
     for (const c of w.coffins) if (!w.inPlot.has(c) && c.body.position.y > -0.3 && overlapsPlot(coffinBox(c), pl, 0.25)) return true;
     for (const d of w.diggers) if (!d.rag && near(d.body.position, -0.1)) return true;
     return false;
@@ -515,7 +514,7 @@ export function createBots(sim, opts = {}) {
     }
     // bookkeeping for the supply chain: loose corpses need coffins, coffins need graves
     let loose = 0, full = 0, ready = 0, digging = 0, graveBoxes = 0, emptyRuns = 0;
-    for (const k of w.corpses) if (!w.boxedIn.has(k) && inYard(k.bodies[P.pelvis].position)) loose++;
+    for (const k of w.corpses) if (!w.boxedIn.has(k) && inYard(k.bodies[0].position)) loose++;
     for (const c of w.coffins) {
       const pl = w.inPlot.get(c);
       if (pl) { if (!w.contents.get(c) && w.up.get(c) > 0.72) graveBoxes++; } else if (w.contents.get(c) && w.up.get(c) > 0.5) full++;
@@ -553,9 +552,9 @@ export function createBots(sim, opts = {}) {
       const tr = sim.truck, late = tr.state === 'wait' && sim.time - tr.t > 55;
       for (const k of w.corpses) {
         if (w.boxedIn.has(k) || heldByOthers(w, p, k) || !isFree(b, 'e' + k.id) || banned(b, 'e' + k.id)) continue;
-        const q = k.bodies[P.chest].position;
+        const q = k.bodies[0].position;
         if (!inYard(q) || corpseOnMovingTruck(k)) continue;
-        const hole = holePlotOf(k.bodies[P.pelvis].position);
+        const hole = holePlotOf(k.bodies[0].position);
         let bc = null, bd = Infinity;
         if (hole >= 0 && w.plotCoffin.has(sim.plots[hole])) { // it missed the coffin in that grave: hop in and fix it
           bc = boxes.find((x) => x.c === w.plotCoffin.get(sim.plots[hole]));
@@ -691,7 +690,7 @@ export function createBots(sim, opts = {}) {
 
   // ---------- night: the shovel ----------
   // Where a foe is: the walker capsule while it stands, its belly while it lies (a downed body never has e.z.body in the world).
-  const foePos = (e) => (e.z && e.z.mode !== 'down' ? e.z.body.position : e.kind === 'corpse' ? e.bodies[P.pelvis].position : e.rag.bodies[0].position);
+  const foePos = (e) => (e.z && e.z.mode !== 'down' ? e.z.body.position : e.kind === 'corpse' ? e.bodies[0].position : e.rag.bodies[0].position);
   function zombieNear(w, q, r) {
     for (const e of w.walkers) { const z = e.z.body.position; if (hyp(z.x - q.x, z.z - q.z) < r) return true; }
     return false;
@@ -800,14 +799,14 @@ export function createBots(sim, opts = {}) {
       if (T - t.st0 > (t.dump ? 1.8 : 0.6)) {
         if (w.boxedIn.has(k) || w.contents.get(t.coffin) === k) return endTask(b, 'in the coffin', true);
         t.tries++; stage(b, 'go');
-        t.hole = holePlotOf(k.bodies[P.pelvis].position); // missed: maybe it is lying in the grave now
+        t.hole = holePlotOf(k.bodies[0].position); // missed: maybe it is lying in the grave now
       }
       return;
     }
     if (!mine) {
       if (t.stage === 'carry') { t.tries++; stage(b, 'go'); say(b, `dropped ${k.name}`); }
       if (t.tries > 6) return endTask(b, 'too slippery', false, 8);
-      const pt = k.bodies[P.chest].position;
+      const pt = k.bodies[0].position;
       return approachGrab(b, p, k, pt, t, dt, { ignorePlot: t.hole >= 0 ? t.hole : undefined });
     }
     if (t.stage !== 'carry') { stage(b, 'carry'); b.stats.grabs++; }

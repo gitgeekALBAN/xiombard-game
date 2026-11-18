@@ -21,7 +21,7 @@ export const LANTERNS = [
 ];
 
 // Coffin and truck dimensions (shared by physics and visuals).
-// inner width must exceed the skeleton's shoulder width (~0.76 m) or bodies cannot lie inside
+// inner width must exceed the widest belly corpses.js generates (0.74 m) or bodies cannot lie inside
 export const COFFIN = { hx: 0.5, hy: 0.25, hz: 1.12, wall: 0.05 };
 export const TRUCK = {
   // boxes in truck-local space (truck faces -X; the open bed is at +X)
