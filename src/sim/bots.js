@@ -43,6 +43,9 @@ const TRUCK_HZ = Math.max(...TRUCK.boxes.map((b) => Math.abs(b.c[2]) + b.h[2]));
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 const hyp = Math.hypot;
+// a risen body knocked down for good lies still and can be boxed; one with fight left in it gets up again in seconds
+const cargo = (e) => !e.z || (e.z.mode === 'down' && e.z.hp <= 0);
+const ZDOG = 2, ZDRAGGER = 1; // ZTYPE in shared/zombies.js
 const inYard = (q) => Math.abs(q.x) < YARD && Math.abs(q.z) < YARD;
 const stray = (q) => q.z > 17.5 || q.z < -7.5 || Math.abs(q.x) > 19; // a coffin that wandered off the work area
 function hashName(s) {
@@ -109,9 +112,10 @@ export function createBots(sim, opts = {}) {
   // ---------- world snapshot (at most once per frame) ----------
   function world() {
     if (W && Wt === T) return W;
-    const corpses = [], coffins = [], diggers = [];
+    const corpses = [], coffins = [], diggers = [], walkers = [], downZ = [];
     for (const e of sim.ents) {
-      if (e.kind === 'corpse') { if (!e.z) corpses.push(e); } // a body on its feet is a zombie, not cargo
+      if (e.z) { if (e.z.mode !== 'down') walkers.push(e); else if (e.z.hp > 0) downZ.push(e); } // on its feet, or getting up again soon
+      if (e.kind === 'corpse') { if (cargo(e)) corpses.push(e); } // a body on its feet is a zombie, not cargo
       else if (e.kind === 'coffin') coffins.push(e);
       else if (e.kind === 'digger') diggers.push(e);
     }
@@ -142,7 +146,7 @@ export function createBots(sim, opts = {}) {
     for (const pl of sim.plots) {
       if (pl.depth > 0.06) obst.push({ x0: pl.x - PLOT_HALF.x, x1: pl.x + PLOT_HALF.x, z0: pl.z - PLOT_HALF.z, z1: pl.z + PLOT_HALF.z, kind: 'hole', plot: pl.i });
     }
-    W = { corpses, coffins, diggers, held, up, contents, boxedIn, inPlot, plotCoffin, holeBody, obst, danger };
+    W = { corpses, coffins, diggers, walkers, downZ, held, up, contents, boxedIn, inPlot, plotCoffin, holeBody, obst, danger };
     Wt = T;
     return W;
   }
@@ -612,7 +616,7 @@ export function createBots(sim, opts = {}) {
     b.stats[ok ? 'done' : 'fail']++;
   }
   function stage(b, s) { b.task.stage = s; b.task.st0 = T; b.hist.length = 0; b.stallN = 0; b.path = null; }
-  const desc = (t) => t.kind + (t.staging ? ' (park)' : '') + (t.empty ? ' (empty)' : '') + (t.corpse ? ` ${t.corpse.name}` : '') + (t.coffin ? ` coffin#${t.coffin.id}` : '') + (t.plot ? ` plot${t.plot.i}` : '') + (t.dump ? ' (into grave)' : '') + (t.inPlot !== undefined ? ' (in grave)' : '') + (t.hole >= 0 ? ' (from hole)' : '');
+  const desc = (t) => (t.foe ? `fight ${t.foe.name || (t.foe.z ? t.foe.z.def.name : 'zombie')}#${t.foe.id}` : t.kind) + (t.staging ? ' (park)' : '') + (t.empty ? ' (empty)' : '') + (t.corpse ? ` ${t.corpse.name}` : '') + (t.coffin ? ` coffin#${t.coffin.id}` : '') + (t.plot ? ` plot${t.plot.i}` : '') + (t.dump ? ' (into grave)' : '') + (t.inPlot !== undefined ? ' (in grave)' : '') + (t.hole >= 0 ? ' (from hole)' : '');
   const alive = (e) => e && sim.ents.includes(e);
 
   // Is the current job still worth doing? (also detects success)
@@ -620,9 +624,25 @@ export function createBots(sim, opts = {}) {
     const t = b.task, age = T - t.st0;
     switch (t.kind) {
       case 'idle': return true;
+      case 'fight': {
+        const e = t.foe;
+        if (!alive(e) || !e.z) return endTask(b, 'gone', true, 0), false;
+        if (e.z.mode === 'down') {
+          if (e.z.hp <= 0) return endTask(b, 'down for good', true, 0), false;
+          t.downT = (t.downT || 0) + PLAN_DT;
+          if (t.downT > 5) return endTask(b, 'stays down', true, 0), false;
+          return true;
+        }
+        t.downT = 0;
+        const q = e.z.body.position;
+        if (!inYard(q) || hyp(q.x - p.body.position.x, q.z - p.body.position.z) > 32) return endTask(b, 'out of reach', false, 6), false;
+        if (age > 14) return endTask(b, 'cannot catch it', false, 8), false;
+        return true;
+      }
       case 'load': {
         const k = t.corpse;
         if (!alive(k)) return endTask(b, 'gone', false, 0), false;
+        if (!cargo(k)) return endTask(b, 'it got up', false, 0), false;
         if (w.boxedIn.has(k) && !(p.grab && p.grab.ent === k)) return endTask(b, 'boxed', t.stage === 'verify'), false;
         if (heldByOthers(w, p, k)) return endTask(b, 'taken', false, 4), false;
         if (corpseOnMovingTruck(k) && !(p.grab && p.grab.ent === k)) return endTask(b, 'truck left', false, 0), false;
@@ -664,8 +684,97 @@ export function createBots(sim, opts = {}) {
     return false;
   }
 
+  // ---------- night: the shovel ----------
+  // Where a foe is: the walker capsule while it stands, its belly while it lies (a downed body never has e.z.body in the world).
+  const foePos = (e) => (e.z && e.z.mode !== 'down' ? e.z.body.position : e.kind === 'corpse' ? e.bodies[P.pelvis].position : e.rag.bodies[0].position);
+  function zombieNear(w, q, r) {
+    for (const e of w.walkers) { const z = e.z.body.position; if (hyp(z.x - q.x, z.z - q.z) < r) return true; }
+    return false;
+  }
+  // How badly this zombie needs a shovel from me (higher is more urgent; -Infinity: leave it). Priorities:
+  // after me > scratching at a grave > a dog > chasing a teammate or heading for a grave > just close by.
+  // Teammates already on it make it less attractive, so several zombies get spread over the crew.
+  function threatScore(b, p, w, e) {
+    const z = e.z, q = z.body.position, me = p.body.position;
+    if (!inYard(q)) return -Infinity;
+    const d = hyp(q.x - me.x, q.z - me.z), tg = z.target;
+    let s;
+    if (tg && tg.p === p && d < 14) s = 300;
+    else if (tg && tg.plot) {
+      const dp = hyp(tg.plot.x - q.x, tg.plot.z - q.z);
+      if (z.digT > 0.2 || dp < 2) s = 220;
+      else if (dp < 10 || d < 9) s = 125;
+      else return -Infinity;
+    } else if (z.def.type === ZDOG && d < 14) s = 175;
+    else if (tg && tg.p && d < 13 && hyp(tg.p.body.position.x - q.x, tg.p.body.position.z - q.z) < 8) s = 150;
+    else if (d < 8) s = 110;
+    else return -Infinity;
+    if (z.def.type === ZDOG) s += 25;
+    s -= 4 * d;
+    if (!(tg && tg.p === p)) {
+      let n = 0;
+      for (const o of bots.values()) if (o !== b && o.task && o.task.kind === 'fight' && o.task.foe === e) n++;
+      if (n >= (z.def.type === ZDRAGGER ? 2 : 1) + (z.digT > 2 ? 1 : 0)) return -Infinity;
+      s -= 75 * n;
+    }
+    if (p.grab) s -= p.grab.coffin ? 35 : 20; // busy hands: only worth it when it matters
+    if (banned(b, 'z' + e.id)) s -= 150;
+    return s;
+  }
+  function pickThreat(b, p, w) {
+    let best = null, bs = 30;
+    for (const e of w.walkers) { const s = threatScore(b, p, w, e); if (s > bs) { bs = s; best = e; } }
+    return best && { e: best, s: bs };
+  }
+  function doFight(b, p, t, dt) {
+    const e = t.foe, z = e.z;
+    if (!z) return;
+    const pos = p.body.position, q = foePos(e), d = hyp(q.x - pos.x, q.z - pos.z);
+    if (p.grab) { // hands free first: a coffin is set down properly unless the thing is right here
+      if (p.grab.coffin && d > 5) dropSafely(b, p, dt); else toggle(b, 'g');
+      return;
+    }
+    const want = Math.atan2(q.x - pos.x, q.z - pos.z), fr = b.persona.turn * 1.7;
+    if (z.mode === 'down') { // it will get up again: wait beside it, shovel ready
+      if (d > 2.4) go(b, p, q.x, q.z, { arrive: 1.6, slow: 1, run: d > 5 }, dt);
+      else { turn(b, want, fr, dt); b.inp.mz = d < 1.2 ? -0.4 : 0; }
+      return;
+    }
+    const type = z.def.type;
+    const stand = (type === ZDRAGGER ? 1.85 : type === ZDOG ? 1.2 : 1.5) + t.jit;
+    if (d > 3.5) { // run over there along a path; the goal only follows the zombie in steps (each move replans)
+      if (t.gx === undefined || hyp(q.x - t.gx, q.z - t.gz) > 1.2) { t.gx = q.x; t.gz = q.z; }
+      go(b, p, t.gx, t.gz, { arrive: 1.0, slow: 0.5, run: true }, dt);
+    } else {
+      turn(b, want, fr, dt);
+      const err = Math.abs(angDiff(want, b.yaw));
+      if (d > stand) { b.inp.mz = clamp((d - stand) * 1.5, 0.4, 1) * b.persona.speed * (err < 1 ? 1 : 0.3); b.inp.run = d > 2.6 && err < 0.4; b.wantMove = d > stand + 0.4; }
+      else if (t.careful && d < stand - 0.4) b.inp.mz = -0.5; // the cautious ones step back
+    }
+    // swing when the blow will land on it: whackable now, or about to be (where it will be when the shovel comes down)
+    if (sim.time - p.swingT < 0.6 || d > 3.2) { t.swingAt = 0; return; }
+    const v = z.body.velocity, px = q.x + v.x * 0.16 - pos.x, pz = q.z + v.z * 0.16 - pos.z, pd = hyp(px, pz);
+    const facing = pd < 0.6 || (px * Math.sin(b.yaw) + pz * Math.cos(b.yaw)) / pd > 0.45;
+    const now = sim.whackable(p).length > 0;
+    let go2 = now || (pd < 2.05 && facing && z.mode !== 'rise');
+    if (!go2 && t.whiff && d < 2.9 && facing) { go2 = true; t.whiff = false; } // too eager: swings at the air
+    if (!go2) { t.swingAt = 0; return; }
+    if (!t.swingAt) t.swingAt = T + 0.04 + b.r() * (0.08 + b.persona.hesitate * 0.3);
+    if (T < t.swingAt) return;
+    if (!now && sim.findGrab(p)) return; // the click would grab whatever is lying here instead of swinging
+    if (toggle(b, 'g')) { t.swingAt = 0; t.swings++; b.stats.swings++; t.st0 = T; }
+  }
+
   function plan(b, p) {
     const w = world();
+    if (w.walkers.length) { // something is up and about: does it need a shovel more than the job needs me?
+      const th = pickThreat(b, p, w), cur = b.task && b.task.kind === 'fight' ? b.task : null;
+      if (th && (!cur || (th.e !== cur.foe && th.s > (cur.foe.z && cur.foe.z.mode !== 'down' ? threatScore(b, p, w, cur.foe) : 60) + 40))) {
+        startTask(b, { kind: 'fight', foe: th.e, keys: ['z' + th.e.id], jit: (b.r() - 0.5) * 0.4, careful: b.r() < 0.5, whiff: b.r() < 0.1 + b.persona.hesitate * 0.2, swings: 0 });
+        b.pauseT = Math.min(b.pauseT, T + 0.1);
+        b.stats.fights++;
+      }
+    }
     if (b.task && b.task.kind !== 'idle') validate(b, p, w);
     if (b.task && b.task.kind !== 'idle') return;
     const t = choose(b, p, w);
@@ -880,14 +989,14 @@ export function createBots(sim, opts = {}) {
       t.next = T + 3 + b.r() * 4;
       t.look = b.r() * Math.PI * 2;
       t.n = (t.n || 0) + 1;
-      if (t.n > 2 && b.r() < b.persona.flop * 0.25) flop(b, p, 1.2 + b.r() * 1.5, 'bored');
+      if (t.n > 2 && b.r() < b.persona.flop * 0.25) flop(b, p, 1.2 + b.r() * 1.5, 'bored', true);
     }
     const r = go(b, p, t.spot.x, t.spot.z, { arrive: 0.4, slow: 1.2 }, dt);
     if (r < 0.4) { turn(b, t.look, 1.2, dt); b.wantMove = false; }
   }
 
-  function flop(b, p, dur, why) {
-    if (p.grab || p.rag || !toggle(b, 'fl')) return;
+  function flop(b, p, dur, why, show = false) {
+    if (p.grab || p.rag || (show && zombieNear(world(), p.body.position, 8)) || !toggle(b, 'fl')) return;
     b.flopUntil = T + dur;
     say(b, `flop (${why})`);
     b.stats.flops++;
@@ -955,9 +1064,12 @@ export function createBots(sim, opts = {}) {
     if (p.rag) {
       b.yaw = p.yaw;
       const lying = sim.time - p.ragT;
+      const w = world(), q = p.rag.bodies[0].position, threat = zombieNear(w, q, 12);
+      if (threat) b.flopUntil = 0; // no lounging about with company around
       if (sim.holders(p)) b.getUpAt = 0; // a friend is carrying me: enjoy the ride
-      else if (T > (b.flopUntil || 0) && lying > 0.7 && lying < 6.5) {
-        if (!b.getUpAt) b.getUpAt = T + 0.4 + b.r() * 1.2;
+      else if (T > (b.flopUntil || 0) && (sim.phase === 'night' || threat ? lying > 0.62 && p.rag.bodies[0].velocity.length() < 3.5 : lying > 0.7 && lying < 6.5)) {
+        // knocked over at night: back on your feet before it comes round for seconds
+        if (!b.getUpAt) b.getUpAt = threat ? T + 0.05 + b.r() * (0.15 + b.persona.hesitate * 0.4) : sim.phase === 'night' ? T + 0.1 + b.r() * 0.6 : T + 0.4 + b.r() * 1.2;
         if (T > b.getUpAt) { toggle(b, 'fl'); b.getUpAt = 0; }
       }
       b.hist.length = 0; b.path = null;
@@ -968,7 +1080,7 @@ export function createBots(sim, opts = {}) {
     if (b.climbT && (p.body.position.y > -0.05 || plotAt(p.body.position.x, p.body.position.z, 0.05) < 0)) { say(b, `out of the grave after ${(T - b.climbT).toFixed(1)}s`); b.climbT = 0; }
     const w = world();
     if (b.celebrate && T > b.celebrate.at) {
-      if (b.celebrate.kind === 'flop') flop(b, p, 1 + b.r() * 1.5, 'R.I.P.!');
+      if (b.celebrate.kind === 'flop') flop(b, p, 1 + b.r() * 1.5, 'R.I.P.!', true);
       else if (p.grounded) inp.jump = true;
       if (b.celebrate.kind === 'flop' || T > b.celebrate.at + 0.15) b.celebrate = null;
     }
@@ -997,7 +1109,8 @@ export function createBots(sim, opts = {}) {
     } else {
       const t = b.task;
       let holeTarget = t && ((t.kind === 'load' && t.hole >= 0 && t.stage !== 'verify' && (!(p.grab && p.grab.ent === t.corpse) || t.dump)) ||
-        (t.kind === 'flip' && t.inPlot !== undefined && t.stage !== 'settle'));
+        (t.kind === 'flip' && t.inPlot !== undefined && t.stage !== 'settle') ||
+        (t.kind === 'fight' && hyp(foePos(t.foe).x - pos.x, foePos(t.foe).z - pos.z) < 2.4)); // whack it from down here
       const sunk = pos.y < -0.12 && plotAt(pos.x, pos.z, 0.05) >= 0; // even a shallow hole needs a hop to get out
       b.holeT = sunk ? (b.holeT || 0) + dt : 0;
       if (holeTarget && b.holeT > 5) { endTask(b, "can't reach them down here", false, 15); holeTarget = false; }
@@ -1006,6 +1119,7 @@ export function createBots(sim, opts = {}) {
         else if (t.kind === 'deliver') doDeliver(b, p, t, dt);
         else if (t.kind === 'dig' || t.kind === 'fill') doWork(b, p, t, dt);
         else if (t.kind === 'flip') doFlip(b, p, t, dt);
+        else if (t.kind === 'fight') doFight(b, p, t, dt);
         else doIdle(b, p, t, dt);
       }
     }
@@ -1033,7 +1147,7 @@ export function createBots(sim, opts = {}) {
         inp: { mx: 0, mz: 0, yaw: p.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 }, yaw: p.yaw,
         nextPlan: T + r() * PLAN_DT, actT: 0, pauseT: T + 0.3 + r() * 1.2, path: null, pathT: 0, pgx: 0, pgz: 0, wpi: 0,
         hist: [], stallNext: 0, stallN: 0, unstuck: null, wantMove: false,
-        stats: { time: {}, grabs: 0, done: 0, fail: 0, stalls: 0, stuck: 0, flops: 0, holes: 0 },
+        stats: { time: {}, grabs: 0, done: 0, fail: 0, stalls: 0, stuck: 0, flops: 0, holes: 0, fights: 0, swings: 0 },
       });
       sim.setInput(p.id, { ...bots.get(p.id).inp });
       assignRoles();
