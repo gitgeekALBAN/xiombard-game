@@ -95,8 +95,6 @@ function playerName() {
   return n;
 }
 
-const BOT_NAMES = ['Mortimer', 'Gravella', 'Old Bones', 'Wendel', 'Ichabod'];
-
 async function host() {
   unlockAudio();
   setStatus('Opening the graveyard gates...');
@@ -105,7 +103,7 @@ async function host() {
   // AI teammates so nobody digs alone: ?bots=N (0..5), 3 by default; they step aside for joining humans
   bots = createBots(sim);
   const nBots = Math.max(0, Math.min(5, +(new URLSearchParams(location.search).get('bots') ?? 3)));
-  for (const name of BOT_NAMES.slice(0, nBots)) bots.add(name);
+  for (let i = 0; i < nBots; i++) bots.add(); // each takes the next free crew member and its name
   window.__xiom = { sim, view, look, bots };
   view.myId = myId;
   startPlaying();

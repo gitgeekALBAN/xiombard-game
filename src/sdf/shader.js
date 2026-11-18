@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { lightingGLSL } from '../shaders/toon.js';
 
 // A whole character as one signed distance function, drawn by raymarching inside a box.
 // There is no mesh and no texture: the body is two round cones, the limbs are capsules, the hat and scarf are a
@@ -8,6 +9,7 @@ import * as THREE from 'three';
 //   gouache       3D noise mottles the paint, stretched noise leaves short brush dashes
 //   soft shading  wrapped light, a tinted shadow side, ambient occlusion and one soft shadow ray from the SDF
 // The fragment writes its own depth, so characters sort correctly against ordinary meshes.
+// In the game the same shader also takes the scene fog and the warm lantern pools (options `fog`, `lanterns`).
 const vert = /* glsl */ `
 varying vec3 vWorld;
 void main() {
@@ -33,7 +35,18 @@ uniform float uHair;
 uniform vec3 uCol[9];   // skin, scarf, hat, band, mitten, leg, boot, nose, hair
 uniform vec3 uLightDir, uLightCol, uShadeCol, uRimDir, uRimCol, uInk;
 uniform float uLine, uGrain, uPix;
+uniform float uScale;   // rest units -> world meters (the matrices carry the same scale)
+uniform float uNoHead;  // 1 = leave out the head and hat (your own digger seen from inside its head)
+#ifdef USE_FOG
+uniform vec3 fogColor; uniform float fogDensity;
+#endif
 varying vec3 vWorld;
+#ifdef LITE
+const int STEPS = 48; // phones: fewer march steps and no shadow ray
+#else
+const int STEPS = 80;
+#endif
+${lightingGLSL}
 
 float hash1(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
 float noise(vec3 x) {
@@ -92,8 +105,9 @@ vec3 map(vec3 pw) {
 
   // skin: belly, head and arms melt into one clay shape
   float belly = sdRoundCone(vec3(p0.xy, p0.z / zs), vec3(0.0, uBean.x, 0.0), vec3(0.0, yN, 0.0), uBean.y, uBean.w) * zs;
-  float head = sdRoundCone(vec3(p1.xy, p1.z / zs), vec3(0.0, yN, 0.0), vec3(0.0, uHead.x, 0.0), uBean.w, uHead.y) * zs;
-  float skin = smin(belly, head, 0.06);
+  float skin = belly;
+  bool hasHead = uNoHead < 0.5;
+  if (hasHead) skin = smin(belly, sdRoundCone(vec3(p1.xy, p1.z / zs), vec3(0.0, yN, 0.0), vec3(0.0, uHead.x, 0.0), uBean.w, uHead.y) * zs, 0.06);
   skin = smin(skin, min(arm(p2), arm(p3)), 0.045);
   take(res, skin, 1.0);
 
@@ -106,6 +120,11 @@ vec3 map(vec3 pw) {
   float scarf = min(ring, tail(p0, belly, uTail.x, uScarf.w));
   if (uTail.y < 5.0) scarf = min(scarf, tail(p0, belly, uTail.y, uScarf.w * 0.82));
   take(res, scarf, 2.0);
+
+  take(res, min(mitten(p2), mitten(p3)), 5.0);
+  take(res, min(leg(p4), leg(p5)), 6.0);
+  take(res, min(boot(p4), boot(p5)), 7.0);
+  if (!hasHead) return vec3(res.x * uScale, res.y, res.z * uScale);
 
   // hat, worn a touch crooked
   vec3 ph = p1 - vec3(0.0, uHat.x, 0.0);
@@ -127,15 +146,12 @@ vec3 map(vec3 pw) {
   float bandR = (uHat2.x > 0.5 ? cr * sqrt(max(1.0 - pow(uHat2.y * 0.5 / ch, 2.0), 0.0)) : cr * 0.97) + uHat2.z;
   take(res, sdCyl(ph - vec3(0.0, uHat2.y * 0.5 + 0.012, 0.0), bandR, uHat2.y * 0.5, min(uHat2.y * 0.45, uHat2.z + 0.008)), 4.0);
 
-  take(res, min(mitten(p2), mitten(p3)), 5.0);
-  take(res, min(leg(p4), leg(p5)), 6.0);
-  take(res, min(boot(p4), boot(p5)), 7.0);
   take(res, sdEll(p1 - vec3(0.0, uHead.x - uHead.y * 0.1, uHead.y * zs * 0.98), uHead.y * vec3(0.17, 0.15, 0.24)), 8.0);
   if (uHair > 0.5) {
     float hair = sdEll(p1 - vec3(0.0, uHead.x - uHead.y * 0.25, -0.012), vec3(uHead.y + 0.034, uHead.y * 1.35, (uHead.y + 0.03) * zs));
     take(res, max(hair, p1.z - uHead.y * 0.34), 9.0);
   }
-  return res;
+  return vec3(res.x * uScale, res.y, res.z * uScale);
 }
 
 vec3 normalAt(vec3 p) {
@@ -179,7 +195,7 @@ void main() {
 
   vec3 res = vec3(0.0);
   float prev = 1e9, near = 1e9, nearT = t, graze = 1e9; bool hit = false;
-  for (int i = 0; i < 80; i++) {
+  for (int i = 0; i < STEPS; i++) {
     res = map(ro + rd * t);
     float d = res.x, w = max(uLine, 1.6 * uPix * t);
     if (d < 0.0012 * t) { hit = true; break; }
@@ -209,18 +225,26 @@ void main() {
       float a = atan(pl.x, pl.z);
       float dash = noise(vec3(a * 4.0, pl.y * 60.0, 3.0)) * smoothstep(0.45, 0.75, noise(vec3(a * 2.3, pl.y * 7.0, 7.0)));
       col *= 1.0 - 0.11 * smoothstep(0.5, 0.72, dash);
-      vec4 fc = face(p1);
+      vec4 fc = uNoHead < 0.5 ? face(p1) : vec4(0.0);
       col = mix(col, vec3(0.86, 0.5, 0.55), fc.x);
       line = max(line, fc.y);
     } else if (id == 2) col *= 0.93 + 0.07 * sin(pl.y * 150.0 + 6.0 * noise(pl * 30.0));          // woven
     else if (id == 3 && uHat2.x > 0.5) col *= 0.88 + 0.12 * sin(atan(p1.x, p1.z) * 30.0);       // knitted ribs
     else if (id == 4 && uHat2.z > 0.012) col *= 0.86 + 0.14 * sin(atan(p1.x, p1.z) * 44.0);
 
-    float ndl = dot(n, uLightDir), ao = occlusion(p, n), sh = shadow(p + n * 0.01, uLightDir);
+    float ndl = dot(n, uLightDir), ao = occlusion(p, n);
+    #ifdef LITE
+    float sh = 1.0;
+    #else
+    float sh = shadow(p + n * 0.01, uLightDir);
+    #endif
     float lit = smoothstep(-0.3, 0.8, ndl) * mix(0.3, 1.0, sh);
     lit = floor(lit * 3.0 + 0.5) / 3.0 * 0.35 + lit * 0.65; // a hint of painted steps inside a soft gradient
     vec3 light = mix(uShadeCol, uLightCol, lit) * mix(0.62, 1.0, ao);
     light += uRimCol * pow(clamp(dot(n, uRimDir) * 0.6 + 0.4, 0.0, 1.0), 3.0) * (1.0 - 0.6 * lit);
+    #ifdef LANTERNS
+    light += lanternLight(p, n) * mix(0.7, 1.0, ao);
+    #endif
     col *= light;
     col *= mix(1.0, 0.8, pow(1.0 - abs(dot(n, rd)), 3.0)); // paint pools darker toward the outline
     col = mix(col, uInk, line);
@@ -231,19 +255,29 @@ void main() {
   gl_FragDepth = clamp(clip.z / clip.w * 0.5 + 0.5, 0.0, 1.0);
   gl_FragColor = vec4(col, alpha);
   #include <colorspace_fragment>
+  #ifdef USE_FOG
+  float fz = -(viewMatrix * vec4(ro + rd * depthT, 1.0)).z;
+  gl_FragColor.rgb = mix(gl_FragColor.rgb, fogColor, 1.0 - exp(-fogDensity * fogDensity * fz * fz));
+  #endif
 }`;
 
 const BOX = new THREE.BoxGeometry(2, 2, 2);
 const HALF = new THREE.Vector3(1.3, 1.5, 1.3);
 
 // One raymarched character. `def.look` holds the shape and colors, `parts` six rest -> world matrices to follow.
+// opts: scale (size of the character, must match the scale in the matrices), fog and lanterns (take the scene's),
+// lite (cheaper march for weak GPUs).
 export class SdfCharacter {
-  constructor(def, camera) {
+  constructor(def, camera, opts = {}) {
     const k = def.look, col = (h) => new THREE.Color(h);
     this.inv = Array.from({ length: 6 }, () => new THREE.Matrix4());
+    this.half = HALF.clone();
     this.material = new THREE.ShaderMaterial({
+      defines: { ...(opts.lanterns ? { LANTERNS: 1 } : {}), ...(opts.lite ? { LITE: 1 } : {}) },
+      fog: !!opts.fog,
       uniforms: {
-        uInv: { value: this.inv }, uProj: { value: camera.projectionMatrix }, uBoxC: { value: new THREE.Vector3() }, uBoxH: { value: HALF },
+        ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uScale: { value: opts.scale || 1 }, uNoHead: { value: 0 },
+        uInv: { value: this.inv }, uProj: { value: camera.projectionMatrix }, uBoxC: { value: new THREE.Vector3() }, uBoxH: { value: this.half },
         uBean: { value: new THREE.Vector4(...k.bean) }, uHead: { value: new THREE.Vector3(...k.head) },
         uShoulder: { value: new THREE.Vector3(...k.shoulder) }, uHand: { value: new THREE.Vector3(...k.hand) }, uArm: { value: new THREE.Vector2(...k.arm) },
         uLeg: { value: new THREE.Vector4(...k.leg) }, uHat: { value: new THREE.Vector4(...k.hat) }, uHat2: { value: new THREE.Vector4(...k.hat2) },
@@ -260,9 +294,11 @@ export class SdfCharacter {
     this.mesh.renderOrder = 5;
   }
 
-  // parts: Matrix4 list holding this character's six rest -> world matrices from index `base`; center: where the body is now
-  update(parts, base, center) {
+  // parts: Matrix4 list holding this character's six rest -> world matrices from index `base`;
+  // center (and optionally half): the box to march in, which must enclose the whole character
+  update(parts, base, center, half) {
     for (let i = 0; i < 6; i++) this.inv[i].copy(parts[base + i]).invert();
+    if (half) { this.half.copy(half); this.mesh.scale.copy(half); }
     this.mesh.position.copy(center);
     this.material.uniforms.uBoxC.value.copy(center);
   }

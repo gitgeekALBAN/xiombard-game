@@ -1,6 +1,7 @@
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
-import { PARTS, NPARTS, P, fk, animRots, restRots, limpRots } from '../shared/skeleton.js';
+import { PARTS, NPARTS, P, fk, restRots, limpRots } from '../shared/skeleton.js';
+import { CREW, NCREW, crewRig, crewPose } from '../shared/crew.js';
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
   ROAD_Z, PILE, SPAWN, staticBoxes, plotAt,
@@ -15,7 +16,6 @@ const PLAYER_BITS = 0x3f0;
 const ALL = G_GROUND | G_PROP | G_TRUCK | PLAYER_BITS;
 const STEP = 1 / 60;
 const CORPSE_MASS = 30, DIGGER_RAG_MASS = 45;
-const COLORS = ['#e2584a', '#4fc0b0', '#f0b83a', '#a77de0', '#7fb2ff', '#f07fb8'];
 const MAX_CORPSES = 9;
 const TRUCK_SPAWN_X = TRUCK_START_X - 25; // where a load appears on the road: inside the |x| < 45 cleanup bounds
 // Coffins are held low by one end: one digger drags it, two diggers carry it level.
@@ -26,7 +26,7 @@ const CORPSE_GRIP_N = 1400, COFFIN_GRIP_N = 1100;
 const CORPSE_HOLD_Y = 1.3;
 
 const v3 = (a) => new CANNON.Vec3(a[0], a[1], a[2]);
-const PARTS_OF = { digger: NPARTS, corpse: NPARTS, coffin: 1, truck: 1 };
+const PARTS_OF = { digger: NCREW, corpse: NPARTS, coffin: 1, truck: 1 };
 
 export class Sim {
   constructor() {
@@ -55,7 +55,7 @@ export class Sim {
     this.seedCounter = 1;
     this.rand = rng(Date.now() & 0xffff);
     this._ray = new CANNON.RaycastResult();
-    this._rots = restRots();
+    this._pose = { speed: 0, phase: 0, t: 0, carry: null, dig: false, air: false };
     this._root = new THREE.Matrix4();
 
     for (const b of staticBoxes()) {
@@ -107,7 +107,7 @@ export class Sim {
   }
   byId(id) { return this.ents.find((e) => e.id === id); }
   describe() {
-    return this.ents.map((e) => ({ id: e.id, kind: e.kind, seed: e.seed || 0, color: e.color || '', name: e.name || '' }));
+    return this.ents.map((e) => ({ id: e.id, kind: e.kind, seed: e.seed || 0, color: e.color || '', name: e.name || '', look: e.look ?? -1 }));
   }
   emit(type, data) { this.events.push({ type, ...data }); }
 
@@ -125,6 +125,7 @@ export class Sim {
       b.sleepSpeedLimit = 0.25;
       b.sleepTimeLimit = 1.2;
       b.partIndex = i;
+      b.grabR = part.r ? 0.25 : 0.12;
       this.world.addBody(b);
       bodies.push(b);
     }
@@ -138,6 +139,40 @@ export class Sim {
       });
       this.world.addConstraint(c);
       constraints.push(c);
+    }
+    return { bodies, constraints };
+  }
+
+  // A digger gone limp: six bodies hanging off the belly by five cone joints (sizes come from the crew sheet).
+  makeCrewRagdoll(rig, xf, mass) {
+    const bodies = [], constraints = [], up = new CANNON.Vec3(0, 1, 0);
+    for (let i = 0; i < NCREW; i++) {
+      const sh = rig.shapes[i], o = i * 7;
+      const b = new CANNON.Body({
+        mass: sh.mass * mass, material: this.mProp, linearDamping: 0.08, angularDamping: 0.4,
+        collisionFilterGroup: G_PROP, collisionFilterMask: ALL,
+      });
+      for (const [x, y, z, r] of sh.spheres || []) b.addShape(new CANNON.Sphere(r), new CANNON.Vec3(x, y, z));
+      // limb boxes run along the limb: arms rest at an angle, so the box is turned to match
+      if (sh.box) b.addShape(new CANNON.Box(v3(sh.box)), new CANNON.Vec3(), sh.dir ? new CANNON.Quaternion().setFromVectors(up, v3(sh.dir)) : undefined);
+      b.position.set(xf[o], xf[o + 1], xf[o + 2]);
+      b.quaternion.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]);
+      b.sleepSpeedLimit = 0.25;
+      b.sleepTimeLimit = 1.2;
+      b.partIndex = i;
+      b.grabR = sh.grabR || 0.12;
+      this.world.addBody(b);
+      bodies.push(b);
+    }
+    for (let i = 1; i < NCREW; i++) {
+      const j = rig.pivot[i], a = rig.rest[0], c = rig.rest[i], lim = rig.joints[i];
+      const axis = new CANNON.Vec3(0, lim.up ? 1 : -1, 0);
+      const con = new CANNON.ConeTwistConstraint(bodies[0], bodies[i], {
+        pivotA: new CANNON.Vec3(j.x - a.x, j.y - a.y, j.z - a.z), pivotB: new CANNON.Vec3(j.x - c.x, j.y - c.y, j.z - c.z),
+        axisA: axis, axisB: axis.clone(), angle: lim.cone, twistAngle: 0.4, collideConnected: false,
+      });
+      this.world.addConstraint(con);
+      constraints.push(con);
     }
     return { bodies, constraints };
   }
@@ -199,8 +234,9 @@ export class Sim {
 
   // ---------- players ----------
   addPlayer(name) {
-    const used = new Set(this.ents.filter((e) => e.kind === 'digger').map((e) => e.color));
-    const color = COLORS.find((c) => !used.has(c)) || COLORS[0];
+    // every digger is one of the crew: the first free look, so a full team never has twins
+    const used = new Set(this.ents.filter((e) => e.kind === 'digger').map((e) => e.look));
+    const look = Math.max(0, CREW.findIndex((_, i) => !used.has(i))), color = CREW[look].color;
     let bit = 16;
     while (this.ents.some((e) => e.kind === 'digger' && e.bit === bit)) bit <<= 1;
     const body = new CANNON.Body({ mass: 70, fixedRotation: true, material: this.mPlayer, collisionFilterGroup: bit, collisionFilterMask: ALL, allowSleep: false });
@@ -213,7 +249,7 @@ export class Sim {
     const hand = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, collisionFilterGroup: 0, collisionFilterMask: 0 });
     this.world.addBody(hand);
     const p = this.addEnt({
-      kind: 'digger', name: (name || 'Digger').slice(0, 16), color, seed: n + 1, body, hand, bit,
+      kind: 'digger', name: (name || CREW[look].name).slice(0, 16), color, look, seed: n + 1, body, hand, bit,
       yaw: Math.PI, input: { mx: 0, mz: 0, yaw: Math.PI, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 },
       last: null, rag: null, ragT: 0, grab: null, phase: 0, grounded: true, turn: 0, hint: '', digging: false, jumpT: 0, slipT: 0,
     });
@@ -227,7 +263,7 @@ export class Sim {
     p.input = inp;
   }
 
-  feet(p) { return p.rag ? p.rag.bodies[P.pelvis].position : p.body.position; }
+  feet(p) { return p.rag ? p.rag.bodies[0].position : p.body.position; } // part 0 is the belly
   fwd(p) { return new CANNON.Vec3(Math.sin(p.yaw), 0, Math.cos(p.yaw)); }
   handPoint(p, hy) {
     const f = this.fwd(p), b = p.body.position, d = hy === COFFIN_HOLD_Y ? 0.95 : 0.75;
@@ -237,19 +273,22 @@ export class Sim {
   toRagdoll(p, extra) {
     if (p.rag) return;
     this.drop(p);
-    const xf = this.diggerPose(p, new Float32Array(NPARTS * 7));
-    p.rag = this.makeRagdoll(xf, DIGGER_RAG_MASS);
+    const xf = this.diggerPose(p, new Float32Array(NCREW * 7));
+    p.rag = this.makeCrewRagdoll(crewRig(p.look), xf, DIGGER_RAG_MASS);
     for (const b of p.rag.bodies) {
       b.ent = p;
       b.velocity.copy(p.body.velocity);
       if (extra) b.velocity.vadd(extra, b.velocity);
     }
+    // the round ones would stay balanced on their short legs, so going limp always tips the belly over
+    const tip = this.rand() * Math.PI * 2;
+    p.rag.bodies[0].angularVelocity.set(Math.cos(tip) * 4.5, (this.rand() - 0.5) * 2, Math.sin(tip) * 4.5);
     this.world.removeBody(p.body);
     p.ragT = this.time;
   }
   getUp(p) {
     if (!p.rag) return;
-    const pel = p.rag.bodies[P.pelvis].position.clone();
+    const pel = p.rag.bodies[0].position.clone();
     this.releaseGrabsOn(new Set(p.rag.bodies));
     for (const c of p.rag.constraints) this.world.removeConstraint(c);
     for (const b of p.rag.bodies) this.world.removeBody(b);
@@ -277,7 +316,7 @@ export class Sim {
       if (e === p) continue;
       if (e.kind === 'corpse' || (e.kind === 'digger' && e.rag)) {
         for (const b of this.bodiesOf(e)) {
-          const d = b.position.distanceTo(hand) - (PARTS[b.partIndex].r ? 0.25 : 0.12) + (boxed.has(e) ? 0.8 : 0);
+          const d = b.position.distanceTo(hand) - b.grabR + (boxed.has(e) ? 0.8 : 0);
           if (d < bestD) { bestD = d; best = { body: b, ent: e, pivot: new CANNON.Vec3() }; }
         }
       } else if (e.kind === 'coffin') {
@@ -716,8 +755,9 @@ export class Sim {
   diggerPose(p, out) {
     const b = p.body.position;
     this._root.makeRotationY(p.yaw).setPosition(b.x, b.y + (p.grounded ? Math.abs(Math.sin(p.phase)) * 0.05 * Math.min(1, (p.speed || 0) / 3) : 0), b.z);
-    animRots({ speed: p.speed || 0, phase: p.phase, t: this.time + p.id, carry: p.grab ? (p.grab.coffin ? 'coffin' : 'corpse') : null, dig: p.digging, air: !p.grounded }, this._rots);
-    return fk(this._root, this._rots, out);
+    this._pose.speed = p.speed || 0; this._pose.phase = p.phase; this._pose.t = this.time + p.id;
+    this._pose.carry = p.grab ? (p.grab.coffin ? 'coffin' : 'corpse') : null; this._pose.dig = p.digging; this._pose.air = !p.grounded;
+    return crewPose(crewRig(p.look), this._root, this._pose, out);
   }
   writeXf(e) {
     if (e.kind === 'digger' && !e.rag) { this.diggerPose(e, e.xf); return; }

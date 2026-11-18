@@ -25,8 +25,9 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/net.js` — PeerJS rooms: 4-letter code → peer id `xiombard-gy-<CODE>`.
 - `src/sim/game.js` — **host-only** simulation: cannon-es world, ragdolls, grabbing/grip, digging, truck, scoring.
 - `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
-- `src/view/models.js` — every model built from primitives in code (diggers, corpses, coffins, truck, headstones, trees).
-- `src/shared/` — data both sides need: `skeleton.js` (part list + FK + animation), `layout.js` (level, colliders, decor), `rng.js`.
+- `src/view/models.js` — every mesh model built from primitives in code (corpses, coffins, truck, headstones, trees).
+- `src/view/crew.js` + `src/sdf/shader.js` — the diggers: each one is a signed distance function raymarched in a box (no mesh, no texture).
+- `src/shared/` — data both sides need: `skeleton.js` (corpse part list + FK), `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `layout.js` (level, colliders, decor), `rng.js`.
 - `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `sky.js`, `ground.js`, `noise.glsl.js`.
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
 - `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard.
@@ -36,7 +37,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - **Host-authoritative P2P.** The host's browser runs `Sim`; guests only send input (30 Hz) and render snapshots (20 Hz).
 - Messages: guest→host `hello`, `in` (move, yaw, held buttons, and *counters* for one-shot actions: grab/throw/flop).
   Host→guest `welcome`, `ents` (entity list, sent when `sim.version` changes), `snap` (Float32Array of part transforms + small JSON state + events).
-- Every entity is "N parts × (pos, quat)": digger/corpse 11 (see `PARTS`), coffin 1, truck 1. **Never reorder `PARTS`** — it is the wire format.
+- Every entity is "N parts × (pos, quat)": corpse 11 (see `PARTS`), digger 6 (see `CP` in `shared/crew.js`), coffin 1, truck 1. **Never reorder `PARTS` or `CP`** — they are the wire format.
 - Signaling: free PeerJS cloud broker. Some strict NATs need a TURN server (not set up yet). Local testing: run a PeerJS server on
   port 9000 and open `?peerhost=127.0.0.1&peerport=9000`.
 - No host migration: if the host leaves, the game ends for guests.

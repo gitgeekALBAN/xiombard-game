@@ -4,7 +4,8 @@ import { buildCharacter, buildCoffin, buildTruck } from './models.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
 import { PLOTS, PLOT_HALF } from '../shared/layout.js';
-import { P } from '../shared/skeleton.js';
+import { CP } from '../shared/crew.js';
+import { buildCrew } from './crew.js';
 import { sfx } from '../audio.js';
 import { isTouchDevice } from '../touch.js';
 import { Post } from './post.js';
@@ -14,7 +15,7 @@ import { Post } from './post.js';
 const FOG_COLOR = '#2a2344';
 const FOG_DENSITY = 0.0145;
 
-const _q = new THREE.Quaternion();
+const _q = new THREE.Quaternion(), _size = new THREE.Vector2();
 
 export class View {
   constructor(container) {
@@ -117,9 +118,12 @@ export class View {
     this.order = list.map((d) => {
       let e = this.ents.get(d.id);
       if (!e) {
-        const groups = d.kind === 'coffin' ? buildCoffin(d.seed) : d.kind === 'truck' ? buildTruck() : buildCharacter(d.kind, d.seed, d.color);
+        // diggers are the shader crew (six frames + one raymarched character), everything else is built from meshes
+        const crew = d.kind === 'digger' ? buildCrew(d.look, this.camera) : null;
+        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed) : d.kind === 'truck' ? buildTruck() : buildCharacter(d.kind, d.seed, d.color);
         const root = new THREE.Group();
         for (const g of groups) root.add(g);
+        if (crew) root.add(crew.mesh);
         let shadow = null;
         if (d.kind !== 'truck') {
           shadow = new THREE.Mesh(this.shadowGeo, this.shadowMat);
@@ -130,7 +134,7 @@ export class View {
         const billboards = [];
         root.traverse((o) => { if (o.userData.billboard) billboards.push(o); });
         this.billboards.push(...billboards);
-        e = { ...d, root, groups, shadow, billboards, fresh: true, tpos: groups.map(() => new THREE.Vector3()), tq: groups.map(() => new THREE.Quaternion()) };
+        e = { ...d, root, groups, crew, shadow, billboards, fresh: true, tpos: groups.map(() => new THREE.Vector3()), tq: groups.map(() => new THREE.Quaternion()) };
         this.ents.set(d.id, e);
       }
       return e;
@@ -165,7 +169,7 @@ export class View {
     for (const e of this.order) {
       if (e.kind === 'digger') {
         const p = pl.get(e.id);
-        const sh = e.groups[P.farmR].userData.shovel;
+        const sh = e.groups[CP.armR].userData.shovel;
         if (sh && p) sh.visible = p.dig;
       } else if (e.kind === 'truck') {
         const u = e.groups[0].userData;
@@ -181,17 +185,27 @@ export class View {
     this.renderer.info.reset();
     this.sky.material.uniforms.uTime.value = this.time;
     const a = 1 - Math.exp(-dt * 16);
+    const me = this.ents.get(this.myId);
+    const meState = me && this.state ? this.state.players.find((p) => p.id === this.myId) : null;
+    // first person while on your feet; a ragdolled digger falls back to the third-person view so you see the flop
+    const fp = !!(me && this.firstPerson && !meState?.rag);
+    const fov = fp ? 74 : 62;
+    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    this.renderer.getDrawingBufferSize(_size);
+    const pix = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / _size.y;
     for (const e of this.order) {
       for (let i = 0; i < e.groups.length; i++) {
         e.groups[i].position.lerp(e.tpos[i], a);
         e.groups[i].quaternion.slerp(e.tq[i], a);
       }
+      // your own head and hat would fill the screen in first person, so that body is drawn without them
+      if (e.crew) e.crew.update(pix, e === me && fp && !this.debugCam);
       if (e.shadow) {
-        const c = e.groups[e.kind === 'coffin' ? 0 : P.pelvis].position;
+        const c = e.groups[0].position; // coffin, pelvis or belly
         const gy = this.groundHeight(c.x, c.z);
         const hgt = Math.max(0, c.y - gy);
         e.shadow.position.set(c.x, gy + 0.015, c.z);
-        const s = (e.kind === 'coffin' ? 0.95 : 0.6) * (1 + hgt * 0.25);
+        const s = (e.kind === 'coffin' ? 0.95 : e.crew ? e.crew.rig.belly * 2.1 : 0.6) * (1 + hgt * 0.25);
         e.shadow.scale.set(s, Math.max(0.001, 1 / (1 + hgt * 0.8)), e.kind === 'coffin' ? s * 1.55 : s);
         e.shadow.visible = hgt < 4;
       }
@@ -202,17 +216,10 @@ export class View {
     }
     this.graves.update(this.time);
 
-    const me = this.ents.get(this.myId);
-    const meState = me && this.state ? this.state.players.find((p) => p.id === this.myId) : null;
-    // first person while on your feet; a ragdolled digger falls back to the third-person view so you see the flop
-    const fp = !!(me && this.firstPerson && !meState?.rag);
-    if (me) me.groups[P.head].visible = !fp || !!this.debugCam; // your own head and hat would fill the screen
-    const fov = fp ? 74 : 62;
-    if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     if (fp) {
       // eye in the head, nudged forward so the near plane clears the face; smoothed so ragdoll jitter and the
       // walk cycle give a gentle bob instead of a shake
-      const head = me.groups[P.head].position;
+      const head = me.groups[CP.head].position;
       const fx = Math.sin(look.yaw), fz = Math.cos(look.yaw);
       this.eye.set(head.x + fx * 0.14, head.y + 0.06, head.z + fz * 0.14);
       if (this.eyeFresh) { this.camTarget.copy(this.eye); this.eyeFresh = false; }
@@ -222,8 +229,8 @@ export class View {
       this.camera.lookAt(this.camTarget.x + dir.x, this.camTarget.y + dir.y, this.camTarget.z + dir.z);
     } else if (me) {
       // third-person camera around my digger
-      if (!this.eyeFresh) { this.eyeFresh = true; this.camTarget.copy(me.groups[P.chest].position); }
-      const chest = me.groups[P.chest].position;
+      if (!this.eyeFresh) { this.eyeFresh = true; this.camTarget.copy(me.groups[CP.body].position); }
+      const chest = me.groups[CP.body].position;
       this.camTarget.lerp(new THREE.Vector3(chest.x, chest.y + 0.55, chest.z), 1 - Math.exp(-dt * 12));
       const cp = Math.cos(look.pitch), dir = new THREE.Vector3(Math.sin(look.yaw) * cp, -Math.sin(look.pitch), Math.cos(look.yaw) * cp);
       // pull the camera in if the truck is between it and the player
@@ -286,7 +293,7 @@ export class View {
       }
       el.textContent = p.name;
       el.style.borderColor = p.color;
-      const v = e.groups[P.head].position.clone().add(new THREE.Vector3(0, 0.75, 0)).project(this.camera);
+      const v = e.groups[CP.head].position.clone().add(new THREE.Vector3(0, e.crew.rig.hatTop + 0.3, 0)).project(this.camera);
       el.style.display = v.z < 1 ? '' : 'none';
       el.style.transform = `translate(-50%, -50%) translate(${(v.x * 0.5 + 0.5) * innerWidth}px, ${(-v.y * 0.5 + 0.5) * innerHeight}px)`;
     }

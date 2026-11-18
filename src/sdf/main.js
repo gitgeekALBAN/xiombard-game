@@ -3,7 +3,7 @@ import * as CANNON from 'cannon-es';
 import { isTouchDevice } from '../touch.js';
 import { Puppet } from '../showcase/rig.js';
 import { SdfCharacter } from './shader.js';
-import { TEAM } from './team.js';
+import { TEAM } from '../shared/crew.js';
 
 // Shader crew: five characters with no meshes and no textures. Each one is a signed distance function raymarched
 // in a box, posed by the same six-part skeleton and ragdoll as the splat puppets.

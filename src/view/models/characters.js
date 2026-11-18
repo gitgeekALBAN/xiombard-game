@@ -336,7 +336,7 @@ function digger(k, color) {
   leg(k[P.thighR], k[P.shinR], { pants: TROUS, foot: 'boot', footC: BOOT, r: 0.92 });
 }
 
-function buildShovel() {
+export function buildShovel() {
   const s = new THREE.Group(), kit = [];
   const WOOD = '#8a5f3e', IRON = '#a3a6b4';
   put(kit, new THREE.CylinderGeometry(0.019, 0.022, 1.0, 7), { c: WOOD, mot: 0.5, pos: [0, 0.12, 0] });
