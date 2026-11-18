@@ -65,8 +65,10 @@ float sdBox(vec2 p, vec2 b) { vec2 d = abs(p) - b; return length(max(d, 0.0)) + 
 float sdRound(vec2 p, vec2 b, float r) { return sdBox(p, b - r) - r; }
 float sdSeg(vec2 p, vec2 a, vec2 b) { vec2 pa = p - a, ba = b - a; return length(pa - ba * clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0)); }
 mat2 rot2(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
-// anti-aliased fill of a signed distance (negative inside), aa from the screen derivative
-float fill(float d) { float aa = max(fwidth(d), 1e-4) * 0.75; return smoothstep(aa, -aa, d); }
+// anti-aliased fill of a signed distance in paint-space meters (negative inside). The pixel size PX is taken once
+// at the top of main(): derivatives inside the branches below would be undefined (non-uniform control flow).
+float PX = 1e-3;
+float fill(float d) { return smoothstep(PX, -PX, d); }
 float line(float d, float w) { return fill(abs(d) - w); }
 
 // The painted curl (curlPts in propkit.js): a spiral of 'turns' turns out to radius r, then a tail that swings down.
@@ -192,9 +194,9 @@ void stonePaint(inout vec3 col, inout float ink, vec3 p, vec3 on) {
   float nl = floor(flags / 8.0);
   float w = vQ.x, h = vQ.y, ph = vQ.z, y0 = ph - 0.02;
   // weathering: lichen and moss creep up from the ground and settle on the top edges
-  float m = fbm(p.xy * 9.0 + p.z * 3.0 + seed);
+  float m = fbm(p.xy * 5.0 + p.z * 2.0 + seed);
   float moss = smoothstep(0.55, 0.75, m) * (smoothstep(0.35, 0.05, p.y) + smoothstep(h - 0.25, h, p.y) * 0.8 + 0.25);
-  col = mix(col, vec3(0.06, 0.085, 0.045), clamp(moss, 0.0, 1.0) * 0.6);
+  col = mix(col, vec3(0.06, 0.085, 0.045), clamp(moss, 0.0, 1.0) * 0.45);
   col *= 0.94 + 0.12 * vnoise(p.xy * 60.0 + seed);   // grit
   col *= 1.0 - 0.12 * smoothstep(0.86, 0.9, vnoise(p.xy * 45.0 + p.z * 20.0 + seed)); // pits
   bool front = on.z > 0.6 && p.y > ph + 0.005;
@@ -312,7 +314,7 @@ void coffinWood(inout vec3 col, inout float ink, vec3 p, vec3 on) {
 void coffinLining(inout vec3 col, inout float ink, inout float em, vec3 p, vec3 on) {
   // pleated satin: folds run the length of the coffin (across it on the end walls), every other fold darker
   float c = (abs(on.z) > 0.6 ? p.x : p.z) * 11.0;
-  float aa = max(fwidth(c), 1e-4);
+  float aa = PX * 11.0 * 1.4;
   float fc = fract(c);
   float s = smoothstep(-aa, aa, abs(fc - 0.5) - 0.3);
   col = mix(col, ${V('#5e1028')}, s);
@@ -463,6 +465,7 @@ void main() {
   if (!gl_FrontFacing) N = -N;
   int id = int(vK.x + 0.5);
   vec3 p = vP, on = normalize(vON);
+  PX = max(length(fwidth(vP)) * 0.55, 1e-5);
   vec3 col = vCol;
   float ink = 0.0, em = 0.0, rim = 1.0, mottle = 0.4;
   if (id == ${PAINT.PLAIN}) { mottle = vK.y; rim = vK.z; em = vK.w; }
@@ -496,7 +499,7 @@ void main() {
   }
   else if (id == ${PAINT.TRUCK_FLOOR}) { mottle = 0.5; truckFloor(col, ink, p); }
   else if (id == ${PAINT.TRUCK_RAIL}) {
-    float c = (vK.y > 0.5 ? p.z : p.x) * 2.6, aa = max(fwidth(c), 1e-4);
+    float c = (vK.y > 0.5 ? p.z : p.x) * 2.6, aa = PX * 2.6 * 1.4;
     col = mix(col, ${V(PAL.stripeDark)}, smoothstep(-aa, aa, abs(fract(c) - 0.5) - 0.25));
     mottle = 0.25;
   }
