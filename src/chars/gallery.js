@@ -7,7 +7,7 @@ import { corpseRig, REST_ROTS } from '../shared/corpses.js';
 import { Character } from './index.js';
 
 // The cast page: every character of the game on one sheet, for looking at shapes and paint up close.
-// ?set=crew|dead|zombies|walkers|dogs (default: all)   ?mode=night   ?only=<index within the set>
+// ?set=crew|dead|zombies|walkers|dogs|odd (default: all)   ?mode=night   ?only=<index within the set>
 const $ = (id) => document.getElementById(id);
 const q = new URLSearchParams(location.search);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -42,8 +42,10 @@ const SETS = {
   dead: [11, 24, 37, 50, 63, 76].map((seed) => ({ name: 'Body', note: `#${seed}`, color: '#8a8f9a', rig: corpseRig(seed), pose: (rig, root, w, t, out) => rigPose(rig, root, REST_ROTS, out) })),
   zombies: ZOMBIES.map((d, i) => ({ name: d.name, note: ['walker', 'dragger', 'dog'][d.type], color: '#6f9a4a', rig: zombieRig(i), pose: (rig, root, w, t, out) => { zs.speed = w * d.speed; zs.phase = t * (d.type === 2 ? 11 : 5) + i; zs.t = t + i; return zombiePose(rig, root, zs, out); } })),
 };
+SETS.zombies.forEach((c, i) => { if (i >= 10) c.note = 'odd one'; });
 SETS.dogs = SETS.zombies.filter((c) => c.note === 'dog');
-SETS.walkers = SETS.zombies.filter((c) => c.note !== 'dog');
+SETS.walkers = SETS.zombies.filter((c) => c.note === 'walker' || c.note === 'dragger');
+SETS.odd = SETS.zombies.filter((c) => c.note === 'odd one');
 const pick = q.get('set') || 'all';
 let cast = pick === 'all' ? [...SETS.crew, ...SETS.dead, ...SETS.zombies] : SETS[pick] || SETS.crew;
 if (q.get('only') !== null) cast = [cast[+q.get('only')]];

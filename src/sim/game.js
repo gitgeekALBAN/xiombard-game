@@ -2,7 +2,7 @@ import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
 import { CREW, NCREW, crewRig, crewPose, rigPose } from '../shared/crew.js';
 import { corpseRig, limpRots, REST_ROTS, COFFIN_ROTS } from '../shared/corpses.js';
-import { ZOMBIES, ZTYPE, Z_WALKERS, Z_DRAGGER, Z_DOGS, zombieRig, zombiePose } from '../shared/zombies.js';
+import { ZOMBIES, ZTYPE, Z_WALKERS, Z_DRAGGER, Z_DOGS, Z_ODD, zombieRig, zombiePose } from '../shared/zombies.js';
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
   ROAD_Z, PILE, SPAWN, staticBoxes, plotAt,
@@ -28,7 +28,7 @@ const CORPSE_HOLD_Y = 1.3;
 // The shift has two halves. By day the truck delivers and the crew buries. At night nothing is delivered: zombies
 // climb out of the ground, every body left unburied gets up too, and the crew defends the yard with shovels.
 const DAY_LEN = 150, NIGHT_LEN = 80, TWILIGHT = 10; // seconds; the light fades over the last TWILIGHT of each half
-const MAX_ZOMBIES = 8;      // raymarched zombies alive at once (each one costs GPU time)
+const MAX_ZOMBIES = 10;     // visitors on the yard at once
 const RISE_TIME = 1.6;      // seconds a zombie takes to climb out of the ground
 const SWING_TIME = 0.45;    // a shovel swing; the blow lands a third of the way in
 const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it has to be dodged or hit first
@@ -524,8 +524,9 @@ export class Sim {
     for (const e of this.ents) if (e.kind === 'corpse' && !e.z) e.riseAt = this.time + 2 + this.rand() * 7;
     // tonight's visitors: the first night shows one of everything, later nights bring more
     const pick = (a) => a[Math.floor(this.rand() * a.length)];
-    const looks = [pick(Z_WALKERS), Z_DOGS[0], pick(Z_WALKERS), Z_DRAGGER, Z_DOGS[1], pick(Z_WALKERS), Z_DOGS[2]];
-    for (let i = 0; i < Math.min(8, (this.dayN - 1) * 2); i++) { const r = this.rand(); looks.push(r < 0.5 ? pick(Z_WALKERS) : r < 0.8 ? pick(Z_DOGS) : Z_DRAGGER); }
+    const odd = Object.values(Z_ODD);
+    const looks = [pick(Z_WALKERS), Z_DOGS[0], Z_ODD.longshanks, Z_DRAGGER, Z_DOGS[1], Z_ODD.granny, Z_ODD.bloat, Z_DOGS[2], Z_ODD.stack, Z_ODD.headless, Z_ODD.barrel];
+    for (let i = 0; i < Math.min(8, (this.dayN - 1) * 2); i++) { const r = this.rand(); looks.push(r < 0.35 ? pick(Z_WALKERS) : r < 0.55 ? pick(Z_DOGS) : r < 0.9 ? pick(odd) : Z_DRAGGER); }
     const gap = (this.nightLen * 0.6) / looks.length;
     this.spawns = looks.map((look, i) => ({ look, t: this.time + 3 + i * gap }));
   }
@@ -603,7 +604,7 @@ export class Sim {
   }
   attackOf(z) {
     if (z.mode !== 'attack') return 0;
-    return Math.min(1, (this.time - z.t) / (z.def.type === ZTYPE.dog ? 0.4 : z.def.type === ZTYPE.dragger ? 0.95 : 0.75));
+    return Math.min(1, (this.time - z.t) / (z.def.atk || (z.def.type === ZTYPE.dog ? 0.4 : z.def.type === ZTYPE.dragger ? 0.95 : 0.75)));
   }
   zombieXf(e, out) {
     const z = e.z, s = this._pose;
@@ -674,13 +675,13 @@ export class Sim {
         z.hit = true;
         const p = tg && tg.p;
         if (p && !p.rag && dist < def.reach + 0.6) {
-          const k = dog ? 2.5 : def.type === ZTYPE.dragger ? 8 : 3.8, n = Math.max(dist, 0.01);
-          this.toRagdoll(p, new CANNON.Vec3((dx / n) * k, dog ? 2 : def.type === ZTYPE.dragger ? 5.5 : 3.2, (dz / n) * k));
+          const [k, up] = def.push || (dog ? [2.5, 2] : def.type === ZTYPE.dragger ? [8, 5.5] : [3.8, 3.2]), n = Math.max(dist, 0.01);
+          this.toRagdoll(p, new CANNON.Vec3((dx / n) * k, up, (dz / n) * k));
           this.emit('sfx', { name: dog ? 'bark' : 'bonk', pos: [tx, 1, tz] });
-          this.emit('toast', { text: dog ? 'Chomp!' : def.type === ZTYPE.dragger ? 'WHAM!' : 'Oof!', pos: [tx, 1.9, tz] });
+          this.emit('toast', { text: dog ? 'Chomp!' : k > 6 ? 'WHAM!' : 'Oof!', pos: [tx, 1.9, tz] });
         }
       }
-      if (a >= 1) { z.mode = 'walk'; z.cool = this.time + (dog ? 3 : 2); }
+      if (a >= 1) { z.mode = 'walk'; z.cool = this.time + (def.cool || (dog ? 3 : 2)); }
     // nobody gets hit again the moment they are back on their feet
     } else if (tg && tg.p && dist < def.reach && this.time > z.cool && Math.abs(dy) < 0.6 && this.time - tg.p.upT > 1.5) {
       z.mode = 'attack'; z.t = this.time; z.hit = false;
@@ -707,14 +708,26 @@ export class Sim {
   knock(e, vx, vy, vz) {
     const z = e.z;
     if (!z || z.mode === 'down') return false;
+    if (z.def.split && e.kind === 'zombie') { // two in one coat: the blow knocks them apart, each still good for one more
+      const q = z.body.position, x = q.x, y = q.y, zz = q.z;
+      this.emit('puff', { pos: [x, y + 0.8, zz], kind: 0 });
+      this.removeEnt(e);
+      z.def.split.forEach((look, i) => {
+        const s = i ? 1 : -1, n = this.spawnZombie(look, x + s * 0.3, zz);
+        n.z.mode = 'walk'; n.z.body.position.y = y; n.z.yaw = z.yaw;
+        this.knock(n, vx * 0.6 + s * vz * 0.4, vy, vz * 0.6 - s * vx * 0.4);
+      });
+      return true;
+    }
     z.hp--;
+    const fly = z.def.fly || 1;
     if (e.kind === 'zombie') {
       const xf = this.zombieXf(e, new Float32Array(NCREW * 7));
-      e.rag = this.makeCrewRagdoll(zombieRig(e.look), xf, z.def.type === ZTYPE.dog ? 14 : 38);
+      e.rag = this.makeCrewRagdoll(zombieRig(e.look), xf, z.def.mass || (z.def.type === ZTYPE.dog ? 14 : 38));
       for (const b of e.rag.bodies) b.ent = e;
     } else this.ghost(e, false);
     const bodies = this.bodiesOf(e);
-    for (const b of bodies) b.velocity.set(vx, vy, vz);
+    for (const b of bodies) b.velocity.set(vx * fly, vy * fly, vz * fly);
     bodies[0].angularVelocity.set((this.rand() - 0.5) * 9, (this.rand() - 0.5) * 5, (this.rand() - 0.5) * 9);
     this.world.removeBody(z.body);
     z.mode = 'down'; z.t = this.time; z.speed = 0;

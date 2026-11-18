@@ -51,8 +51,54 @@ const dogs = [
     colors: dogColors('#cfd6c8', '#e6e2d6', '#8a4f9a', '#b9a6c6'), speed: 5.2 },
 ].map((d) => ({ name: d.name, type: ZTYPE.dog, hp: 1, speed: d.speed, reach: 0.95, look: { dog: d.dog, face: 2, grime: 0.5, colors: d.colors } }));
 
-// index = the `look` number sent over the network: 0-5 walkers, 6 dragger, 7-9 dogs — do not reorder
-export const ZOMBIES = [...walkers, dragger, ...dogs];
+// ---------- the odd ones. They walk and fight like walkers (type 0) unless a field says otherwise:
+//   atk: seconds a swing takes, cool: seconds between swings, push: [sideways, up] speed given to whoever is hit,
+//   mass: ragdoll weight, fly: how far a shovel sends it (1 = like a walker), split: looks it falls apart into
+const ZSKIN = '#9db093';
+const odd = (name, stats, look) => ({ name, type: ZTYPE.walker, hp: 2, speed: 2, reach: 1.15, ...stats, look: { face: 1, grime: 0.8, torn: true, tail: [0.03, 9, 0.04], hat2: [1, 0.06, 0.016, 0], ...look }, rig: null });
+const odds = [
+  // a ball of a belly on little legs with a head on a stalk: slow, hard to put down, and it bumps you a long way
+  odd('Bloat', { hp: 4, speed: 1.3, reach: 1.3, atk: 0.9, push: [7, 5], mass: 60, fly: 0.75 }, {
+    ball: true, bounce: true, bean: [0.47, 0.37, 0.84, 0.05], head: [1.02, 0.105, 0.95], shoulder: [0.31, 0.62, 0], hand: [0.48, 0.44, 0.03], arm: [0.03, 0.052],
+    leg: [0.13, 0.14, 0.035, 0.09], hat: null, scarf: [0.87, 0.07, 0.034, 0.2], patches: [[-0.5, 0.42, 0.05, 0.045, '#8a5a44'], [0.7, 0.56, 0.04, 0.04, '#4a6a8a'], [0.1, 0.3, 0.045, 0.035, '#7a5a86']],
+    colors: { skin: '#a6b79d', scarf: '#5a5562', hat: '#333', band: '#333', mitten: '#4a3a36', leg: '#7f8f7a', boot: '#3f332f', nose: '#6a7a66' },
+  }),
+  // all legs: quick, reaches a long way, and goes down from one good whack
+  odd('Longshanks', { hp: 1, speed: 3.3, reach: 1.5, atk: 0.6 }, {
+    bean: [0.86, 0.12, 1.14, 0.085], head: [1.3, 0.115, 0.92], shoulder: [0.09, 1.04, 0], hand: [0.3, 0.64, 0.02], arm: [0.03, 0.045],
+    leg: [0.05, 0.76, 0.03, 0.11], hat: [1.345, 0, 0.135, 0.15], hat2: [1, 0.06, 0.016, 0.035], scarf: [1.09, 0.108, 0.036, 0.3], patches: [[0.3, 0.9, 0.03, 0.03, '#8a5a44']],
+    colors: { skin: ZSKIN, scarf: '#7a5a3a', hat: '#c9772e', band: '#a85f22', pom: '#b96a26', mitten: '#5a4a3a', leg: '#8d9c86', boot: '#5a4030', nose: '#6a7a66' },
+  }),
+  // two small ones under one long coat: the first whack knocks them apart
+  odd('Stack', { hp: 1, speed: 1.8, split: [1, 4] }, {
+    coat: { color: '#6b4a34', hem: 0.13 }, face2: [0, 0.6, 0.2, 0.115], bean: [0.42, 0.25, 1.0, 0.15], head: [1.16, 0.14, 0.9], shoulder: [0.17, 0.9, 0], hand: [0.38, 0.62, 0.02], arm: [0.036, 0.05],
+    leg: [0.08, 0.17, 0.032, 0.09], hat: [1.215, 0, 0.16, 0.14], scarf: null, patches: [],
+    colors: { skin: ZSKIN, scarf: '#444', hat: '#5f6a66', band: '#4f5a56', mitten: '#4a3a30', leg: '#5a4a3a', boot: '#3a2e28', nose: '#6a7a66' },
+  }),
+  // small, quick, and never stops swinging that rolling pin
+  odd('Granny', { hp: 1, speed: 3.0, reach: 1.05, atk: 0.45, cool: 1.0, push: [2.8, 2.4] }, {
+    coat: { color: '#6a5a68', hem: 0.1 }, shawl: '#7a5038', hair: true, bun: true, prop: 'pin', bean: [0.34, 0.2, 0.6, 0.13], head: [0.72, 0.15, 0.9], shoulder: [0.14, 0.55, 0], hand: [0.33, 0.4, 0.04], arm: [0.03, 0.05],
+    leg: [0.07, 0.15, 0.03, 0.08], hat: [0.78, 0, 0.165, 0.13], hat2: [1, 0.06, 0.014, 0.035], scarf: null, patches: [],
+    colors: { skin: ZSKIN, scarf: '#444', hat: '#a8403a', band: '#8a3430', pom: '#b84a44', mitten: '#5a4a52', leg: '#6a6a70', boot: '#3a3038', nose: '#6a7a66', hair: '#cfcac6' },
+  }),
+  // lost its head and carries it in one mitten, which makes a fine club
+  odd('Headless', { hp: 2, speed: 2.0, reach: 1.25 }, {
+    headAt: [0.47, 0.66, 0.07], bean: [0.45, 0.24, 0.86, 0.15], head: [1.0, 0.15, 0.9], shoulder: [0.2, 0.74, 0], hand: [0.4, 0.52, 0.03], arm: [0.034, 0.055],
+    leg: [0.085, 0.2, 0.034, 0.09], hat: [1.055, 0, 0.17, 0.15], hat2: [1, 0.06, 0.016, 0.035], scarf: [0.82, 0.175, 0.045, 0.3], patches: [[-0.4, 0.5, 0.04, 0.04, '#8a7a4a'], [0.6, 0.4, 0.035, 0.04, '#7a5a86']],
+    colors: { skin: ZSKIN, scarf: '#4a6a8a', hat: '#8a3a36', band: '#74302c', pom: '#9a443e', mitten: '#3f4f66', leg: '#7f8f7a', boot: '#33303a', nose: '#6a7a66' },
+  }),
+  // came up still wearing the coffin: the staves take the blows, so it needs a lot of them and hardly flies
+  odd('Barrel', { hp: 4, speed: 1.6, mass: 70, fly: 0.6 }, {
+    barrel: { y0: 0.3, y1: 0.82 }, bean: [0.56, 0.33, 1.0, 0.19], head: [1.15, 0.18, 0.86], shoulder: [0.3, 0.95, 0], hand: [0.5, 0.68, 0.03], arm: [0.04, 0.06],
+    leg: [0.12, 0.22, 0.04, 0.1], hat: null, scarf: [0.935, 0.24, 0.05, 0.2], patches: [],
+    colors: { skin: '#93ad84', scarf: '#6a4a6a', hat: '#333', band: '#333', mitten: '#5a4a5a', leg: '#6f7f6a', boot: '#2f2a30', nose: '#5f7359' },
+  }),
+];
+for (const d of odds) d.rig = lookRig(d.look);
+
+// index = the `look` number sent over the network: 0-5 walkers, 6 dragger, 7-9 dogs, 10-15 the odd ones — do not reorder
+export const ZOMBIES = [...walkers, dragger, ...dogs, ...odds];
+export const Z_ODD = Object.fromEntries(odds.map((d, i) => [d.name.toLowerCase(), walkers.length + 1 + dogs.length + i]));
 export const Z_WALKERS = walkers.map((_, i) => i), Z_DRAGGER = walkers.length, Z_DOGS = dogs.map((_, i) => walkers.length + 1 + i);
 
 function dogRig(def, index) {
@@ -79,7 +125,7 @@ export function zombieRig(look) {
 }
 
 // ---------- poses ----------
-const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matrix4(), _b = new THREE.Matrix4(), _r = new THREE.Matrix4();
+const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matrix4(), _b = new THREE.Matrix4(), _r = new THREE.Matrix4(), _hop = new THREE.Matrix4();
 const _e = new THREE.Euler(), _v = new THREE.Vector3(), _q = new THREE.Quaternion(), _qr = new THREE.Quaternion();
 const _s = new THREE.Vector3(), _d = new THREE.Vector3(), _f = new THREE.Vector3(), _side = new THREE.Vector3(), _rd = new THREE.Vector3();
 const _rot = Array.from({ length: NCREW }, () => [0, 0, 0]);
@@ -111,13 +157,21 @@ export function zombiePose(rig, root, s, out, off = 0) {
   const up = -1.35 - wind * 1.2 + slam * 1.5;
   set(R[2], up + Math.sin(t * 2.3) * 0.08, 0, -0.42);
   set(R[3], up + Math.sin(t * 2.3 + 1.7) * 0.08, 0, 0.42);
+  const look = rig.def.look;
+  if (look.bounce) { // a ball of a zombie gets about in little hops
+    root = _hop.copy(root).multiply(_a.makeTranslation(0, Math.abs(sw) * 0.2 * Math.min(k * 1.6, 1) + 0.02, 0));
+    R[0][0] = 0.06 + sw * 0.08; R[4][0] *= 0.5; R[5][0] *= 0.5;
+  }
+  if (look.headAt) set(R[2], -0.35 - wind * 1.6 + slam * 2.0 + Math.sin(t * 1.7) * 0.06, 0, -0.1); // the head is held low, and swung like a club
   about(_body, root, rig.pivot[0], R[0]);
   write(rig, 0, _body, out, off);
-  write(rig, 1, about(_m, _body, rig.pivot[1], R[1]), out, off);
+  if (!look.headAt) write(rig, 1, about(_m, _body, rig.pivot[1], R[1]), out, off);
   write(rig, 4, about(_m, root, rig.pivot[4], R[4]), out, off);
   write(rig, 5, about(_m, root, rig.pivot[5], R[5]), out, off);
   if (!drag) {
-    write(rig, 2, about(_m, _body, rig.pivot[2], R[2]), out, off);
+    about(_m, _body, rig.pivot[2], R[2]);
+    write(rig, 2, _m, out, off);
+    if (look.headAt) write(rig, 1, _m, out, off); // the carried head goes wherever that mitten goes
     write(rig, 3, about(_m, _body, rig.pivot[3], R[3]), out, off);
     return out;
   }

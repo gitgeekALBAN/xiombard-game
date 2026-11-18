@@ -28,8 +28,9 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/sim/game.js` — **host-only** simulation: cannon-es world, ragdolls, grabbing/grip, digging, truck, scoring.
 - `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
 - `src/view/models.js` — every mesh model built from primitives in code (coffins, truck, headstones, trees, the shovel).
-- `src/view/crew.js` + `src/sdf/shader.js` — **every character** (diggers, zombies, dogs, the dead): each one is a signed distance function raymarched in a box (no mesh, no texture), so they all share one style.
-- `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs — same six parts, same shader), `layout.js` (level, colliders, decor), `rng.js`.
+- `src/chars/` + `src/view/crew.js` — **every character** (diggers, zombies, dogs, the dead). Each one is described by distance formulas in JavaScript (`human.js`, `creatures.js`), turned into a low-poly mesh once at load (`mesher.js`: surface nets, baked occlusion, two bone weights per vertex) and painted by one shader from the rest position (`material.js`: gouache, knitting, stitched patches, dirt, faces, ink hull). No model or texture files. `cast.html` shows the whole cast (`npm run build:cast`).
+- `src/sdf/shader.js` — the older raymarched version of the crew; only the `sdf.html` demo page uses it.
+- `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs and six odd ones — Bloat, Longshanks, Stack, Granny, Headless, Barrel — all on the same six parts), `layout.js` (level, colliders, decor), `rng.js`.
 - `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `sky.js`, `ground.js`, `noise.glsl.js`.
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
 - `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard.

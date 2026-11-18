@@ -32,6 +32,7 @@ uniform vec3 uLightDir, uLightCol, uShadeCol, uRimCol, uInk;
 uniform float uFace;     // 0 happy crew, 1 zombie, 2 zombie dog, 3 at rest
 uniform vec4 uTint;      // skin goes toward rgb by a (a body that got up)
 uniform vec4 uHeadC;     // face center in rest space (xyz) and head radius
+uniform vec4 uHeadC2;    // a second face (two zombies in one coat); radius 0 = none
 uniform float uBellyR;   // for laying patches around the belly
 uniform vec4 uPatch[4];  // stitched-on patches: angle around the body, height, half width, half height (0 = none)
 uniform vec3 uPatchCol[4];
@@ -60,7 +61,7 @@ float knit(float u, float v, float su, float sv) {
 }
 
 // The face is painted onto the front of the head. Returns ink (x), eye white (y), shade (z), blush (w).
-vec4 face(vec3 p) {
+vec4 faceAt(vec3 p, vec4 uHeadC) {
   float s = uHeadC.w; vec2 f = p.xy - uHeadC.xy;
   float lw = 0.032 * s, ink = 0.0, white = 0.0, shade = 0.0, blush = 0.0;
   if (uFace > 1.5 && uFace < 2.5) { // a dog is seen from the side: one staring eye on its left, a cross on its right
@@ -127,7 +128,8 @@ void main() {
       float along = abs(dd.x) < abs(dd.y) ? q.y : q.x;
       if (abs(d) < 0.011) ink = max(ink, 0.9 * stroke(abs(fract(along / 0.022) - 0.5) * 0.022, 0.0028));
     }
-    vec4 fc = face(p);
+    vec4 fc = faceAt(p, uHeadC);
+    if (uHeadC2.w > 0.0) fc = max(fc, faceAt(p, uHeadC2));
     col = mix(col, vec3(0.86, 0.5, 0.55), fc.w) * (1.0 - fc.z);
     col = mix(col, vec3(0.93, 0.92, 0.84), fc.y);
     ink = max(ink, fc.x);
@@ -142,12 +144,13 @@ void main() {
   else if (id == 12) { // fur: strokes along the body, mouldy blotches, and the face
     col *= 0.84 + 0.2 * vnoise(vec3(p.x * 46.0, p.y * 46.0, p.z * 9.0));
     col = mix(col, col * vec3(0.7, 0.8, 0.62), uGrime * smoothstep(0.48, 0.66, fbm(p * 4.0 + 7.0)));
-    vec4 fc = face(p);
+    vec4 fc = faceAt(p, uHeadC);
     col = mix(col * (1.0 - fc.z), vec3(0.93, 0.92, 0.84), fc.y);
     ink = max(ink, fc.x);
   }
   else if (id == 13) col *= 0.8 + 0.25 * vnoise(vec3(p.x * 8.0, p.y * 70.0, p.z * 8.0));            // wood grain
   else if (id == 15) col *= 0.9 + 0.1 * sin(p.x * 300.0) * sin(p.y * 300.0);                        // woven cloth
+  else if (id == 16) col *= 0.85 + 0.5 * pow(max(dot(N, normalize(uLightDir + vec3(0.0, 0.4, 0.0))), 0.0), 6.0);    // iron: a dull glint
 
   if (uGrime > 0.0 && id != 1) { // earth on everything that came out of the ground, thicker toward the feet and hands
     float low = smoothstep(0.42, 0.0, p.y) * 0.7 + 0.25;
@@ -208,7 +211,7 @@ export function characterMaterials(opts = {}) {
     uPart: { value: Array.from({ length: 6 }, () => new THREE.Matrix4()) }, uNoHead: { value: 0 },
     uLightDir: { value: new THREE.Vector3(-0.4, 0.7, 0.5).normalize() }, uLightCol: { value: new THREE.Color(1, 1, 1) }, uShadeCol: { value: new THREE.Color(0.5, 0.45, 0.66) },
     uRimCol: { value: new THREE.Color(0, 0, 0) }, uInk: { value: new THREE.Color(INK) },
-    uFace: { value: 0 }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uBellyR: { value: 0.25 },
+    uFace: { value: 0 }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uHeadC2: { value: new THREE.Vector4(0, 0, 0, 0) }, uBellyR: { value: 0.25 },
     uPatch: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uPatchCol: { value: Array.from({ length: 4 }, () => new THREE.Color()) },
     uGrime: { value: 0 }, uGrain: { value: 0.05 }, uThick: { value: 0.0075 },
   };

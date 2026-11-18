@@ -64,7 +64,8 @@ const LOOKS = [
 export function lookRig(k) {
   const [yB, rB, yN] = k.bean, [yH, rH, zs] = k.head;
   return {
-    body: { c: [0, (yB - rB + yN) / 2, 0], r: [rB * 0.9, (yN - yB + rB) / 2, rB * zs * 0.9] }, head: { c: [0, yH, 0], r: rH }, neck: [0, yN, 0],
+    // a carried head (headAt) hangs off the hand that holds it instead of the neck
+    body: { c: [0, (yB - rB + yN) / 2, 0], r: [rB * 0.9, (yN - yB + rB) / 2, rB * zs * 0.9] }, head: { c: k.headAt || [0, yH, 0], r: rH }, neck: k.headAt ? k.hand : [0, yN, 0],
     shoulder: k.shoulder, hand: k.hand, armR: Math.max(k.arm[0], 0.04), hip: [k.leg[0], k.leg[1], 0], legR: Math.max(k.leg[2], 0.04),
   };
 }

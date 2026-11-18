@@ -40,7 +40,9 @@ export class Character {
     uniforms.uFace.value = k.face || 0;
     if (k.dog) { const [x, y, z] = dogHeadAt(k.dog); uniforms.uHeadC.value.set(x, y + k.dog.head[0] * 0.1, z, k.dog.head[0] * 0.92); }
     else if (k.faceAt) uniforms.uHeadC.value.set(...k.faceAt);
+    else if (k.headAt) uniforms.uHeadC.value.set(k.headAt[0], k.headAt[1], k.headAt[2] + k.head[1] * k.head[2] * 0.25, k.head[1]);
     else uniforms.uHeadC.value.set(0, k.head[0], k.head[1] * k.head[2] * 0.25, k.head[1]);
+    if (k.face2) uniforms.uHeadC2.value.set(k.face2[0], k.face2[1], k.face2[2] + k.face2[3] * 0.2, k.face2[3]);
     uniforms.uBellyR.value = k.bean ? k.bean[1] : 0.2;
     uniforms.uGrime.value = k.grime || 0;
     (k.patches || []).slice(0, 4).forEach((p, i) => { uniforms.uPatch.value[i].set(p[0], p[1], p[2], p[3]); uniforms.uPatchCol.value[i].setRGB(...lin(p[4])); });
