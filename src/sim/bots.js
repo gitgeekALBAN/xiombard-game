@@ -702,7 +702,7 @@ export function createBots(sim, opts = {}) {
     if (tg && tg.p === p && d < 14) s = 300;
     else if (tg && tg.plot) {
       const dp = hyp(tg.plot.x - q.x, tg.plot.z - q.z);
-      if (z.digT > 0.2 || dp < 2) s = 220;
+      if (z.digT > 0.2 || dp < 2) s = 220 + z.digT * 15; // the longer it scratches, the closer the tenant is to coming back out
       else if (dp < 10 || d < 9) s = 125;
       else return -Infinity;
     } else if (z.def.type === ZDOG && d < 14) s = 175;
@@ -759,7 +759,10 @@ export function createBots(sim, opts = {}) {
     let go2 = now || (pd < 2.05 && facing && z.mode !== 'rise');
     if (!go2 && t.whiff && d < 2.9 && facing) { go2 = true; t.whiff = false; } // too eager: swings at the air
     if (!go2) { t.swingAt = 0; return; }
-    if (!t.swingAt) t.swingAt = T + 0.04 + b.r() * (0.08 + b.persona.hesitate * 0.3);
+    if (!t.swingAt) { // reaction time, and now and then a fumble with the shovel (that is when they get you)
+      t.swingAt = T + 0.04 + b.r() * (0.08 + b.persona.hesitate * 0.3);
+      if (b.r() < 0.12 + b.persona.hesitate * 0.15) t.swingAt += 0.25 + b.r() * 0.45;
+    }
     if (T < t.swingAt) return;
     if (!now && sim.findGrab(p)) return; // the click would grab whatever is lying here instead of swinging
     if (toggle(b, 'g')) { t.swingAt = 0; t.swings++; b.stats.swings++; t.st0 = T; }
@@ -770,7 +773,7 @@ export function createBots(sim, opts = {}) {
     if (w.walkers.length) { // something is up and about: does it need a shovel more than the job needs me?
       const th = pickThreat(b, p, w), cur = b.task && b.task.kind === 'fight' ? b.task : null;
       if (th && (!cur || (th.e !== cur.foe && th.s > (cur.foe.z && cur.foe.z.mode !== 'down' ? threatScore(b, p, w, cur.foe) : 60) + 40))) {
-        startTask(b, { kind: 'fight', foe: th.e, keys: ['z' + th.e.id], jit: (b.r() - 0.5) * 0.4, careful: b.r() < 0.5, whiff: b.r() < 0.1 + b.persona.hesitate * 0.2, swings: 0 });
+        startTask(b, { kind: 'fight', foe: th.e, keys: ['z' + th.e.id], jit: (b.r() - 0.5) * 0.4, careful: b.r() < 0.5, whiff: b.r() < 0.2 + b.persona.hesitate * 0.3, swings: 0 });
         b.pauseT = Math.min(b.pauseT, T + 0.1);
         b.stats.fights++;
       }
