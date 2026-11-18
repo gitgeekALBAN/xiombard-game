@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Character } from '../chars/index.js';
-import { CP, NCREW } from '../shared/crew.js';
+import { CP, NCREW, shovelHoldDir } from '../shared/crew.js';
 import { keyLight } from '../shaders/toon.js';
 import { buildShovel } from './models/shovel.js';
 
@@ -17,12 +17,17 @@ export function buildCrew(rig, opts = {}) {
   const ch = new Character(rig.def, { q: opts.q }), u = ch.uniforms;
   u.uThick.value = 0.011;
 
-  if (opts.shovel) { // the shovel rides in the right mitten, upright while the arms chop (see crewPose)
-    const shovel = buildShovel();
+  if (opts.shovel) {
+    // The shovel is a straight extension of the right arm (crewPose aims that arm like a weapon), gripped in the
+    // mitten. It is rolled about its own axis so that the blade lies face up when carried at the ready.
+    const shovel = buildShovel(), Y = new THREE.Vector3(0, 1, 0);
+    const armDir = new THREE.Vector3().fromArray(rig.shapes[CP.armR].dir), hold = shovelHoldDir();
+    const mount = new THREE.Quaternion().setFromUnitVectors(Y, armDir), carried = new THREE.Quaternion().setFromUnitVectors(armDir, hold);
+    const face = new THREE.Vector3(0, 0, 1).applyQuaternion(mount).applyQuaternion(carried), want = Y.clone().addScaledVector(hold, -Y.dot(hold)).normalize();
+    mount.multiply(new THREE.Quaternion().setFromAxisAngle(Y, Math.atan2(hold.dot(new THREE.Vector3().crossVectors(face, want)), face.dot(want))));
     const hand = rig.hand.clone().setX(-rig.hand.x).sub(rig.rest[CP.armR]);
-    shovel.scale.setScalar(0.85);
-    shovel.position.set(hand.x, hand.y - 0.2, hand.z + 0.04);
-    shovel.rotation.set(0.4, 0, -0.55, 'ZXY');
+    shovel.position.copy(hand).addScaledVector(armDir, k.arm[1] * S * 0.55); // inside the mitten, not at the wrist
+    shovel.quaternion.copy(mount);
     groups[CP.armR].add(shovel);
     groups[CP.armR].userData.shovel = shovel;
   }

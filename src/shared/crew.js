@@ -118,10 +118,15 @@ const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matr
 const _e = new THREE.Euler(), _v = new THREE.Vector3(), _q = new THREE.Quaternion();
 const _rot = Array.from({ length: NCREW }, () => [0, 0, 0]);
 const set = (r, x, y, z) => { r[0] = x; r[1] = y; r[2] = z; };
+const _aim = new THREE.Vector3();
+// how the shovel is carried: the right arm's elevation in radians (a little below level, like a spear at the ready)
+export const SHOVEL_HOLD = -0.3;
+export const shovelHoldDir = () => new THREE.Vector3(-0.14, Math.sin(SHOVEL_HOLD), Math.cos(SHOVEL_HOLD)).normalize();
 const about = (out, parent, j, r) => out.copy(parent).multiply(_a.makeTranslation(j.x, j.y, j.z))
   .multiply(_r.makeRotationFromEuler(_e.set(r[0], r[1], r[2], 'XYZ'))).multiply(_b.makeTranslation(-j.x, -j.y, -j.z));
 
 // Procedural digger animation, straight to part transforms. s = { speed, phase, t, carry, dig, air, swing 0..1 }.
+// Unless something is being carried, the right arm holds the shovel out like a weapon (see `aim` below).
 // Writes 7 floats per part (px,py,pz,qx,qy,qz,qw) into `out` from `off`. The legs hang from the root, so a leaning
 // body keeps its feet under it; head and arms ride on the body.
 export function crewPose(rig, root, s, out, off = 0) {
@@ -141,34 +146,50 @@ export function crewPose(rig, root, s, out, off = 0) {
     set(R[3], low ? -0.75 : -1.5, 0, 0.5);
     R[0][0] += low ? 0.3 : -0.08;
   }
-  if (s.dig) {
-    const c = Math.sin(t * 7);
-    set(R[0], 0.4 + c * 0.18, 0, 0);
-    set(R[2], -0.8 + c * 0.5, 0, -0.55);
-    set(R[3], -0.8 + c * 0.5, 0, 0.55);
-    set(R[4], -0.3, 0, 0);
-    set(R[5], 0.2, 0, 0);
-  }
-  if (s.swing) { // the shovel goes up over the head and comes down hard
-    const w = Math.min(s.swing / 0.3, 1), c = s.swing > 0.3 ? Math.min((s.swing - 0.3) / 0.25, 1) : 0, up = -2.7 * w * w * (3 - 2 * w) + 2.1 * c * c * (3 - 2 * c);
-    set(R[2], up, 0, -0.5);
-    set(R[3], up, 0, 0.5);
-    R[0][0] += -0.2 * w + 0.5 * c;
+  // The right mitten holds the shovel, which is a straight extension of the arm, so the arm is aimed like a weapon:
+  // an elevation (radians above level, forward) instead of joint angles.
+  let aim = null;
+  if (!s.carry) {
+    let e = SHOVEL_HOLD + Math.sin(s.phase * 2) * 0.06 * k + Math.sin(t * 1.4) * 0.02; // at the ready, bobbing with the step
+    if (s.dig) { // a jab forward and down into the ground, the body leaning into it
+      const c = Math.sin(t * 7), push = 0.5 + 0.5 * c;
+      e = -0.55 - 0.5 * push;
+      set(R[0], 0.22 + 0.3 * push, 0, 0);
+      set(R[2], -0.5 - 0.5 * push, 0, -0.3);
+      set(R[4], -0.3, 0, 0);
+      set(R[5], 0.25, 0, 0);
+    }
+    if (s.swing) { // up over the shoulder, then down hard; the blow lands a third of the way in
+      const w = Math.min(s.swing / 0.26, 1), c = s.swing > 0.26 ? Math.min((s.swing - 0.26) / 0.2, 1) : 0, back = Math.max(0, (s.swing - 0.6) / 0.4);
+      const up = w * w * (3 - 2 * w), down = c * c * (3 - 2 * c);
+      e = SHOVEL_HOLD + (2.0 - SHOVEL_HOLD) * up - 3.0 * down + (SHOVEL_HOLD + 1.0) * back * down;
+      R[0][0] += -0.22 * up + 0.5 * down * (1 - back);
+      R[0][1] += 0.35 * up - 0.5 * down * (1 - back); // wind up with the shoulder, follow through
+      set(R[2], -0.4 * up, 0, 0.25);
+    }
+    aim = _aim.set(-0.14, Math.sin(e), Math.cos(e)).normalize();
   }
   if (s.air) {
     set(R[4], -0.6, 0, 0);
     set(R[5], -0.2, 0, 0);
-    if (!s.carry) { R[2][2] = 0.9; R[3][2] = -0.9; }
+    if (!s.carry) R[2][2] = 0.9;
   }
   if (wad > 0.01) root = _hop.copy(root).multiply(_a.makeTranslation(sw * 0.045 * wad, bounce * 0.085 * wad, 0)); // feet and all
-  return rigPose(rig, root, R, out, off);
+  return rigPose(rig, root, R, out, off, aim);
 }
 
 // Six euler rotations (body about the hips, head and arms on the body, legs on the root) -> 7 floats per part.
-export function rigPose(rig, root, R, out, off = 0) {
+// aim (optional): a unit direction in the body's frame; the right arm points along it instead of using R[3].
+export function rigPose(rig, root, R, out, off = 0, aim = null) {
   about(_body, root, rig.pivot[0], R[0]);
   for (let i = 0; i < NCREW; i++) {
-    const m = i === 0 ? _body : about(_m, i < 4 ? _body : root, rig.pivot[i], R[i]), o = off + i * 7;
+    let m;
+    if (i === 3 && aim) {
+      const j = rig.pivot[3];
+      _q.setFromUnitVectors(_v.fromArray(rig.shapes[3].dir), aim);
+      m = _m.copy(_body).multiply(_a.makeTranslation(j.x, j.y, j.z)).multiply(_r.makeRotationFromQuaternion(_q)).multiply(_b.makeTranslation(-j.x, -j.y, -j.z));
+    } else m = i === 0 ? _body : about(_m, i < 4 ? _body : root, rig.pivot[i], R[i]);
+    const o = off + i * 7;
     _v.copy(rig.rest[i]).applyMatrix4(m);
     _q.setFromRotationMatrix(m);
     out[o] = _v.x; out[o + 1] = _v.y; out[o + 2] = _v.z;

@@ -124,25 +124,23 @@ function finish(kit, grp, olw = 0.011) {
 
 // garment: { c, c2, d (stripe pairs per meter), dir 'v' (along the limb) | 'h' (around it), duty, mot }
 
+// A short spade, made to be held like a weapon: the origin is where the mitten grips it, the blade points along +y
+// and its face looks along +z. About 0.85 m from the D-grip to the tip.
 export function buildShovel() {
   const s = new THREE.Group(), kit = [];
   const WOOD = '#8a5f3e', IRON = '#a3a6b4';
-  put(kit, new THREE.CylinderGeometry(0.019, 0.022, 1.0, 7), { c: WOOD, mot: 0.5, pos: [0, 0.12, 0] });
-  // D-grip
-  put(kit, new THREE.TorusGeometry(0.055, 0.014, 5, 10, Math.PI), { c: WOOD, mot: 0.5, pos: [0, 0.66, 0] });
-  put(kit, new THREE.CylinderGeometry(0.013, 0.013, 0.12, 6), { c: WOOD, mot: 0.5, pos: [0, 0.66, 0], rot: [0, 0, Math.PI / 2] });
-  for (const sx of [-1, 1]) put(kit, new THREE.CylinderGeometry(0.012, 0.016, 0.06, 6), { c: WOOD, pos: [sx * 0.05, 0.63, 0], rot: [0, 0, sx * 0.4], ol: false });
+  put(kit, new THREE.CylinderGeometry(0.02, 0.022, 0.52, 7), { c: WOOD, mot: 0.5, pos: [0, 0.18, 0] });
+  // D-grip behind the hand
+  put(kit, new THREE.TorusGeometry(0.05, 0.014, 5, 10, Math.PI), { c: WOOD, mot: 0.5, pos: [0, -0.08, 0], rot: [0, 0, Math.PI] });
+  put(kit, new THREE.CylinderGeometry(0.013, 0.013, 0.11, 6), { c: WOOD, mot: 0.5, pos: [0, -0.08, 0], rot: [0, 0, Math.PI / 2] });
   // socket and a pointed, slightly dished blade
-  put(kit, new THREE.CylinderGeometry(0.024, 0.04, 0.12, 8), { c: IRON, mot: 0.3, pos: [0, -0.4, 0] });
+  put(kit, new THREE.CylinderGeometry(0.04, 0.024, 0.12, 8), { c: IRON, mot: 0.3, pos: [0, 0.44, 0] });
   const sh = new THREE.Shape();
-  sh.moveTo(-0.11, 0); sh.lineTo(0.11, 0); sh.quadraticCurveTo(0.125, -0.18, 0.06, -0.28); sh.quadraticCurveTo(0.02, -0.33, 0, -0.35);
-  sh.quadraticCurveTo(-0.02, -0.33, -0.06, -0.28); sh.quadraticCurveTo(-0.125, -0.18, -0.11, 0);
+  sh.moveTo(-0.11, 0); sh.lineTo(0.11, 0); sh.quadraticCurveTo(0.125, 0.16, 0.06, 0.25); sh.quadraticCurveTo(0.02, 0.3, 0, 0.32);
+  sh.quadraticCurveTo(-0.02, 0.3, -0.06, 0.25); sh.quadraticCurveTo(-0.125, 0.16, -0.11, 0);
   const blade = deform(new THREE.ExtrudeGeometry(sh, { depth: 0.014, bevelEnabled: false, curveSegments: 5 }), (v) => { v.z += 1.4 * v.x * v.x - 0.007; });
-  put(kit, blade, { c: IRON, mot: 0.45, pos: [0, -0.44, 0], shade: (v) => 1.15 - 0.4 * THREE.MathUtils.clamp((-0.6 - v.y) / 0.3, 0, 1) });
+  put(kit, blade, { c: IRON, mot: 0.45, pos: [0, 0.46, 0], shade: (v) => 1.15 - 0.4 * THREE.MathUtils.clamp((v.y - 0.56) / 0.25, 0, 1) });
   finish(kit, s, 0.009);
-  s.position.set(0, -0.2, 0.05);
-  s.rotation.set(1.25, 0, 0); // blade down into the ground in the digging pose (see animRots)
-  s.visible = false;
   return s;
 }
 

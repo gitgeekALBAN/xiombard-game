@@ -8,6 +8,7 @@ import { CP, crewRig } from '../shared/crew.js';
 import { zombieRig } from '../shared/zombies.js';
 import { corpseRig } from '../shared/corpses.js';
 import { buildCrew } from './crew.js';
+import { createViewmodel } from './viewmodel.js';
 import { sfx } from '../audio.js';
 import { isTouchDevice } from '../touch.js';
 import { Post } from './post.js';
@@ -48,6 +49,10 @@ export class View {
     this.camera.lookAt(0, 0, 3);
     this.sky = createSky(fogColor);
     this.scene.add(this.sky);
+    this.scene.add(this.camera); // the first-person shovel hangs off the camera
+    this.viewmodel = createViewmodel(this.camera);
+    this.vmLook = -1;
+    this.lastEye = new THREE.Vector3();
     this.world = buildWorld(this.scene);
     this.groundMat = this.world.groundMat;
     this.graves = createGraves(this.scene, this.groundMat);
@@ -217,7 +222,7 @@ export class View {
       if (e.kind === 'digger') {
         const p = pl.get(e.id);
         const sh = e.groups[CP.armR].userData.shovel;
-        if (sh && p) sh.visible = p.dig;
+        if (sh && p) sh.visible = !p.busy && !(e.id === this.myId && this.fpNow); // always in hand, except when both mittens are full (your own is the one at the camera)
       } else if (e.kind === 'truck') {
         const u = e.groups[0].userData;
         for (const w of u.wheels) w.rotation.z = st.truck[0];
@@ -244,7 +249,13 @@ export class View {
         e.groups[i].quaternion.slerp(e.tq[i], a);
       }
       // your own head and hat would fill the screen in first person, so that body is drawn without them
-      if (e.crew) e.crew.update(e === me && fp && !this.debugCam);
+      if (e.crew) {
+        // in first person your own body is not drawn at all: it leans and rocks into view, and the shovel at the camera
+        // stands in for your hands (see viewmodel.js)
+        const own = e === me && fp && !this.debugCam;
+        e.crew.mesh.visible = !own;
+        e.crew.update(false);
+      }
       if (e.shadow) {
         const c = e.groups[0].position; // coffin, pelvis or belly
         const gy = this.groundHeight(c.x, c.z);
@@ -321,6 +332,12 @@ export class View {
       if (b.parent) b.quaternion.premultiply(b.parent.getWorldQuaternion(_q).invert());
     }
     this.sky.position.copy(this.camera.position);
+    // the shovel at the camera: only in first person, on your feet, with a free hand
+    if (me && me.look !== this.vmLook) { this.vmLook = me.look; this.viewmodel.setColor(crewRig(me.look).def.look.colors.mitten); }
+    const moved = Math.hypot(this.camTarget.x - this.lastEye.x, this.camTarget.z - this.lastEye.z) / Math.max(dt, 1e-3);
+    this.lastEye.copy(this.camTarget);
+    this.fpNow = fp && !this.debugCam;
+    this.viewmodel.update(dt, { show: this.fpNow && !!meState && !meState.busy, speed: Math.min(moved, 8), dig: !!meState?.dig, swing: !!meState?.sw });
     this.post.render(this.scene, this.camera, this.time);
     this.updateLabels();
   }

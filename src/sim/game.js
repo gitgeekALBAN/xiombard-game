@@ -1098,7 +1098,7 @@ export class Sim {
         this.ents.filter((e) => e.z).length],
       risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
-        id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging || this.swinging(e),
+        id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging, sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
         grip: e.grab && !e.grab.coffin ? +e.grab.grip.toFixed(2) : -1,
       })),
       ev,
