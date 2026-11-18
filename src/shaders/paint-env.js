@@ -156,8 +156,8 @@ void main() {
       base = mix(base, base * 0.38, max(seam, joint));
     }
     float m = vnoise(o.xz * 6.0 + o.y * 3.0) * 0.6 + vnoise(o.xy * 17.0) * 0.4;
-    float moss = smoothstep(0.62, 0.72, m + (0.5 - vW.y) * 0.5 + max(N.y, 0.0) * 0.25);
-    base = mix(base, MOSS, moss * 0.75);
+    float moss = smoothstep(0.66, 0.76, m + (0.45 - vW.y) * 0.35 + max(N.y, 0.0) * 0.08);
+    base = mix(base, MOSS, moss * 0.6);
     mot = 0.6;
   } else if (pat == 6) {
     float s = step(0.5, fract(vUv.x * vPat.y));
