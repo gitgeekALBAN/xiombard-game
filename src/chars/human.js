@@ -1,5 +1,5 @@
 import { smin, sphere, ellipsoid, roundCone, capsule, turned, mirrorX, squashZ, noise3 } from './sdf.js';
-import { lathe, merge, place, ribbon, revolve, ball, along, clip } from './prims.js';
+import { lathe, merge, place, ribbon, revolve, ball, along } from './prims.js';
 
 // A two-legged character as a list of pieces for the mesher, sculpted from the numbers of its look (see
 // shared/crew.js for what each array means). Rest pose: feet on y = 0, facing +Z, +X is the character's left.
@@ -19,9 +19,9 @@ const shift = (b, ox, oy, oz) => [b[0] + ox, b[1] + oy, b[2] + oz, b[3] + ox, b[
 //   coat        { color, hem }: the body is a long garment with sleeves, cut off flat at hem
 //   headAt      [x, y, z]: the head is not on the shoulders but carried there (the neck gets a stitched cap)
 //   face2       [x, y, z, r]: a second head peeking out of the body
-//   shawl, bun  a cloth over the shoulders, a knot of hair
+//   shawl, bun  a cloth over the shoulders (paint), a knot of hair (a ball)
 //   barrel      { y0, y1, staves }: a barrel around the belly (a primitive; staves, hoops and rivets are painted)
-//   prop 'pin'  a rolling pin in the right mitten
+//   prop 'pin'  a rolling pin held in the right mitten like a club
 export function humanPieces(k, q = 1) {
   const [yB, rB, yN, rN] = k.bean, [yH, rH, zs] = k.head, col = Object.fromEntries(Object.entries(k.colors).map(([n, h]) => [n, lin(h)]));
   const [sx, sy, sz] = k.shoulder, [hx, hy, hz] = k.hand, ar = k.arm[0], mr = k.arm[1], out = [], c = (v) => v / q;
@@ -48,7 +48,7 @@ export function humanPieces(k, q = 1) {
   else { // the body and the head are separate pieces: a coat with a head in its collar, or a head carried in a mitten
     out.push({ mesh: turn(belly, yB), occ: belly, mat: coat ? MAT.cloth : MAT.skin, color: garb || col.skin, bone: 0 });
     out.push({ mesh: loose ? place(ball(rH, rH * 0.96, rH * zs, 12, 8), (x, y, z) => [x, y, z], ...loose) : turn(head, (yN + yH) / 2, 9), occ: head, mat: MAT.skin, color: col.skin, bone: 1 });
-    if (loose) out.push({ mesh: place(ball(rN * 0.92, 0.035, rN * 0.92 * zs, 10, 4), (x, y, z) => [x, y, z], 0, yN + rN * 0.55, 0), mat: MAT.cloth, color: lin(k.capColor || '#8a5a44'), bone: 0 });
+    // (the stitched patch over the empty neck is paint: see `uWrap` in material.js)
   }
   if (k.face2) { const [fx, fy, fz, fr] = k.face2; out.push({ mesh: place(ball(fr, fr * 0.95, fr * 0.9, 12, 8), (x, y, z) => [x, y, z], fx, fy, fz), mat: MAT.skin, color: col.skin, bone: 0 }); }
   const armLen = Math.hypot(hx - sx, hy - sy, hz - sz);
@@ -140,28 +140,17 @@ export function humanPieces(k, q = 1) {
     out.push({ mesh: set(merge(...parts)), occ: (x, y, z) => Math.max(shade(x, y, z), hb + ho[1] - 0.02 - y), mat: knit ? MAT.knit : MAT.felt, color: col.hat, bone: 1 });
     const bandR = (knit ? cr * Math.sqrt(Math.max(1 - (bh * 0.5 / ch) ** 2, 0)) : cr * 0.97) + bp, y0 = 0.012, y1 = 0.012 + bh, rr = Math.min(bh * 0.3, 0.014);
     const frayed = k.torn ? (ring, a) => (ring < 2 ? 0.016 * noise3(a * 3.1 + 4, 0.5, 0.5) - 0.008 : 0) : undefined; // a moth-eaten lower edge
-    out.push({ mesh: set(lathe([[bandR - 0.02, y0], [bandR, y0 + rr], [bandR, y1 - rr], [bandR - 0.02, y1]], 14, { smooth: true, lift: frayed })), mat: knit ? MAT.cuff : MAT.felt, color: col.band, bone: 1 });
+    if (knit) out.push({ mesh: set(lathe([[bandR - 0.02, y0], [bandR, y0 + rr], [bandR, y1 - rr], [bandR - 0.02, y1]], 14, { smooth: true, lift: frayed })), mat: knit ? MAT.cuff : MAT.felt, color: col.band, bone: 1 }); // a felt hat's ribbon is paint (`uBand`)
     if (pom > 0) out.push({ mesh: set(place(ball(pom, pom, pom, 10, 6), (x, y, z) => [x, y, z], 0, ch + pom * 0.55, 0)), mat: MAT.fluff, color: col.pom || col.hat, bone: 1 }); // the fluff is paint
   }
 
   if (!k.face) { // the living have a little button of a nose
     out.push({ mesh: place(ball(rH * 0.17, rH * 0.15, rH * 0.24, 8, 5), (x, y, z) => [x, y, z], ho[0], yH - rH * 0.1 + ho[1], rH * zs * 0.98 + ho[2]), mat: MAT.nose, color: col.nose, bone: 1 });
   }
-  if (k.hair) { // a cap of hair over the back of the head, cut away in front so the face shows
-    const hairAt = [ho[0], yH - rH * 0.25 + ho[1], -0.012 + ho[2]];
-    const cap = clip(place(ball(rH + 0.034, rH * 1.35, (rH + 0.03) * zs, 12, 8), (x, y, z) => [x, y, z], ...hairAt), (x, y, z) => z - ho[2] < rH * 0.36);
-    out.push({ mesh: cap, mat: MAT.hair, color: col.hair, bone: 1 });
-    if (k.bun) out.push({ mesh: place(ball(rH * 0.42, rH * 0.42, rH * 0.42, 8, 5), (x, y, z) => [x, y, z], 0, yH + rH * 0.25, -rH * 1.05), mat: MAT.hair, color: col.hair, bone: 1 });
-  }
+  // Hair and a shawl are paint on the head and the shoulders (`uHair`, `uWrap` in material.js): they lie flat on
+  // the body, so modeling them would only add triangles. A bun sticks out, so it is a small ball.
+  if (k.hair && k.bun) out.push({ mesh: place(ball(rH * 0.42, rH * 0.42, rH * 0.42, 8, 5), (x, y, z) => [x, y, z], 0, yH + rH * 0.25, -rH * 1.05), mat: MAT.hair, color: col.hair, bone: 1 });
 
-  // ---- the odd ones' extras
-  if (k.shawl) { // a cloth over the shoulders: a band that follows the body's outline, with a scalloped lower edge and a knot in front
-    const top = yN - 0.03, low = yN - 0.2, rAt = (y) => { let a = 0, b = 2; for (let n = 0; n < 24; n++) { const m = (a + b) / 2; if (belly(m, y, 0) < 0) a = m; else b = m; } return a; };
-    const ys4 = [0, 1, 2, 3].map((i) => low + ((top - low) * i) / 3), outer = ys4.map((y) => [rAt(y) + 0.05, y]), inner = ys4.map((y) => [rAt(y) + 0.012, y]).reverse();
-    const band = lathe([...outer, ...inner], 21, { smooth: true, closed: true, zs, lift: (ring, a) => (ring === 0 || ring === 7 ? 0.03 * Math.cos(a * 7) : 0) });
-    const knot = place(ball(0.042, 0.042, 0.042, 8, 5), (x, y, z) => [x, y, z], 0, top - 0.07, rAt(top - 0.07) * zs + 0.045);
-    out.push({ mesh: merge(band, knot), mat: MAT.cloth, color: lin(k.shawl), bone: 0 });
-  }
   // Hard, simple things are primitives: a few rings of a solid of revolution. Their planks, hoops and rivets are
   // paint (see the wood and iron materials in material.js), not geometry.
   if (k.barrel) { // what is left of a coffin, worn like a barrel: a bulging wall, a splintered rim, a short way in
@@ -174,9 +163,10 @@ export function humanPieces(k, q = 1) {
     const floor = lathe([[0.001, y1 - 0.16], [R * 0.93 - 0.04, y1 - 0.16]], seg, { zs }), bottom = lathe([[0.001, y0], [R * 0.93, y0]], seg, { zs, flip: true });
     out.push({ mesh: merge(wall, top, inside, floor, bottom), mat: MAT.wood, color: lin(k.barrel.color || '#8a6238'), bone: 0 });
   }
-  if (k.prop === 'pin') { // a rolling pin lying across the right mitten
-    const pin = lathe([[0.001, -0.25], [0.015, -0.245], [0.017, -0.17], [0.04, -0.16], [0.044, 0], [0.04, 0.16], [0.017, 0.17], [0.015, 0.245], [0.001, 0.25]], 10, { smooth: true });
-    out.push({ mesh: place(pin, (x, y, z) => [y, -x, z], -hx + 0.14, hy - 0.01, hz + mr * 1.2), mat: MAT.wood, color: lin('#b08a5a'), bone: 3 });
+  if (k.prop === 'pin') { // a rolling pin gripped by one handle like a club: a straight extension of the right arm
+    const pin = lathe([[0.001, -0.04], [0.015, -0.035], [0.017, 0.04], [0.04, 0.05], [0.044, 0.21], [0.04, 0.37], [0.017, 0.38], [0.015, 0.455], [0.001, 0.46]], 10, { smooth: true });
+    const L = Math.hypot(hx - sx, hy - sy, hz - sz), d = [(sx - hx) / L, (hy - sy) / L, (hz - sz) / L], grip = [-hx + d[0] * mr * 0.5, hy + d[1] * mr * 0.5, hz + d[2] * mr * 0.5];
+    out.push({ mesh: along(pin, grip, [grip[0] + d[0], grip[1] + d[1], grip[2] + d[2]]), mat: MAT.wood, color: lin('#b08a5a'), bone: 3 });
   }
   return out;
 }

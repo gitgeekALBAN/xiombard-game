@@ -46,6 +46,12 @@ export class Character {
     uniforms.uBellyR.value = k.bean ? k.bean[1] : 0.2;
     uniforms.uGrime.value = k.grime || 0;
     if (k.hat && k.hatPatch) { const h = k.hatPatch, dy = k.headAt ? k.headAt[1] - k.head[0] : 0; uniforms.uHatPatch.value.set(h[0], h[1] + dy, h[2], h[3]); uniforms.uHatPatchCol.value.setRGB(...lin(h[4])); uniforms.uHatR.value = k.hat[2]; }
+    // garments that are paint, not geometry
+    const dy = k.headAt ? k.headAt[1] - k.head[0] : 0;
+    if (k.shawl) { uniforms.uWrap.value.set(k.bean[2] - 0.2, k.bean[2] - 0.03, 7, 1); uniforms.uWrapCol.value.setRGB(...lin(k.shawl)); }
+    else if (k.headAt) { uniforms.uWrap.value.set(k.bean[2] + k.bean[3] * 0.25, 99, 0, 0); uniforms.uWrapCol.value.setRGB(...lin(k.capColor || '#8a5a44')); }
+    if (k.hair) { uniforms.uHair.value.set(k.head[0] + dy, k.head[1], k.head[1] * 0.3, 1); uniforms.uHairCol.value.setRGB(...lin(k.colors.hair || '#77707c')); }
+    if (k.hat && k.hat2[0] < 0.5) { uniforms.uBand.value.set(k.hat[0] + dy + 0.012, k.hat[0] + dy + 0.012 + k.hat2[1]); uniforms.uBandCol.value.setRGB(...lin(k.colors.band)); }
     if (k.barrel) uniforms.uBarrel.value.set(k.barrel.y0, k.barrel.y1, k.barrel.staves || 10, k.head[2]);
     (k.patches || []).slice(0, 4).forEach((p, i) => { uniforms.uPatch.value[i].set(p[0], p[1], p[2], p[3]); uniforms.uPatchCol.value[i].setRGB(...lin(p[4])); });
     const geo = characterGeometry(k, opts.q || QUALITY.value);

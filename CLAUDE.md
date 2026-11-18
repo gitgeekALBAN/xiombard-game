@@ -29,7 +29,6 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
 - `src/view/models.js` — every mesh model built from primitives in code (coffins, truck, headstones, trees, the shovel).
 - `src/chars/` + `src/view/crew.js` — **every character** (diggers, zombies, dogs, the dead). Each one is described by distance formulas in JavaScript (`human.js`, `creatures.js`), turned into a low-poly mesh once at load (`mesher.js`: surface nets, baked occlusion, two bone weights per vertex) and painted by one shader from the rest position (`material.js`: gouache, knitting, stitched patches, dirt, faces, ink hull). No model or texture files. `cast.html` shows the whole cast (`npm run build:cast`).
-- `src/sdf/shader.js` — the older raymarched version of the crew; only the `sdf.html` demo page uses it.
 - `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs and six odd ones — Bloat, Longshanks, Stack, Granny, Headless, Barrel — all on the same six parts), `layout.js` (level, colliders, decor), `rng.js`.
 - `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `sky.js`, `ground.js`, `noise.glsl.js`.
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
@@ -66,7 +65,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - **One rule.** Hard, simple shapes are plain primitives (boxes, solids of revolution, tubes, ribbons) with only as many triangles as the silhouette needs. Small relief is never geometry: planks, seams, hoops, rivets, stitches, knitting, fringe, cracks, engravings and dirt are painted by the fragment shader from the object's own coordinates. Only soft shapes that have to melt into each other are sculpted (mittens, boots, fur, pompoms on dogs).
 - **Ink outlines** are an inverted hull, and a hull doubles every triangle it covers: keep it for real silhouettes, paint the lines inside a shape.
 - **Gaussian splatting: tried and dropped.** We built a splat renderer and a set of splat puppets; it cost a second rendering path, was heavy, hard to animate, and did not look better than painted meshes. Do not bring it back without a concrete reason.
-- **Raymarching whole characters per pixel: tried and replaced.** `src/sdf/` and `sdf.html` are the old demo of it; the game does not use it.
+- **Raymarching whole characters per pixel: tried and replaced.** It looked good but cost every covered pixel dozens of formula evaluations; low-poly meshes painted by a shader look the same and cost almost nothing. The demo page is gone.
 
 ## Product thinking
 Product, segment and value decisions follow Advanced Jobs To Be Done / Next Move Theory (Ivan Zamesin). Treat new features as value hypotheses with a named riskiest assumption and the cheapest test before building.

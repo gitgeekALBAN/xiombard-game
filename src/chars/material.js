@@ -38,6 +38,12 @@ uniform vec4 uPatch[4];  // stitched-on patches: angle around the body, height, 
 uniform vec3 uPatchCol[4];
 uniform vec4 uHatPatch;  // a patch sewn on the hat: angle around the head, height, half width, half height (0 = none)
 uniform vec3 uHatPatchCol; uniform float uHatR;
+uniform vec4 uWrap;      // cloth painted on the body: from y, to y, scallops around the lower edge, 1 = a knot in front (to <= from: none)
+uniform vec3 uWrapCol;
+uniform vec4 uHair;      // hair painted on the head: head center y, head radius, how far forward it reaches, 1 = on
+uniform vec3 uHairCol;
+uniform vec2 uBand;      // a ribbon painted around a felt hat: from y, to y
+uniform vec3 uBandCol;
 uniform vec4 uBarrel;    // a worn barrel: bottom y, top y, staves around, head depth squash (staves 0 = none)
 uniform float uGrime;    // 0 clean .. 1 fresh out of the ground
 uniform float uGrain;
@@ -180,6 +186,29 @@ void main() {
   else if (id == 15) col *= 0.9 + 0.1 * sin(p.x * 300.0) * sin(p.y * 300.0);                        // woven cloth
   else if (id == 16) col *= 0.85 + 0.5 * pow(max(dot(N, normalize(uLightDir + vec3(0.0, 0.4, 0.0))), 0.0), 6.0);    // iron: a dull glint
 
+  if (uBand.y > uBand.x && id == 10 && p.y > uBand.x && p.y < uBand.y) { // the ribbon on a felt hat
+    col = uBandCol * (0.88 + 0.12 * sin(p.y * 500.0)) * (0.9 + 0.2 * fbm(p * 7.0));
+    ink = max(ink, 0.8 * stroke(min(p.y - uBand.x, uBand.y - p.y), 0.004));
+  }
+  if (uHair.w > 0.5 && id == 1) { // hair lies on the back and sides of the head, with a ragged edge toward the face
+    vec3 h = p - vec3(uHeadC.x, uHair.x, uHeadC.z - uHeadC.w * 0.225);
+    float edge = uHair.z + 0.018 * sin(p.y * 46.0) + 0.012 * sin(p.y * 113.0 + 1.0), d = h.z - edge;
+    if (length(h) < uHair.y * 1.45 && h.y > -uHair.y * 1.25) {
+      if (d < 0.0) col = uHairCol * (0.8 + 0.25 * vnoise(vec3(around * 30.0, p.y * 5.0, 1.0))) * (0.9 + 0.2 * fbm(p * 7.0));
+      ink = max(ink, 0.85 * stroke(abs(d), 0.0045));
+    }
+  }
+  if (uWrap.y > uWrap.x && (id == 1 || id == 15) && length(p.xz) < uBellyR * 1.3) { // a shawl, or the patch over an empty neck
+    float low = uWrap.x + (uWrap.z > 0.0 ? 0.032 * cos(around * uWrap.z) : 0.0);
+    if (p.y > low && p.y < uWrap.y) col = uWrapCol * (0.88 + 0.12 * sin(p.x * 300.0) * sin(p.y * 300.0)) * (0.9 + 0.2 * fbm(p * 7.0));
+    if (p.y < uWrap.y) ink = max(ink, 0.85 * stroke(abs(p.y - low), 0.0045));
+    if (uWrap.w > 0.5 && p.z > 0.0) { // the knot
+      float k = length(vec2(p.x, p.y - uWrap.y + 0.075)) - 0.042;
+      if (k < 0.0) col = uWrapCol * 0.82 * (0.9 + 0.2 * fbm(p * 9.0));
+      ink = max(ink, 0.85 * stroke(abs(k), 0.004));
+    }
+    if (uWrap.z <= 0.0 && p.y > low + 0.012) ink = max(ink, 0.8 * cross2(p.xz, 0.035, 0.005)); // a cross of thread on the patch
+  }
   if (uHatPatch.z > 0.0 && (id == 3 || id == 10)) sewn(col, ink, p, atan(p.x - uHeadC.x, p.z - uHeadC.z + uHeadC.w * 0.225), uHatR, uHatPatch, uHatPatchCol);
   if (uGrime > 0.0 && id != 1) { // earth on everything that came out of the ground, thicker toward the feet and hands
     float low = smoothstep(0.42, 0.0, p.y) * 0.7 + 0.25;
@@ -243,6 +272,8 @@ export function characterMaterials(opts = {}) {
     uFace: { value: 0 }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uHeadC2: { value: new THREE.Vector4(0, 0, 0, 0) }, uBellyR: { value: 0.25 },
     uPatch: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uPatchCol: { value: Array.from({ length: 4 }, () => new THREE.Color()) },
     uHatPatch: { value: new THREE.Vector4(0, 0, 0, 0) }, uHatPatchCol: { value: new THREE.Color() }, uHatR: { value: 0.15 },
+    uWrap: { value: new THREE.Vector4(0, 0, 0, 0) }, uWrapCol: { value: new THREE.Color() }, uHair: { value: new THREE.Vector4(0, 0, 0, 0) }, uHairCol: { value: new THREE.Color() },
+    uBand: { value: new THREE.Vector2(0, 0) }, uBandCol: { value: new THREE.Color() },
     uBarrel: { value: new THREE.Vector4(0, 0, 0, 1) }, uGrime: { value: 0 }, uGrain: { value: 0.05 }, uThick: { value: 0.0075 },
   };
   const fog = opts.fog !== false;

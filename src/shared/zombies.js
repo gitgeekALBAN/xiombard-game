@@ -176,7 +176,11 @@ export function zombiePose(rig, root, s, out, off = 0) {
     about(_m, _body, rig.pivot[2], R[2]);
     write(rig, 2, _m, out, off);
     if (look.headAt) write(rig, 1, _m, out, off); // the carried head goes wherever that mitten goes
-    write(rig, 3, about(_m, _body, rig.pivot[3], R[3]), out, off);
+    if (look.prop) { // a club in the right mitten: held up at the ready, swung up and brought down (the arm is aimed, see crewPose)
+      const e = 0.65 + Math.sin(t * 2.1) * 0.06 + wind * 1.1 - slam * 2.3, j = rig.pivot[3];
+      _q.setFromUnitVectors(_rd.fromArray(rig.shapes[3].dir), _d.set(-0.1, Math.sin(e), Math.cos(e)).normalize());
+      write(rig, 3, _m.copy(_body).multiply(_a.makeTranslation(j.x, j.y, j.z)).multiply(_r.makeRotationFromQuaternion(_q)).multiply(_b.makeTranslation(-j.x, -j.y, -j.z)), out, off);
+    } else write(rig, 3, about(_m, _body, rig.pivot[3], R[3]), out, off);
     return out;
   }
   // The dragger's arms are longer than its shoulders are high: each fist rests on the ground behind the shoulder
