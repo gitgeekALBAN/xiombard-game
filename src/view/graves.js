@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { toon, outlineMat } from '../shaders/toon.js';
+import { paintMat, paintAttrs, spec, P } from '../shaders/paint-env.js';
 import { PAL } from './palette.js';
 import { geo, buildHeadstone } from './models.js';
 import { outlineGeo } from './models/common.js';
@@ -16,10 +17,11 @@ import { PLOTS, PLOT_HALF, PLOT_MAX_DEPTH } from '../shared/layout.js';
 const dirt = toon(PAL.dirtLight, { mottle: 1, gradColor: PAL.dirtDark, gradY: [0.0, 0.45], rim: 0.6 });
 const looseDirt = toon(PAL.dirtLight, { mottle: 1, rim: 0.5 });
 
-// Lumpy earth: a squashed sphere pushed around by noise, its lower half flattened onto the ground.
-// footN > 2 squares the footprint off (a superellipse) so a heap can cover a rectangular hole.
-function earth(seed, { sx, sy, sz, footN = 2, lump = 0.18, freq = 2.2, clods = 0, peak = 2 }) {
-  const g = new THREE.SphereGeometry(1, 22, 12);
+// Lumpy earth: a dome pushed around by noise, its rim pressed onto the ground. Only the upper half of a sphere:
+// the rest would lie flat under the ground. footN > 2 squares the footprint off (a superellipse) so a heap can
+// cover a rectangular hole. Clods are a few low balls (the dug mounds paint theirs instead).
+function earth(seed, { sx, sy, sz, footN = 2, lump = 0.18, freq = 2.2, clods = 0, peak = 2, seg = [16, 6] }) {
+  const g = new THREE.SphereGeometry(1, seg[0], seg[1], 0, Math.PI * 2, 0, Math.PI / 2);
   const p = g.attributes.position, v = new THREE.Vector3();
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i);
@@ -37,7 +39,7 @@ function earth(seed, { sx, sy, sz, footN = 2, lump = 0.18, freq = 2.2, clods = 0
   const R = (i) => noise3(seed * 1.7 + i * 3.1, i * 0.37, 0.5);
   for (let i = 0; i < clods; i++) {
     const a = R(i) * 12.6, d = 1.02 + R(i + 9) * 0.25, s = 0.05 + R(i + 4) * 0.06;
-    const c = new THREE.SphereGeometry(1, 6, 4).toNonIndexed();
+    const c = new THREE.SphereGeometry(1, 5, 3).toNonIndexed();
     c.applyMatrix4(mat4([Math.cos(a) * sx * d, s * 0.3, Math.sin(a) * sz * d], [a, a * 2, 0], [s * 1.3, s * 0.8, s]));
     parts.push(c);
   }
@@ -50,16 +52,15 @@ function earth(seed, { sx, sy, sz, footN = 2, lump = 0.18, freq = 2.2, clods = 0
 }
 
 // Loose soil filling the hole: a slab whose top is bumpy, so it reads as shovelled earth.
+// Only the top is ever seen (the sides lie against the walls of the hole), so it is a bumpy sheet.
 function fillGeo() {
-  const g = new THREE.BoxGeometry(PLOT_HALF.x * 2, 0.4, PLOT_HALF.z * 2, 6, 1, 12);
+  const g = new THREE.PlaneGeometry(PLOT_HALF.x * 2, PLOT_HALF.z * 2, 4, 8).rotateX(-Math.PI / 2);
   const p = g.attributes.position;
   for (let i = 0; i < p.count; i++) {
-    if (p.getY(i) < 0.1) continue;
     const x = p.getX(i), z = p.getZ(i);
     const edge = Math.min(PLOT_HALF.x - Math.abs(x), PLOT_HALF.z - Math.abs(z)) > 0.01 ? 1 : 0.3;
-    p.setY(i, 0.2 + (noise3(x * 4, 0, z * 4) - 0.5) * 0.12 * edge);
+    p.setY(i, (noise3(x * 4, 0, z * 4) - 0.5) * 0.12 * edge);
   }
-  g.translate(0, -0.2, 0);
   g.computeVertexNormals();
   return g;
 }
@@ -112,24 +113,26 @@ function plate(name, face, seed) {
 }
 
 export function createGraves(scene, groundMat) {
-  const pile = earth(3, { sx: 1, sy: 1, sz: 1, lump: 0.35, freq: 3.4, clods: 9, peak: 1.6 });
-  const pileHull = outlineGeo(pile);
+  // the dug mounds: one instanced dome for all plots (clods painted), with its instanced ink hull
+  const pile = paintAttrs(earth(3, { sx: 1, sy: 1, sz: 1, lump: 0.35, freq: 3.4, peak: 1.6 }).toNonIndexed(), spec(PAL.dirtLight, { pat: P.dirt, rim: 0.6 }));
+  const mounds = new THREE.InstancedMesh(pile, paintMat(), PLOTS.length);
+  const moundHull = new THREE.InstancedMesh(outlineGeo(pile), outlineMat(0.02), PLOTS.length);
+  for (const im of [mounds, moundHull]) { im.frustumCulled = false; im.name = 'mounds'; scene.add(im); }
+  const _m = new THREE.Matrix4(), _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), Y = new THREE.Vector3(0, 1, 0);
   const fill = fillGeo();
-  const heaps = [0, 1, 2].map((i) => earth(11 + i * 5, { sx: 0.84, sy: 0.2, sz: 1.46, footN: 3.6, lump: 0.3, freq: 3.2, clods: 6, peak: 2.6 }));
+  const heaps = [0, 1, 2].map((i) => earth(11 + i * 5, { sx: 0.84, sy: 0.2, sz: 1.46, footN: 3.6, lump: 0.3, freq: 3.2, clods: 4, peak: 2.6, seg: [14, 5] }));
 
   const plots = PLOTS.map((p, i) => {
     const floor = new THREE.Mesh(geo.BOX, groundMat);
     floor.scale.set(PLOT_HALF.x * 2, 2, PLOT_HALF.z * 2);
     floor.position.set(p.x, -1, p.z);
     // the pile of dug earth sits beside the hole, on the side away from the path
-    const mound = new THREE.Mesh(pile, dirt);
-    mound.add(new THREE.Mesh(pileHull, outlineMat(0.02)));
-    mound.position.set(p.x + PLOT_HALF.x + 0.72, 0, p.z + (i % 2 ? 0.25 : -0.25));
-    mound.rotation.y = (i % 3 - 1) * 0.35 + Math.PI * (i % 2);
+    const mound = { x: p.x + PLOT_HALF.x + 0.72, z: p.z + (i % 2 ? 0.25 : -0.25), yaw: (i % 3 - 1) * 0.35 + Math.PI * (i % 2) };
+    mounds.setMatrixAt(i, _m.makeScale(0, 0, 0)); moundHull.setMatrixAt(i, _m);
     const fillM = new THREE.Mesh(fill, looseDirt);
     fillM.position.set(p.x, -2, p.z);
     fillM.visible = false;
-    scene.add(floor, mound, fillM);
+    scene.add(floor, fillM);
     return { floor, mound, fill: fillM, stone: null, seed: -1, x: p.x, z: p.z };
   });
 
@@ -151,8 +154,11 @@ export function createGraves(scene, groundMat) {
       const v = plots[i];
       v.floor.position.y = -d - 1;
       const m = Math.min(1, d / PLOT_MAX_DEPTH) * (1 - f);
-      v.mound.scale.set(0.35 + 0.3 * m, 0.03 + 0.62 * m, 0.55 + 0.4 * m);
-      v.mound.visible = m > 0.02;
+      const mo = v.mound;
+      if (m > 0.02) _m.compose(_p.set(mo.x, 0, mo.z), _q.setFromAxisAngle(Y, mo.yaw), _s.set(0.35 + 0.3 * m, 0.03 + 0.62 * m, 0.55 + 0.4 * m));
+      else _m.makeScale(0, 0, 0);
+      mounds.setMatrixAt(i, _m); moundHull.setMatrixAt(i, _m);
+      mounds.instanceMatrix.needsUpdate = true; moundHull.instanceMatrix.needsUpdate = true;
       v.fill.visible = f > 0.01 && !(v.stone && v.stone.userData.settled);
       v.fill.position.y = -d + (d + 0.02) * f;
       if (buried && v.seed !== seed) {

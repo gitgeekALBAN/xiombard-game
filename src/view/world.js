@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { groundMaterial } from '../shaders/ground.js';
 import { outlineMat, LANTERN_Y, lampsOn } from '../shaders/toon.js';
+import { glowSprites } from '../shaders/paint-env.js';
 import { buildHeadstone, geo } from './models.js';
 import { outlineGeo } from './models/common.js';
 import {
-  Batch, MAT, G, M, treeParts, crowParts, buildCrowHead, lanternPostParts, lanternParts, glowQuad, pillarParts,
+  Batch, MAT, TOON, G, M, treeParts, crowParts, buildCrowHead, lanternPostParts, lanternParts, pillarParts,
   gateLeafParts, shedParts, carpenterParts, coffinLidParts, tuftGeo, mushroomGeos, signLabels,
 } from './models/environment.js';
 import { buildBackdrop } from './backdrop.js';
@@ -16,7 +17,34 @@ import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, PILE, PLOTS, PL
 // Positions and sizes come from shared/layout.js because the host's colliders use the same numbers.
 // buildWorld(scene) returns { groundMat, update(time, dt, camera), setDay(k) }.
 // Any mesh with userData.billboard = true is turned to face the camera every frame by the view.
-// Static set pieces go into one Batch, merged per material at the end (see models/environment.js).
+// Static set pieces go into one Batch: one painted mesh plus its ink hulls (see models/environment.js).
+
+// Bake a set of static groups into one mesh per material (the old headstones: each is built on its own, then
+// they are merged so the whole row costs a few draw calls instead of three each).
+function mergeStatic(groups, name) {
+  const lists = new Map();
+  for (const g of groups) {
+    g.updateMatrixWorld(true);
+    g.traverse((o) => {
+      if (!o.isMesh) return;
+      const c = o.geometry.index ? o.geometry.toNonIndexed() : o.geometry.clone();
+      for (const k of Object.keys(c.attributes)) if (k !== 'position' && k !== 'normal') c.deleteAttribute(k);
+      if (!c.attributes.normal) c.computeVertexNormals();
+      c.applyMatrix4(o.matrixWorld);
+      if (!lists.has(o.material)) lists.set(o.material, []);
+      lists.get(o.material).push(c);
+    });
+  }
+  const out = new THREE.Group();
+  out.name = name;
+  for (const [mat, list] of lists) {
+    const m = new THREE.Mesh(mergeGeometries(list), mat);
+    m.geometry.computeBoundingSphere();
+    out.add(m);
+  }
+  return out;
+}
+
 export function buildWorld(scene) {
   const s = scene;
   const groundMat = groundMaterial();
@@ -27,17 +55,20 @@ export function buildWorld(scene) {
     s.add(m);
   }
 
-  for (const st of DECOR.stones) {
+  s.add(mergeStatic(DECOR.stones.map((st) => {
     const g = buildHeadstone(st.kind, st.w, st.h, st.seed);
     g.position.set(st.x, 0, st.z);
     g.rotation.set(st.rx, st.ry, st.rz);
-    s.add(g);
-  }
+    return g;
+  }), 'headstones'));
 
   const R = rng(4242);
   const batch = new Batch();
   const add = batch.add.bind(batch);
-  const glows = [], crows = [], tufts = [], shrooms = [];
+  const glow = glowSprites('#ffb860', 32);
+  const glows = []; // [{ i, base }]
+  const glowQuad = (pos, size, strength = 0.8) => glows.push({ i: glow.add(pos, size, strength), base: strength });
+  const crows = [], tufts = [], shrooms = [];
   const tuft = (x, z, k = 1) => tufts.push(M([x, 0, z], [R.range(-0.15, 0.15), R() * 6.3, R.range(-0.15, 0.15)], k * R.range(0.9, 1.7)));
   const crow = (pos, yaw) => {
     crowParts(batch.sub(M([pos.x, pos.y, pos.z], [0, yaw, 0])));
@@ -66,7 +97,7 @@ export function buildWorld(scene) {
   const sh = DECOR.shed;
   const shed = shedParts(batch.sub(M([sh.x, 0, sh.z])), sh, 77);
   const shedPos = (v) => v.clone().add(new THREE.Vector3(sh.x, 0, sh.z));
-  glows.push(glowQuad(s, shedPos(shed.lantern), 1.5, 0.7), glowQuad(s, shedPos(shed.window), 1.6, 0.35), glowQuad(s, shedPos(shed.window2), 1.1, 0.3));
+  glowQuad(shedPos(shed.lantern), 1.5, 0.7); glowQuad(shedPos(shed.window), 1.6, 0.35); glowQuad(shedPos(shed.window2), 1.1, 0.3);
   crow(new THREE.Vector3(sh.x + 0.9, 4.05, sh.z), 2.6);
   for (let i = 0; i < 12; i++) {
     const side = i % 4, u = R.range(-1, 1);
@@ -117,7 +148,8 @@ export function buildWorld(scene) {
       }
       for (const y of [0.22, 1.28]) {
         const [x, z] = pt((a + b) / 2);
-        add(G.box, MAT.iron, M([x, y + R.range(-0.02, 0.02), z], [0, along === 'x' ? 0 : Math.PI / 2, R.range(-0.008, 0.008)], [b - a, 0.05, 0.04]), 0.01);
+        // rails are as dark as the ink, so like the bars they go without a hull
+        add(G.box, MAT.iron, M([x, y + R.range(-0.02, 0.02), z], [0, along === 'x' ? 0 : Math.PI / 2, R.range(-0.008, 0.008)], [b - a, 0.05, 0.04]), 0);
       }
     }
   }
@@ -126,7 +158,7 @@ export function buildWorld(scene) {
     const pm = M([x, 0, z], [pr.range(-0.04, 0.04), pr.range(-0.2, 0.2), pr.range(-0.04, 0.04)]);
     const sub = batch.sub(pm);
     const h = pillarParts(sub, pr, 0.4, 1.95);
-    sub(G.sphLo, MAT.stone, M([0, h + 0.13, 0], [0, 0, 0], 0.15), 0.015);
+    sub(G.ball, MAT.stone, M([0, h + 0.13, 0], [0, 0, 0], 0.15), 0.015);
     tuft(x + pr.range(-0.4, 0.4), z + pr.range(-0.4, 0.4), 1.3);
   }
   // bars are nearly ink-dark already, so they go without a hull (saves a draw call and 5k triangles)
@@ -144,10 +176,10 @@ export function buildWorld(scene) {
       const sub = batch.sub(pm);
       const h = pillarParts(sub, pr, 0.58, 2.7);
       // a stone skull-ish ball under the lantern, then the lantern on a short neck
-      sub(G.cyl8, MAT.iron, M([0, h + 0.2, 0], [0, 0, 0], [0.07, 0.25, 0.07]), 0.012);
+      sub(G.tube6, MAT.iron, M([0, h + 0.2, 0], [0, 0, 0], [0.07, 0.25, 0.07]), 0.012);
       sub(G.box, MAT.stone, M([0, h + 0.07, 0], [0, 0.3, 0], [0.5, 0.14, 0.5]), 0.015);
       lanternParts(sub, M([0, h + 0.62, 0], [0, 0.4, 0]), 1.6);
-      glows.push(glowQuad(s, new THREE.Vector3(0, h + 0.62, 0).applyMatrix4(pm), 2.6, 0.8));
+      glowQuad(new THREE.Vector3(0, h + 0.62, 0).applyMatrix4(pm), 2.6, 0.8);
       for (let i = 0; i < 3; i++) tuft(gx + pr.range(-0.6, 0.6), hz + sz * pr.range(0.35, 0.7), 1.3);
       // leaf hinged at the pillar's road-side edge, swung ~155 degrees open (lies near the fence outside)
       const open = sx === 1 ? 1.75 + (sz + 1) * 0.08 : sz === 1 ? 1.9 : 2.45;
@@ -163,7 +195,7 @@ export function buildWorld(scene) {
   LANTERNS.forEach(([x, z], i) => {
     const lr = rng(900 + i);
     lanternPostParts(batch.sub(M([x, 0, z], [lr.range(-0.025, 0.025), 0, lr.range(-0.025, 0.025)])), 900 + i);
-    glows.push(glowQuad(s, new THREE.Vector3(x, LANTERN_Y, z), 2.6, 0.8));
+    glowQuad(new THREE.Vector3(x, LANTERN_Y, z), 2.6, 0.8);
     for (let k = 0; k < 3; k++) { const a = lr() * 6.3; tuft(x + Math.cos(a) * 0.3, z + Math.sin(a) * 0.3, 0.9); }
   });
 
@@ -193,14 +225,14 @@ export function buildWorld(scene) {
   for (const st of DECOR.stones) for (let i = 0; i < 3; i++) tuft(st.x + R.range(-0.5, 0.5) * st.w * 1.6, st.z + R.range(-0.25, 0.25), 1);
   const clear = (x, z) => !PLOTS.some((p) => Math.abs(x - p.x) < PLOT_HALF.x + 0.3 && Math.abs(z - p.z) < PLOT_HALF.z + 0.3);
   const tm = tufts.filter((m) => clear(m.elements[12], m.elements[14]));
-  const grass = new THREE.InstancedMesh(tuftGeo(), MAT.grass, tm.length);
+  const grass = new THREE.InstancedMesh(tuftGeo(), TOON.grass, tm.length);
   tm.forEach((m, i) => grass.setMatrixAt(i, m));
   grass.frustumCulled = false;
   s.add(grass);
   const { cap, stem } = mushroomGeos();
-  const capMesh = new THREE.InstancedMesh(cap, MAT.shroom, shrooms.length);
+  const capMesh = new THREE.InstancedMesh(cap, TOON.shroom, shrooms.length);
   const capLine = new THREE.InstancedMesh(outlineGeo(cap), outlineMat(0.008), shrooms.length);
-  const stemMesh = new THREE.InstancedMesh(stem, MAT.stem, shrooms.length);
+  const stemMesh = new THREE.InstancedMesh(stem, TOON.stem, shrooms.length);
   shrooms.forEach(([x, z, k], i) => {
     const m = M([x, 0, z], [R.range(-0.25, 0.25), R() * 6, R.range(-0.25, 0.25)], k);
     capMesh.setMatrixAt(i, m); capLine.setMatrixAt(i, m); stemMesh.setMatrixAt(i, m);
@@ -211,6 +243,9 @@ export function buildWorld(scene) {
   statics.name = 'environment';
   batch.build(statics);
   s.add(statics);
+  glow.mesh.name = 'glows';
+  glow.mesh.visible = false;
+  s.add(glow.mesh);
 
   const backdrop = buildBackdrop(s);
   let lamps = 1; // lantern and window glow sprites: 1 at night, out by day
@@ -218,14 +253,13 @@ export function buildWorld(scene) {
     groundMat,
     setDay(k) {
       lamps = lampsOn(k);
-      for (const g of glows) g.visible = lamps > 0;
+      glow.mesh.visible = lamps > 0;
       backdrop.setDay(k);
     },
     update(time, dt, camera) {
-      glows.forEach((g, i) => {
+      if (glow.mesh.visible) glows.forEach((g, i) => {
         const f = 0.88 + 0.08 * Math.sin(time * 11 + i * 1.7) * Math.sin(time * 6.3 + i * 2.9) + 0.04 * Math.sin(time * 2.1 + i);
-        g.material.uniforms.uStrength.value = g.userData.base * f * lamps;
-        g.scale.setScalar(0.96 + f * 0.05);
+        glow.set(g.i, g.base * f * lamps, 0.96 + f * 0.05);
       });
       // crows jerk their heads to a new direction every few seconds
       for (const c of crows) {
