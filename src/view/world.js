@@ -1,17 +1,17 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { groundMaterial } from '../shaders/ground.js';
-import { outlineMat, LANTERN_Y, lampsOn } from '../shaders/toon.js';
+import { LANTERN_Y, lampsOn } from '../shaders/toon.js';
 import { glowSprites, paintMat, paintAttrs } from '../shaders/paint-env.js';
 import { buildHeadstoneField, geo } from './models.js';
-import { outlineGeo } from './models/common.js';
 import {
-  Batch, MAT, TOON, G, M, treeParts, crowParts, buildCrowHead, lanternPostParts, lanternParts, pillarParts,
-  gateLeafParts, shedParts, carpenterParts, coffinLidParts, tuftGeo, mushroomGeos, signLabels,
+  Batch, MAT, G, M, treeParts, crowParts, buildCrowHead, lanternPostParts, lanternParts, pillarParts,
+  gateLeafParts, shedParts, carpenterParts, coffinLidParts, signLabels,
 } from './models/environment.js';
+import { buildPlants } from './plants.js';
 import { buildBackdrop } from './backdrop.js';
 import { rng } from '../shared/rng.js';
-import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, PILE, PLOTS, PLOT_HALF } from '../shared/layout.js';
+import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, PILE } from '../shared/layout.js';
 
 // The static graveyard: ground, old headstones, trees, shed, fence, gates, lanterns, and the backdrop beyond the fence.
 // Positions and sizes come from shared/layout.js because the host's colliders use the same numbers.
@@ -38,8 +38,9 @@ export function buildWorld(scene) {
   const glow = glowSprites('#ffb860', 32);
   const glows = []; // [{ i, base }]
   const glowQuad = (pos, size, strength = 0.8) => glows.push({ i: glow.add(pos, size, strength), base: strength });
-  const crows = [], tufts = [], shrooms = [];
-  const tuft = (x, z, k = 1) => tufts.push(M([x, 0, z], [R.range(-0.15, 0.15), R() * 6.3, R.range(-0.15, 0.15)], k * R.range(0.9, 1.7)));
+  // grass tuft and mushroom spots for the plants (view/plants.js); k = size hint (>= 1.2: may grow tall)
+  const crows = [], tufts = [], shrooms = [], pillars = [];
+  const tuft = (x, z, k = 1) => tufts.push([x, z, k]);
   const crow = (pos, yaw) => {
     crowParts(batch.sub(M([pos.x, pos.y, pos.z], [0, yaw, 0])));
     const head = buildCrowHead();
@@ -127,6 +128,7 @@ export function buildWorld(scene) {
     const pr = rng(Math.floor(x * 31 + z * 7 + 999));
     const pm = M([x, 0, z], [pr.range(-0.04, 0.04), pr.range(-0.2, 0.2), pr.range(-0.04, 0.04)]);
     const sub = batch.sub(pm);
+    pillars.push(pm);
     const h = pillarParts(sub, pr, 0.4, 1.95);
     sub(G.ball, MAT.stone, M([0, h + 0.13, 0], [0, 0, 0], 0.15), 0.015);
     tuft(x + pr.range(-0.4, 0.4), z + pr.range(-0.4, 0.4), 1.3);
@@ -191,23 +193,9 @@ export function buildWorld(scene) {
   const textMesh = new THREE.Mesh(mergeGeometries(text), new THREE.MeshBasicMaterial({ map: signLabels(labels), transparent: true, alphaTest: 0.25, color: '#8d84a6', depthWrite: false }));
   s.add(textMesh);
 
-  // grass tufts at stones and along fence and buildings, mushrooms in a few clusters
-  for (const st of DECOR.stones) for (let i = 0; i < 3; i++) tuft(st.x + R.range(-0.5, 0.5) * st.w * 1.6, st.z + R.range(-0.25, 0.25), 1);
-  const clear = (x, z) => !PLOTS.some((p) => Math.abs(x - p.x) < PLOT_HALF.x + 0.3 && Math.abs(z - p.z) < PLOT_HALF.z + 0.3);
-  const tm = tufts.filter((m) => clear(m.elements[12], m.elements[14]));
-  const grass = new THREE.InstancedMesh(tuftGeo(), TOON.grass, tm.length);
-  tm.forEach((m, i) => grass.setMatrixAt(i, m));
-  grass.frustumCulled = false;
-  s.add(grass);
-  const { cap, stem } = mushroomGeos();
-  const capMesh = new THREE.InstancedMesh(cap, TOON.shroom, shrooms.length);
-  const capLine = new THREE.InstancedMesh(outlineGeo(cap), outlineMat(0.008), shrooms.length);
-  const stemMesh = new THREE.InstancedMesh(stem, TOON.stem, shrooms.length);
-  shrooms.forEach(([x, z, k], i) => {
-    const m = M([x, 0, z], [R.range(-0.25, 0.25), R() * 6, R.range(-0.25, 0.25)], k);
-    capMesh.setMatrixAt(i, m); capLine.setMatrixAt(i, m); stemMesh.setMatrixAt(i, m);
-  });
-  for (const im of [capMesh, capLine, stemMesh]) { im.frustumCulled = false; s.add(im); }
+  // vegetation: grass, reeds, toadstools, ferns, ivy, brambles... one merged mesh with one material
+  const plants = buildPlants({ tufts, shrooms, pillars });
+  s.add(plants.mesh);
 
   const statics = new THREE.Group();
   statics.name = 'environment';
@@ -227,6 +215,7 @@ export function buildWorld(scene) {
       backdrop.setDay(k);
     },
     update(time, dt, camera) {
+      plants.update(time);
       if (glow.mesh.visible) glows.forEach((g, i) => {
         const f = 0.88 + 0.08 * Math.sin(time * 11 + i * 1.7) * Math.sin(time * 6.3 + i * 2.9) + 0.04 * Math.sin(time * 2.1 + i);
         glow.set(g.i, g.base * f * lamps, 0.96 + f * 0.05);

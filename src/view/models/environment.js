@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { toon, outlineMat, LANTERN_Y } from '../../shaders/toon.js';
+import { outlineMat, LANTERN_Y } from '../../shaders/toon.js';
 import { paintMat, paintAttrs, spec, P } from '../../shaders/paint-env.js';
 import { rng } from '../../shared/rng.js';
 import { PAL } from '../palette.js';
@@ -32,12 +32,6 @@ export const MAT = {
   glass: spec(PAL.amber, { p2: 0.88 }),
   scarf: spec(PAL.bone, { pat: P.stripes, p1: 7 }),
   lid: spec('#33243a', { pat: P.lid, rim: 0.8 }),
-};
-// Instanced dressing keeps its own toon materials.
-export const TOON = {
-  shroom: toon('#b9a6d6', { gradColor: '#efe6ff', gradY: [0, 0.12], emissive: 0.25 }),
-  stem: toon(PAL.boneShade, { rim: 0.5 }),
-  grass: toon(PAL.grassLight, { gradColor: '#1e2430', gradY: [0, 0.32], side: THREE.DoubleSide, rim: 0.4, dayColor: '#6f9a4c' }),
 };
 
 const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -563,32 +557,6 @@ export function carpenterParts(add) {
 // A coffin lid: the toe-pincher board; the bone cross and the striped band at the foot are paint.
 export function coffinLidParts(add, m) {
   add(coffinShapeGeo(0.62, 1.9, 0.06), MAT.lid, m, 0.016, new THREE.Matrix4());
-}
-
-// A grass tuft: a fan of curved blades, about 0.3 m tall. Used as an InstancedMesh.
-export function tuftGeo(blades = 4) {
-  const pos = [];
-  for (let i = 0; i < blades; i++) {
-    const a = (i / blades) * Math.PI * 2 + i * 0.7;
-    const lean = 0.35 + (i % 3) * 0.2, h = 0.22 + ((i * 37) % 5) * 0.035, w = 0.035;
-    const dx = Math.cos(a), dz = Math.sin(a), sx = -dz * w, sz = dx * w;
-    const p0 = [dx * 0.03, 0, dz * 0.03], p1 = [dx * lean * h * 0.5, h * 0.55, dz * lean * h * 0.5], p2 = [dx * lean * h * 1.3, h, dz * lean * h * 1.3];
-    const q = (p, k) => [[p[0] - sx * k, p[1], p[2] - sz * k], [p[0] + sx * k, p[1], p[2] + sz * k]];
-    const [a0, b0] = q(p0, 1), [a1, b1] = q(p1, 0.7);
-    pos.push(...a0, ...b0, ...a1, ...b0, ...b1, ...a1, ...a1, ...b1, ...p2);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.computeVertexNormals();
-  return g;
-}
-
-// Mushrooms: a low dome on an open stem (both far too small to need more).
-export function mushroomGeos() {
-  const cap = new THREE.SphereGeometry(1, 6, 2, 0, Math.PI * 2, 0, Math.PI / 2);
-  cap.scale(0.07, 0.05, 0.07).translate(0, 0.1, 0);
-  const stem = new THREE.CylinderGeometry(0.018, 0.025, 0.11, 4, 1, true).translate(0, 0.055, 0);
-  return { cap, stem };
 }
 
 // Painted signboard labels drawn into a canvas at runtime (one atlas for every board).
