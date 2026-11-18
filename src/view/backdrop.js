@@ -265,7 +265,7 @@ function deadTree(f, r, h, detail = 1) {
   f.strip(trunk, h * 0.15, h * 0.03);
   f.poly([[-h * 0.15, -2], [h * 0.15, -2], [h * 0.13, 0], [h * 0.03, h * 0.12], [-h * 0.03, h * 0.12], [-h * 0.12, 0]]); // flared roots
   const nb = 3 + Math.floor(r() * 3) + (detail > 0.7 ? 1 : 0);
-  const steps = detail > 0.7 ? 13 : 8;
+  const steps = detail > 0.7 ? 8 : 6;
   for (let b = 0; b < nb; b++) {
     const side = b % 2 ? 1 : -1;
     const ts = r.range(0.42, 0.95);
@@ -280,7 +280,7 @@ function deadTree(f, r, h, detail = 1) {
       if (i === Math.floor(steps * 0.4) && r() < 0.6 * detail) {
         // twig hooking the other way
         let tx = x, ty = y; const tp = [[tx, ty]];
-        for (let j = 1; j <= 5; j++) { const ta = a - side * (0.6 + j * 0.45); tx += Math.sin(ta) * L * 0.07; ty += Math.cos(ta) * L * 0.07; tp.push([tx, ty]); }
+        for (let j = 1; j <= 3; j++) { const ta = a - side * (0.6 + j * 0.75); tx += Math.sin(ta) * L * 0.117; ty += Math.cos(ta) * L * 0.117; tp.push([tx, ty]); }
         f.strip(tp, h * 0.02, h * 0.005);
       }
     }
@@ -348,7 +348,7 @@ function windowsGeo(rects, m, r) {
 
 // ---------------- ridges ----------------
 // ring of hills at radius R: a crest row and two rows sloping down toward the yard, well below the horizon
-function ridgeGeo(R, H, seg = 200) {
+function ridgeGeo(R, H, seg = 120) {
   const rows = [[0, 1, 0], [10, 0.6, -2], [22, 0, -60]];
   const pos = [];
   for (let i = 0; i <= seg; i++) for (const [dr, k, dy] of rows) {
@@ -378,11 +378,33 @@ export function buildBackdrop(scene) {
 
   // ---------- L0: terrain ----------
   {
-    const NA = 168, radii = [];
-    for (let i = 0; i <= 40; i++) radii.push(FENCE - 4 + (TERRAIN_R - FENCE + 4) * Math.pow(i / 40, 1.55));
+    // Each ring spends its vertices where the shape is: twice as dense across the road valley (the truck
+    // drives there, so it must stay exactly flat) and on the chapel's hill, sparse on the plain rolling slopes.
+    const NA = 96, NR = 28, radii = [];
+    for (let i = 0; i <= NR; i++) radii.push(FENCE - 4 + (TERRAIN_R - FENCE + 4) * Math.pow(i / NR, 1.55));
+    const chapelA = Math.atan2(CHAPEL.z, CHAPEL.x);
+    const ringAngles = (rad) => {
+      const bumps = [];
+      if (rad > ROAD_Z) { const a = Math.asin(ROAD_Z / rad); bumps.push([a, 20 / rad, 3.2], [Math.PI - a, 20 / rad, 3.2]); }
+      bumps.push([chapelA, Math.max(0.12, 45 / rad), 1.6]);
+      const N = 2048, cdf = [0];
+      for (let i = 0; i < N; i++) {
+        const a = ((i + 0.5) / N) * Math.PI * 2;
+        let d = 1;
+        for (const [c, w, k] of bumps) d += k * Math.exp(-((angDist(a, c) / w) ** 2));
+        cdf.push(cdf[i] + d);
+      }
+      const out = [];
+      for (let j = 0, i = 0; j < NA; j++) {
+        const t = (j / NA) * cdf[N];
+        while (cdf[i + 1] < t) i++;
+        out.push(((i + (t - cdf[i]) / (cdf[i + 1] - cdf[i])) / N) * Math.PI * 2);
+      }
+      return out;
+    };
     const pos = [];
-    for (const rad of radii) for (let j = 0; j < NA; j++) {
-      const a = (j / NA) * Math.PI * 2, x = Math.cos(a) * rad, z = Math.sin(a) * rad;
+    for (const rad of radii) for (const a of ringAngles(rad)) {
+      const x = Math.cos(a) * rad, z = Math.sin(a) * rad;
       pos.push(x, terrainH(x, z), z);
     }
     const idx = [];
@@ -629,7 +651,7 @@ export function buildBackdrop(scene) {
   // mist bands between the layers
   const mists = [];
   for (const [R, y0, y1, alpha, color] of [[200, -6, 22, 0.3, ['#5e5684', '#a07090', '#f4ece2']], [300, 0, 45, 0.3, ['#6a6290', '#b07a94', '#f6efe6']]]) {
-    const g = new THREE.CylinderGeometry(R, R, y1 - y0, 120, 1, true).translate(0, (y0 + y1) / 2, 0);
+    const g = new THREE.CylinderGeometry(R, R, y1 - y0, 64, 1, true).translate(0, (y0 + y1) / 2, 0);
     const m = mat(mistFrag, { uFogMax: { value: 0.6 }, uTime, uColor: { value: dc(color) }, uY: { value: new THREE.Vector2(y0, y1) }, uAlpha: { value: alpha } },
       { transparent: true, depthWrite: false, side: THREE.BackSide });
     const mesh = new THREE.Mesh(g, m);

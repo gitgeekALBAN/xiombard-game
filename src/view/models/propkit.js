@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { outlineMat } from '../../shaders/toon.js';
 import { outlineGeo } from './common.js';
 
@@ -51,6 +51,50 @@ export function instance({ meshes, hull }, parent, thick = 0.02) {
   for (const { geo, mat } of meshes) parent.add(new THREE.Mesh(geo, mat));
   if (hull && thick) parent.add(new THREE.Mesh(hull, outlineMat(thick)));
   return parent;
+}
+
+// Kit for the painted props (paint-props.js): every part becomes vertices of ONE mesh that carries its paint as
+// attributes, plus one ink hull. paint = { id, color, k: [3 params], q: [4 params] } (see PAINT). The paint space
+// (aP) is the object's own space unless pspace maps the part's local coordinates somewhere else (a wheel's or a
+// lamp's own frame). rig: index of the moving part the vertices ride on (truck wheels and tailgate).
+const _c = new THREE.Color();
+export class PaintKit {
+  constructor() { this.parts = []; this.hull = []; }
+  add(geo, paint, { pos, rot, scale, matrix, pspace, outline = true, flat = false, rig = 0 } = {}) {
+    const g = clean(geo, flat);
+    const m = matrix || mat4(pos, rot, scale);
+    const local = g.attributes.position.clone();
+    g.applyMatrix4(m);
+    const n = g.attributes.position.count;
+    const P = new Float32Array(n * 3);
+    if (pspace) { local.applyMatrix4(pspace); P.set(local.array); } else P.set(g.attributes.position.array);
+    const col = new Float32Array(n * 3), K = new Float32Array(n * 4), Q = new Float32Array(n * 4), Rg = new Float32Array(n).fill(rig);
+    _c.set(paint.color);
+    const k = [paint.id, ...(paint.k || [0, 0, 0])], q = paint.q || [0, 0, 0, 0];
+    for (let i = 0; i < n; i++) { _c.toArray(col, i * 3); K.set(k, i * 4); Q.set(q, i * 4); }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    g.setAttribute('aK', new THREE.BufferAttribute(K, 4));
+    g.setAttribute('aQ', new THREE.BufferAttribute(Q, 4));
+    g.setAttribute('aP', new THREE.BufferAttribute(P, 3));
+    g.setAttribute('aRig', new THREE.BufferAttribute(Rg, 1));
+    if (m.determinant() < 0) for (const a of Object.values(g.attributes)) for (let i = 0; i < a.count; i += 3) {
+      for (let c = 0; c < a.itemSize; c++) { const t = a.getComponent(i + 1, c); a.setComponent(i + 1, c, a.getComponent(i + 2, c)); a.setComponent(i + 2, c, t); }
+    }
+    this.parts.push(g);
+    if (outline) this.hull.push(g);
+    return this;
+  }
+  // -> { geo, hull }: hull keeps the rig index so a rigged hull can follow the moving parts
+  bake() {
+    const geo = mergeGeometries(this.parts);
+    let hull = null;
+    if (this.hull.length) {
+      const h = mergeGeometries(this.hull.map((g) => { const c = new THREE.BufferGeometry(); c.setAttribute('position', g.attributes.position); c.setAttribute('aRig', g.attributes.aRig); return c; }));
+      hull = mergeVertices(h, 1e-3);
+      hull.computeVertexNormals();
+    }
+    return { geo, hull };
+  }
 }
 
 // Flat ribbon along a 2D polyline in the XY plane, facing +Z. width may be a function of t (0..1).
