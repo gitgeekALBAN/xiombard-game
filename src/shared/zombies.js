@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CREW, CREW_SCALE, NCREW, lookRig, humanRig } from './crew.js';
+import { CREW, CREW_SCALE, NCREW, lookRig, humanRig, solveArm, writeArm } from './crew.js';
 
 // The night shift's visitors. They are drawn by the same shader as the crew and move on the same six rigid parts,
 // so the simulation and the view treat them like diggers with different numbers.
@@ -115,7 +115,7 @@ function dogRig(def, index) {
   ];
   const joints = [null, { cone: 0.6, up: true }, { cone: 0.9 }, { cone: 0.9 }, { cone: 0.9 }, { cone: 0.9 }];
   const radius = [g.len + g.r + g.tail[0] + g.pom[2] + 0.06, hr + Math.max(sl + 0.05, g.ear[1] + 0.04, g.pom[0] * 2) + 0.05, ...legs.map(() => g.h / 2 + 0.1)];
-  return { index, def, S: 1, rest, pivot, shapes, joints, radius, hatTop: hr, belly: g.r * 1.5, dog: g };
+  return { index, def, S: 1, rest, bodyC: rest, elbow: false, pivot, shapes, joints, radius, hatTop: hr, belly: g.r * 1.5, dog: g };
 }
 
 const rigs = new Map();
@@ -131,6 +131,7 @@ const _e = new THREE.Euler(), _v = new THREE.Vector3(), _q = new THREE.Quaternio
 const _s = new THREE.Vector3(), _d = new THREE.Vector3(), _f = new THREE.Vector3(), _side = new THREE.Vector3(), _rd = new THREE.Vector3();
 const _rot = Array.from({ length: NCREW }, () => [0, 0, 0]);
 const set = (r, x, y, z) => { r[0] = x; r[1] = y; r[2] = z; };
+const _h = [0, 0, 0], mix3 = (a, b, t, o) => { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; };
 const about = (out, parent, j, r) => out.copy(parent).multiply(_a.makeTranslation(j.x, j.y, j.z))
   .multiply(_r.makeRotationFromEuler(_e.set(r[0], r[1], r[2], 'XYZ'))).multiply(_b.makeTranslation(-j.x, -j.y, -j.z));
 function write(rig, i, m, out, off) {
@@ -156,31 +157,34 @@ export function zombiePose(rig, root, s, out, off = 0) {
   set(R[1], drag ? -0.3 : 0.05, Math.sin(t * 0.6) * 0.15, 0.38 + Math.sin(t * 1.1) * 0.06);
   set(R[4], sw * 0.5 * k, 0, 0.04);
   set(R[5], -sw * 0.5 * k, 0, -0.04);
-  // walkers hold both arms out; the swing lifts them overhead and chops down
-  const up = -1.35 - wind * 1.2 + slam * 1.5;
-  set(R[2], up + Math.sin(t * 2.3) * 0.08, 0, -0.42);
-  set(R[3], up + Math.sin(t * 2.3 + 1.7) * 0.08, 0, 0.42);
   const look = rig.def.look;
   if (!look.bounce && wad > 0.01) root = _hop.copy(root).multiply(_a.makeTranslation(sw * 0.05 * wad, bounce * 0.06 * wad, 0));
   if (look.bounce) { // a ball of a zombie gets about in little hops
     root = _hop.copy(root).multiply(_a.makeTranslation(0, Math.abs(sw) * 0.2 * Math.min(k * 1.6, 1) + 0.02, 0));
     R[0][0] = 0.06 + sw * 0.08; R[4][0] *= 0.5; R[5][0] *= 0.5;
   }
-  if (look.headAt) set(R[2], -0.35 - wind * 1.6 + slam * 2.0 + Math.sin(t * 1.7) * 0.06, 0, -0.1); // the head is held low, and swung like a club
   about(_body, root, rig.pivot[0], R[0]);
   write(rig, 0, _body, out, off);
   if (!look.headAt) write(rig, 1, about(_m, _body, rig.pivot[1], R[1]), out, off);
   write(rig, 4, about(_m, root, rig.pivot[4], R[4]), out, off);
   write(rig, 5, about(_m, root, rig.pivot[5], R[5]), out, off);
   if (!drag) {
-    about(_m, _body, rig.pivot[2], R[2]);
-    write(rig, 2, _m, out, off);
-    if (look.headAt) write(rig, 1, _m, out, off); // the carried head goes wherever that mitten goes
-    if (look.prop) { // a club in the right mitten: held up at the ready, swung up and brought down (the arm is aimed, see crewPose)
-      const e = 0.65 + Math.sin(t * 2.1) * 0.06 + wind * 1.1 - slam * 2.3, j = rig.pivot[3];
-      _q.setFromUnitVectors(_rd.fromArray(rig.shapes[3].dir), _d.set(-0.1, Math.sin(e), Math.cos(e)).normalize());
-      write(rig, 3, _m.copy(_body).multiply(_a.makeTranslation(j.x, j.y, j.z)).multiply(_r.makeRotationFromQuaternion(_q)).multiply(_b.makeTranslation(-j.x, -j.y, -j.z)), out, off);
-    } else write(rig, 3, about(_m, _body, rig.pivot[3], R[3]), out, off);
+    // Arms reach for a point and the elbow bends by itself (see solveArm in crew.js). Walkers hold both mittens out
+    // in front; a swing lifts them over the head and brings them down. The odd ones differ in what they hold.
+    const reach = (i, base, pole, up, down) => {
+      mix3(base, up, wind, _h); mix3(_h, down, slam, _h);
+      _h[1] += Math.sin(t * 2.3 + i * 1.7) * 0.05 * (1 - wind);
+      solveArm(rig, i, _h, pole);
+      return writeArm(rig, i, _body, out, off);
+    };
+    if (look.headAt) { // the head sits in the left mitten, held low at the side and swung like a club
+      const q = reach(2, [0.25, -0.72, 0.28], [0.3, -0.3, -1], [0.3, 0.7, 0.1], [0, -0.4, 0.85]), o = off + 7, a = off + 14;
+      _v.copy(rig.rest[1]).sub(rig.rest[2]).applyQuaternion(q); // the head goes wherever that forearm goes
+      out[o] = out[a] + _v.x; out[o + 1] = out[a + 1] + _v.y; out[o + 2] = out[a + 2] + _v.z;
+      out[o + 3] = q.x; out[o + 4] = q.y; out[o + 5] = q.z; out[o + 6] = q.w;
+    } else reach(2, [-0.05, 0.03, 0.93], [0.4, -0.9, 0], [0.1, 0.75, 0.3], [-0.05, -0.45, 0.85]);
+    if (look.prop) reach(3, [0.1, -0.05, 0.6], [0.4, -1, -0.2], [0.2, 0.65, -0.05], [-0.05, -0.4, 0.9]); // a club, held up at the ready
+    else reach(3, [-0.05, 0.03, 0.93], [0.4, -0.9, 0], [0.1, 0.75, 0.3], [-0.05, -0.45, 0.85]);
     return out;
   }
   // The dragger's arms are longer than its shoulders are high: each fist rests on the ground behind the shoulder

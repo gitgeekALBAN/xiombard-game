@@ -92,8 +92,14 @@ export function crewRig(look) {
 export function humanRig(def, S, index = 0) {
   const k = def.look, r = def.rig, mx = (a) => [-a[0], a[1], a[2]];
   const mid = (a, b) => v3(a, S).add(v3(b, S)).multiplyScalar(0.5);
-  const rest = [v3(r.body.c, S), v3(r.head.c, S), mid(r.shoulder, r.hand), mid(mx(r.shoulder), mx(r.hand)),
-    new THREE.Vector3(r.hip[0] * S, r.hip[1] * S / 2, 0), new THREE.Vector3(-r.hip[0] * S, r.hip[1] * S / 2, 0)];
+  // Arms bend at an elbow. Parts 2 and 3 are the FOREARMS (elbow to mitten); the upper arm is not a part of its own:
+  // whoever draws the character stretches it from the shoulder to wherever the forearm begins. The ragdoll keeps
+  // one straight box per arm, so `bodyC` (collider centers) differs from `rest` (part centers) for the arms.
+  const elbow = !k.brute, armC = [mid(r.shoulder, r.hand), mid(mx(r.shoulder), mx(r.hand))];
+  const fore = (a, b) => v3(a, S).lerp(v3(b, S), 0.75);
+  const legC = [new THREE.Vector3(r.hip[0] * S, r.hip[1] * S / 2, 0), new THREE.Vector3(-r.hip[0] * S, r.hip[1] * S / 2, 0)];
+  const rest = [v3(r.body.c, S), v3(r.head.c, S), elbow ? fore(r.shoulder, r.hand) : armC[0], elbow ? fore(mx(r.shoulder), mx(r.hand)) : armC[1], ...legC];
+  const bodyC = [rest[0], rest[1], armC[0], armC[1], rest[4], rest[5]], elbowAt = [null, null, armC[0], armC[1]];
   const pivot = [new THREE.Vector3(0, r.hip[1] * S, 0), v3(r.neck, S), v3(r.shoulder, S), v3(mx(r.shoulder), S), v3(r.hip, S), v3(mx(r.hip), S)];
   const br = Math.min(r.body.r[0], r.body.r[2]) * 0.95 * S, tall = r.body.r[1] * S - br;
   const armLen = v3(r.shoulder, S).distanceTo(v3(r.hand, S)), limb = (x) => Math.max(x * S, 0.06);
@@ -110,85 +116,121 @@ export function humanRig(def, S, index = 0) {
   const hatTop = k.hat ? (k.hat[0] - k.head[0] + k.hat[3] + k.hat2[3] * 1.6) * S : r.head.r * S;
   const radius = [r.body.r[1] * S + 0.12, Math.max(hatTop, k.hat ? k.hat[1] * S : 0, r.head.r * S) + 0.06, armLen / 2 + k.arm[1] * S * 2.4,
     armLen / 2 + k.arm[1] * S * 2.4, Math.hypot(r.hip[1] * S / 2 + 0.04, k.leg[2] * S * 4.6) + 0.03, Math.hypot(r.hip[1] * S / 2 + 0.04, k.leg[2] * S * 4.6) + 0.03];
-  return { index, def, S, rest, pivot, shapes, joints, radius, hatTop, armLen, belly: k.bean[1] * S, hand: v3(r.hand, S),
+  return { index, def, S, rest, bodyC, elbow, elbowAt, pivot, shapes, joints, radius, hatTop, armLen, belly: k.bean[1] * S, hand: v3(r.hand, S),
     height: (k.head[0] + k.head[1]) * S, back: k.bean[1] * k.head[2] * S };
 }
 
-const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matrix4(), _b = new THREE.Matrix4(), _r = new THREE.Matrix4(), _hop = new THREE.Matrix4();
+const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matrix4(), _b = new THREE.Matrix4(), _r = new THREE.Matrix4();
 const _e = new THREE.Euler(), _v = new THREE.Vector3(), _q = new THREE.Quaternion();
 const _rot = Array.from({ length: NCREW }, () => [0, 0, 0]);
 const set = (r, x, y, z) => { r[0] = x; r[1] = y; r[2] = z; };
-const _aim = new THREE.Vector3();
-// how the shovel is carried: the right arm's elevation in radians (a little below level, like a spear at the ready)
-export const SHOVEL_HOLD = -0.3;
-export const shovelHoldDir = () => new THREE.Vector3(-0.14, Math.sin(SHOVEL_HOLD), Math.cos(SHOVEL_HOLD)).normalize();
 const about = (out, parent, j, r) => out.copy(parent).multiply(_a.makeTranslation(j.x, j.y, j.z))
   .multiply(_r.makeRotationFromEuler(_e.set(r[0], r[1], r[2], 'XYZ'))).multiply(_b.makeTranslation(-j.x, -j.y, -j.z));
 
+// ---------- arms: two bones and an elbow ----------
+// Where a mitten should be is given from the shoulder in arm lengths: x away from the body, y up, z forward; `pole`
+// says which way the elbow points. solveArm leaves the elbow (_E), the mitten (_H) and the forearm's direction (_F)
+// in the body's own frame; writeArm turns that into the forearm part's transform.
+const _S = new THREE.Vector3(), _H = new THREE.Vector3(), _E = new THREE.Vector3(), _F = new THREE.Vector3(), _pd = new THREE.Vector3(), _pp = new THREE.Vector3();
+const _qa = new THREE.Quaternion(), _qb = new THREE.Quaternion(), _hop = new THREE.Matrix4();
+export function solveArm(rig, i, h, pole) {
+  const side = i === 2 ? 1 : -1, L = rig.armLen, l = L / 2;
+  _H.set(h[0] * side, h[1], h[2]);
+  const d = _H.length(), dist = Math.min(Math.max(d, 0.25), 0.995) * L;
+  _pd.copy(_H).multiplyScalar(1 / Math.max(d, 1e-6));
+  _pp.set(pole[0] * side, pole[1], pole[2]);
+  _pp.addScaledVector(_pd, -_pp.dot(_pd));
+  if (_pp.lengthSq() < 1e-6) _pp.set(0, -1, 0).addScaledVector(_pd, _pd.y);
+  _pp.normalize();
+  const a = dist / 2;
+  _E.copy(rig.pivot[i]).addScaledVector(_pd, a).addScaledVector(_pp, Math.sqrt(Math.max(l * l - a * a, 0)));
+  _H.copy(rig.pivot[i]).addScaledVector(_pd, dist);
+  _F.copy(_H).sub(_E).normalize();
+}
+// body: the body's rest -> world matrix. Returns the forearm's world rotation (also left in _qa).
+export function writeArm(rig, i, body, out, off) {
+  const o = off + i * 7;
+  _qa.setFromUnitVectors(_v.fromArray(rig.shapes[i].dir), _F).premultiply(_qb.setFromRotationMatrix(body));
+  _v.copy(_E).addScaledVector(_F, rig.armLen / 4).applyMatrix4(body);
+  out[o] = _v.x; out[o + 1] = _v.y; out[o + 2] = _v.z;
+  out[o + 3] = _qa.x; out[o + 4] = _qa.y; out[o + 5] = _qa.z; out[o + 6] = _qa.w;
+  return _qa;
+}
+const mix3 = (a, b, t, o) => { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; };
+const ease = (x) => x * x * (3 - 2 * x);
+// the shovel is carried in the right mitten like a weapon at the hip; these are that pose's mitten and elbow
+const HOLD = [0.05, -0.42, 0.62], HOLD_POLE = [0.5, -0.6, -0.6];
+// which way the right forearm (and so the shovel) points when carried, in the body's frame
+export function shovelHoldDir(rig) { solveArm(rig, 3, HOLD, HOLD_POLE); return _F.clone(); }
+const _lh = [0, 0, 0], _lp = [0, 0, 0], _rh = [0, 0, 0], _rp = [0, 0, 0];
+
 // Procedural digger animation, straight to part transforms. s = { speed, phase, t, carry, dig, air, swing 0..1 }.
-// Unless something is being carried, the right arm holds the shovel out like a weapon (see `aim` below).
 // Writes 7 floats per part (px,py,pz,qx,qy,qz,qw) into `out` from `off`. The legs hang from the root, so a leaning
 // body keeps its feet under it; head and arms ride on the body.
 export function crewPose(rig, root, s, out, off = 0) {
   const k = Math.min(s.speed / 4, 1.4), sw = Math.sin(s.phase), t = s.t, idle = 1 - Math.min(k, 1), R = _rot;
   // A cartoon walk: the whole figure hops up between footfalls and rocks from side to side over the standing leg,
-  // the head rolls back the other way and nods, the arms flap out a little. Running does more of all of it.
+  // the head rolls back the other way and nods. Running does more of all of it.
   const wad = s.dig || s.air ? 0 : k * (s.carry ? 0.55 : 1), bounce = Math.abs(Math.cos(s.phase));
   set(R[0], 0.09 * k + Math.sin(t * 1.7) * 0.02, sw * 0.1 * k, -sw * 0.17 * wad + Math.sin(t * 0.9) * 0.02 * idle);
   set(R[1], -0.07 * k + Math.cos(s.phase * 2) * 0.05 * wad + Math.sin(t * 1.1) * 0.04, Math.sin(t * 0.7) * 0.2 * idle, sw * 0.1 * wad + Math.sin(t * 1.3) * 0.06);
-  set(R[2], -sw * 0.7 * k, 0, 0.06 + 0.12 * wad * bounce + Math.sin(t * 1.6) * 0.03);
-  set(R[3], sw * 0.7 * k, 0, -0.06 - 0.12 * wad * bounce - Math.sin(t * 1.6) * 0.03);
+  set(R[2], 0, 0, 0); set(R[3], 0, 0, 0);
   set(R[4], sw * 0.75 * k, 0, 0);
   set(R[5], -sw * 0.75 * k, 0, 0);
-  if (s.carry) { // both mittens out in front: low for a coffin, up high for a body
+  // the mittens: the left one hangs and swings with the step, the right one carries the shovel at the hip
+  let grip = false; // the left mitten takes the shovel's shaft too
+  mix3([0.2, -0.93, 0.1 - sw * 0.5 * k], _lh, 0, _lh); mix3([0.3, -0.2, -1], _lp, 0, _lp);
+  mix3(HOLD, _rh, 0, _rh); mix3(HOLD_POLE, _rp, 0, _rp);
+  _rh[1] += Math.sin(s.phase * 2) * 0.03 * k + Math.sin(t * 1.4) * 0.01;
+  if (s.carry) { // both mittens out in front: low and bent for a coffin, up and forward for a body
     const low = s.carry === 'coffin';
-    set(R[2], low ? -0.75 : -1.5, 0, -0.5);
-    set(R[3], low ? -0.75 : -1.5, 0, 0.5);
+    mix3(low ? [-0.1, -0.6, 0.62] : [-0.12, 0.05, 0.88], _lh, 0, _lh); mix3(_lh, _rh, 0, _rh);
+    mix3(low ? [0.7, -0.3, -0.6] : [0.6, -0.7, -0.3], _lp, 0, _lp); mix3(_lp, _rp, 0, _rp);
     R[0][0] += low ? 0.3 : -0.08;
-  }
-  // The right mitten holds the shovel, which is a straight extension of the arm, so the arm is aimed like a weapon:
-  // an elevation (radians above level, forward) instead of joint angles.
-  let aim = null;
-  if (!s.carry) {
-    let e = SHOVEL_HOLD + Math.sin(s.phase * 2) * 0.06 * k + Math.sin(t * 1.4) * 0.02; // at the ready, bobbing with the step
-    if (s.dig) { // a jab forward and down into the ground, the body leaning into it
-      const c = Math.sin(t * 7), push = 0.5 + 0.5 * c;
-      e = -0.55 - 0.5 * push;
+  } else {
+    if (s.dig) { // a jab forward and down into the ground with both mittens on the shovel, the body leaning into it
+      const push = 0.5 + 0.5 * Math.sin(t * 7);
+      mix3([0.05, -0.45, 0.5], [0.02, -0.72, 0.66], push, _rh); mix3([0.4, 0.2, -1], _rp, 0, _rp);
       set(R[0], 0.22 + 0.3 * push, 0, 0);
-      set(R[2], -0.5 - 0.5 * push, 0, -0.3);
       set(R[4], -0.3, 0, 0);
       set(R[5], 0.25, 0, 0);
+      grip = true;
     }
     if (s.swing) { // up over the shoulder, then down hard; the blow lands a third of the way in
-      const w = Math.min(s.swing / 0.26, 1), c = s.swing > 0.26 ? Math.min((s.swing - 0.26) / 0.2, 1) : 0, back = Math.max(0, (s.swing - 0.6) / 0.4);
-      const up = w * w * (3 - 2 * w), down = c * c * (3 - 2 * c);
-      e = SHOVEL_HOLD + (2.0 - SHOVEL_HOLD) * up - 3.0 * down + (SHOVEL_HOLD + 1.0) * back * down;
-      R[0][0] += -0.22 * up + 0.5 * down * (1 - back);
-      R[0][1] += 0.35 * up - 0.5 * down * (1 - back); // wind up with the shoulder, follow through
-      set(R[2], -0.4 * up, 0, 0.25);
+      const up = ease(Math.min(s.swing / 0.26, 1)), down = s.swing > 0.26 ? ease(Math.min((s.swing - 0.26) / 0.2, 1)) : 0, back = s.swing > 0.6 ? ease((s.swing - 0.6) / 0.4) : 0;
+      mix3(_rh, [0.2, 0.78, -0.15], up, _rh); mix3(_rh, [-0.1, -0.5, 0.82], down, _rh); mix3(_rh, HOLD, back * down, _rh);
+      mix3(_rp, [0.4, -0.9, 0.4], up, _rp); mix3(_rp, [0.5, 0.4, -0.8], down, _rp); mix3(_rp, HOLD_POLE, back * down, _rp);
+      R[0][0] += -0.22 * up * (1 - down) + 0.5 * down * (1 - back);
+      R[0][1] += 0.35 * up * (1 - down) - 0.5 * down * (1 - back); // wind up with the shoulder, follow through
+      mix3(_lh, [0.45, -0.55, -0.15], up * (1 - back), _lh);
     }
-    aim = _aim.set(-0.14, Math.sin(e), Math.cos(e)).normalize();
+    if (s.air) { mix3([0.75, 0.45, 0.05], _lh, 0, _lh); mix3([0, -1, -0.2], _lp, 0, _lp); }
   }
   if (s.air) {
     set(R[4], -0.6, 0, 0);
     set(R[5], -0.2, 0, 0);
-    if (!s.carry) R[2][2] = 0.9;
   }
   if (wad > 0.01) root = _hop.copy(root).multiply(_a.makeTranslation(sw * 0.045 * wad, bounce * 0.085 * wad, 0)); // feet and all
-  return rigPose(rig, root, R, out, off, aim);
+  rigPose(rig, root, R, out, off);
+  if (!rig.elbow) return out;
+  solveArm(rig, 3, _rh, _rp);
+  writeArm(rig, 3, _body, out, off);
+  if (grip) { // the left mitten goes to a point on the shaft, a little way up from the right one
+    _v.copy(_H).addScaledVector(_F, 0.26).sub(rig.pivot[2]).multiplyScalar(1 / rig.armLen);
+    _lh[0] = _v.x; _lh[1] = _v.y; _lh[2] = _v.z;
+    mix3([0.3, -0.6, -0.7], _lp, 0, _lp);
+  }
+  solveArm(rig, 2, _lh, _lp);
+  writeArm(rig, 2, _body, out, off);
+  return out;
 }
 
 // Six euler rotations (body about the hips, head and arms on the body, legs on the root) -> 7 floats per part.
-// aim (optional): a unit direction in the body's frame; the right arm points along it instead of using R[3].
-export function rigPose(rig, root, R, out, off = 0, aim = null) {
+// A rotated arm stays straight: this is for bodies laid out or propped up, and for anything without elbows.
+export function rigPose(rig, root, R, out, off = 0) {
   about(_body, root, rig.pivot[0], R[0]);
   for (let i = 0; i < NCREW; i++) {
-    let m;
-    if (i === 3 && aim) {
-      const j = rig.pivot[3];
-      _q.setFromUnitVectors(_v.fromArray(rig.shapes[3].dir), aim);
-      m = _m.copy(_body).multiply(_a.makeTranslation(j.x, j.y, j.z)).multiply(_r.makeRotationFromQuaternion(_q)).multiply(_b.makeTranslation(-j.x, -j.y, -j.z));
-    } else m = i === 0 ? _body : about(_m, i < 4 ? _body : root, rig.pivot[i], R[i]);
+    const m = i === 0 ? _body : about(_m, i < 4 ? _body : root, rig.pivot[i], R[i]);
     const o = off + i * 7;
     _v.copy(rig.rest[i]).applyMatrix4(m);
     _q.setFromRotationMatrix(m);

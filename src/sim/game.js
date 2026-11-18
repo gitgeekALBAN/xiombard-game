@@ -143,8 +143,10 @@ export class Sim {
       for (const [x, y, z, r] of sh.spheres || []) b.addShape(new CANNON.Sphere(r), new CANNON.Vec3(x, y, z));
       // limb boxes run along the limb: arms rest at an angle, so the box is turned to match
       if (sh.box) b.addShape(new CANNON.Box(v3(sh.box)), new CANNON.Vec3(), sh.dir ? new CANNON.Quaternion().setFromVectors(up, v3(sh.dir)) : undefined);
-      b.position.set(xf[o], xf[o + 1], xf[o + 2]);
-      b.quaternion.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]);
+      // an arm is one straight box from shoulder to mitten, but its part is the forearm: remember the way from one to the other
+      const d = rig.rest[i].clone().sub(rig.bodyC[i]);
+      if (d.lengthSq() > 1e-8) b.xfOff = new CANNON.Vec3(d.x, d.y, d.z);
+      this.bodyFromXf(b, xf, o);
       b.sleepSpeedLimit = 0.25;
       b.sleepTimeLimit = 1.2;
       b.partIndex = i;
@@ -153,7 +155,7 @@ export class Sim {
       bodies.push(b);
     }
     for (let i = 1; i < NCREW; i++) {
-      const j = rig.pivot[i], a = rig.rest[0], c = rig.rest[i], lim = rig.joints[i];
+      const j = rig.pivot[i], a = rig.bodyC[0], c = rig.bodyC[i], lim = rig.joints[i];
       const axis = new CANNON.Vec3(0, lim.up ? 1 : -1, 0);
       const con = new CANNON.ConeTwistConstraint(bodies[0], bodies[i], {
         pivotA: new CANNON.Vec3(j.x - a.x, j.y - a.y, j.z - a.z), pivotB: new CANNON.Vec3(j.x - c.x, j.y - c.y, j.z - c.z),
@@ -163,6 +165,13 @@ export class Sim {
       constraints.push(con);
     }
     return { bodies, constraints };
+  }
+
+  // put a ragdoll body where a part's transform says (7 floats at o); for an arm that means stepping back from the forearm
+  bodyFromXf(b, xf, o) {
+    b.quaternion.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]);
+    b.position.set(xf[o], xf[o + 1], xf[o + 2]);
+    if (b.xfOff) b.position.vsub(b.quaternion.vmult(b.xfOff), b.position);
   }
 
   spawnCorpse(root, rots, seed) {
@@ -389,9 +398,7 @@ export class Sim {
         .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
       const xf = rigPose(rig, m, COFFIN_ROTS, new Float32Array(NCREW * 7));
       corpse.bodies.forEach((b, i) => {
-        const o = i * 7;
-        b.position.set(xf[o], xf[o + 1], xf[o + 2]);
-        b.quaternion.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]);
+        this.bodyFromXf(b, xf, i * 7);
         b.velocity.setZero(); b.angularVelocity.setZero(); b.wakeUp();
       });
       e.body.wakeUp();
@@ -616,11 +623,7 @@ export class Sim {
     const z = e.z, s = this._pose;
     s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z);
     const xf = zombiePose(corpseRig(e.seed), this.walkerRoot(e), s, e.xf);
-    e.bodies.forEach((b, i) => {
-      const o = i * 7;
-      b.position.set(xf[o], xf[o + 1], xf[o + 2]);
-      b.quaternion.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]);
-    });
+    e.bodies.forEach((b, i) => this.bodyFromXf(b, xf, i * 7));
   }
   pickTarget(e) {
     const z = e.z, q = z.body.position, dog = z.def.type === ZTYPE.dog;
@@ -1075,6 +1078,7 @@ export class Sim {
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i], o = i * 7, xf = e.xf;
       xf[o] = b.position.x; xf[o + 1] = b.position.y; xf[o + 2] = b.position.z;
+      if (b.xfOff) { const d = b.quaternion.vmult(b.xfOff); xf[o] += d.x; xf[o + 1] += d.y; xf[o + 2] += d.z; } // an arm reports its forearm
       xf[o + 3] = b.quaternion.x; xf[o + 4] = b.quaternion.y; xf[o + 5] = b.quaternion.z; xf[o + 6] = b.quaternion.w;
     }
   }

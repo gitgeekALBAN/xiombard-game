@@ -51,13 +51,16 @@ export function humanPieces(k, q = 1) {
     // (the stitched patch over the empty neck is paint: see `uWrap` in material.js)
   }
   if (k.face2) { const [fx, fy, fz, fr] = k.face2; out.push({ mesh: place(ball(fr, fr * 0.95, fr * 0.9, 12, 8), (x, y, z) => [x, y, z], fx, fy, fz), mat: MAT.skin, color: col.skin, bone: 0 }); }
-  const armLen = Math.hypot(hx - sx, hy - sy, hz - sz);
-  const sleeve = lathe([[0.001, -ar * 0.6], [ar * 0.75, -ar * 0.3], [ar, 0], [ar * 0.88, armLen]], 8, { smooth: true });
+  // an arm is two tubes and a ball for the elbow: the upper arm follows its own bone (6 left, 7 right), which the
+  // drawing code lays from the shoulder to wherever the forearm begins; the forearm, the elbow and the mitten are part 2 / 3
+  const armLen = Math.hypot(hx - sx, hy - sy, hz - sz), half = armLen / 2;
+  const upper = lathe([[0.001, -ar * 0.6], [ar * 0.75, -ar * 0.3], [ar, 0], [ar * 0.94, half]], 8, { smooth: true });
+  const lower = lathe([[ar * 0.94, 0], [ar * 0.88, half]], 8, { smooth: true }), joint = ball(ar * 1.02, ar * 1.02, ar * 1.02, 8, 5);
   for (const s of [1, -1]) {
-    const arm = s > 0 ? armL : armR;
-    out.push({ mesh: along(sleeve, [s * sx, sy, sz], [s * hx, hy, hz]), occ: arm, mat: coat ? MAT.cloth : MAT.skin, color: garb || col.skin,
-      // whatever lies under the body's surface belongs to the body, or a raised arm would swing its hidden end out through the belly
-      bones: [{ part: s > 0 ? 2 : 3, d: (x, y, z) => arm(x, y, z) + Math.max(0, -trunk(x, y, z)) * 5 }, { part: 0, d: (x, y, z) => trunk(x, y, z) + 0.02 }], soft: 0.035 });
+    const arm = s > 0 ? armL : armR, sh = [s * sx, sy, sz], ha = [s * hx, hy, hz], el = [(sh[0] + ha[0]) / 2, (sh[1] + ha[1]) / 2, (sh[2] + ha[2]) / 2];
+    const paint = { mat: coat ? MAT.cloth : MAT.skin, color: garb || col.skin };
+    out.push({ mesh: along(upper, sh, el), occ: arm, ...paint, bone: s > 0 ? 6 : 7 });
+    out.push({ mesh: merge(along(lower, el, ha), place(joint, (x, y, z) => [x, y, z], ...el)), ...paint, bone: s > 0 ? 2 : 3 });
   }
 
   // ---- mittens: a rounded paw with a thumb (soft: sculpted) and a knitted cuff (a tube)

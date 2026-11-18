@@ -9,8 +9,6 @@ import { buildShovel } from './models/shovel.js';
 // sculpted from the character's formulas, skinned to those six frames (see src/chars/).
 // rig comes from crewRig(), zombieRig() or corpseRig(); opts.shovel puts a shovel in the right mitten,
 // opts.q sets the mesh detail (bodies are many and come and go, so they are built a little coarser).
-const _t = new THREE.Matrix4();
-
 export function buildCrew(rig, opts = {}) {
   const S = rig.S, k = rig.def.look;
   const groups = Array.from({ length: NCREW }, () => new THREE.Group());
@@ -18,10 +16,10 @@ export function buildCrew(rig, opts = {}) {
   u.uThick.value = 0.011;
 
   if (opts.shovel) {
-    // The shovel is a straight extension of the right arm (crewPose aims that arm like a weapon), gripped in the
+    // The shovel is a straight extension of the right forearm (crewPose carries it like a weapon), gripped in the
     // mitten. It is rolled about its own axis so that the blade lies face up when carried at the ready.
     const shovel = buildShovel(), Y = new THREE.Vector3(0, 1, 0);
-    const armDir = new THREE.Vector3().fromArray(rig.shapes[CP.armR].dir), hold = shovelHoldDir();
+    const armDir = new THREE.Vector3().fromArray(rig.shapes[CP.armR].dir), hold = shovelHoldDir(rig);
     const mount = new THREE.Quaternion().setFromUnitVectors(Y, armDir), carried = new THREE.Quaternion().setFromUnitVectors(armDir, hold);
     const face = new THREE.Vector3(0, 0, 1).applyQuaternion(mount).applyQuaternion(carried), want = Y.clone().addScaledVector(hold, -Y.dot(hold)).normalize();
     mount.multiply(new THREE.Quaternion().setFromAxisAngle(Y, Math.atan2(hold.dot(new THREE.Vector3().crossVectors(face, want)), face.dot(want))));
@@ -32,13 +30,10 @@ export function buildCrew(rig, opts = {}) {
     groups[CP.armR].userData.shovel = shovel;
   }
 
-  const scale = new THREE.Vector3(S, S, S), rest = rig.rest.map((r) => r.clone().divideScalar(S));
-  // call once per frame after the groups moved; noHead leaves out the head and hat (your own digger in first person)
+  const pos = groups.map((g) => g.position), quat = groups.map((g) => g.quaternion);
+  // call once per frame after the groups moved; noHead leaves out the head and hat
   function update(noHead) {
-    for (let i = 0; i < NCREW; i++) {
-      const g = groups[i];
-      ch.parts[i].compose(g.position, g.quaternion, scale).multiply(_t.makeTranslation(-rest[i].x, -rest[i].y, -rest[i].z));
-    }
+    ch.setFrames(rig, pos, quat);
     // the key light (moon, low sun or high sun) is the toon shader's, so everyone sits in the same scene
     const key = keyLight();
     u.uLightDir.value.copy(key.dir);

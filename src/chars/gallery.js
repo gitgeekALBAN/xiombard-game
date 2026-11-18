@@ -57,7 +57,7 @@ for (const [i, c] of cast.entries()) {
   const row = Math.floor(i / perRow), col = i % perRow, n = Math.min(perRow, cast.length - row * perRow);
   c.home = new THREE.Vector3((col - (n - 1) / 2) * GAP, 0, -row * ROW);
   c.ch = new Character(c.rig.def, { fog: false });
-  c.rest = c.rig.rest.map((r) => r.clone().divideScalar(c.rig.S));
+  c.pos = Array.from({ length: 6 }, () => new THREE.Vector3()); c.quat = Array.from({ length: 6 }, () => new THREE.Quaternion());
   scene.add(c.ch.group);
   tris += c.ch.triangles;
   const sh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), shadowMat);
@@ -131,10 +131,8 @@ function tick(dt) {
   for (const c of cast) {
     root.makeRotationY(ui.turnA).setPosition(c.home);
     c.pose(c.rig, root, ui.walkK, time, xf);
-    for (let i = 0; i < 6; i++) {
-      const o = i * 7;
-      c.ch.parts[i].compose(_p.set(xf[o], xf[o + 1], xf[o + 2]), _q.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]), _s.setScalar(c.rig.S)).multiply(_t.makeTranslation(-c.rest[i].x, -c.rest[i].y, -c.rest[i].z));
-    }
+    for (let i = 0; i < 6; i++) { const o = i * 7; c.pos[i].set(xf[o], xf[o + 1], xf[o + 2]); c.quat[i].set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]); }
+    c.ch.setFrames(c.rig, c.pos, c.quat);
     const u = c.ch.uniforms;
     u.uLightDir.value.copy(key.dir); u.uLightCol.value.copy(key.lit).multiplyScalar(mode === 'sheet' ? 1.0 : 0.85); u.uShadeCol.value.copy(key.shade).multiplyScalar(mode === 'sheet' ? 1.25 : 1);
   }

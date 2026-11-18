@@ -31,7 +31,9 @@ export function characterGeometry(look, q = QUALITY.value) {
   return g;
 }
 
-// A character ready to draw. parts: six rest -> world matrices (scale included), refreshed by the caller each frame.
+const _s = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _c = new THREE.Vector3(), _q = new THREE.Quaternion(), _t = new THREE.Matrix4();
+
+// A character ready to draw. Call setFrames() every frame with where its six parts are.
 export class Character {
   constructor(def, opts = {}) {
     const k = def.look, { paint, hull, uniforms } = characterMaterials(opts);
@@ -58,5 +60,22 @@ export class Character {
     this.group = new THREE.Group();
     for (const m of [paint, hull]) { const mesh = new THREE.Mesh(geo, m); mesh.frustumCulled = false; this.group.add(mesh); }
     this.triangles = geo.index.count / 3;
+  }
+
+  // Fill the bone matrices from the six part frames (world position and rotation of each part's rest center).
+  // The two upper arms are not parts: each is laid from the shoulder (which rides on the body) to the elbow
+  // (where the forearm begins), so the arm bends wherever the pose put the forearm.
+  setFrames(rig, pos, quat) {
+    const S = rig.S, parts = this.parts;
+    _s.set(S, S, S);
+    for (let i = 0; i < 6; i++) { const r = rig.rest[i]; parts[i].compose(pos[i], quat[i], _s).multiply(_t.makeTranslation(-r.x / S, -r.y / S, -r.z / S)); }
+    for (let i = 2; i < 4; i++) {
+      if (!rig.elbow) { parts[i + 4].copy(parts[0]); continue; }
+      const sh = rig.pivot[i], el = rig.elbowAt[i];
+      _a.copy(sh).divideScalar(S).applyMatrix4(parts[0]); // the shoulder, in the world
+      _b.copy(el).divideScalar(S).applyMatrix4(parts[i]).sub(_a).normalize(); // the way to the elbow
+      _q.setFromUnitVectors(_c.copy(el).sub(sh).normalize().applyQuaternion(quat[0]), _b).multiply(quat[0]);
+      parts[i + 4].compose(_a, _q, _s).multiply(_t.makeTranslation(-sh.x / S, -sh.y / S, -sh.z / S));
+    }
   }
 }

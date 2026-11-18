@@ -7,7 +7,7 @@ import { lightingGLSL, DAY, INK } from '../shaders/toon.js';
 // stitched-on patches, dirt, and the face. Six rigid parts drive the mesh; each vertex blends two of them.
 const skin = /* glsl */ `
 attribute vec3 color; attribute vec2 fx; attribute vec2 bone; attribute float weight;
-uniform mat4 uPart[6];   // rest -> world for body, head, and the four limbs
+uniform mat4 uPart[8];   // rest -> world for body, head and the four limbs, then the two upper arms (6 left, 7 right)
 uniform float uNoHead;   // 1 = drop everything that follows the head (your own digger in first person)
 vec3 skinned(out vec3 n) {
   int a = int(bone.x + 0.5), b = int(bone.y + 0.5);
@@ -266,7 +266,7 @@ void main() {
 export function characterMaterials(opts = {}) {
   const uniforms = {
     ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uDay: DAY,
-    uPart: { value: Array.from({ length: 6 }, () => new THREE.Matrix4()) }, uNoHead: { value: 0 },
+    uPart: { value: Array.from({ length: 8 }, () => new THREE.Matrix4()) }, uNoHead: { value: 0 },
     uLightDir: { value: new THREE.Vector3(-0.4, 0.7, 0.5).normalize() }, uLightCol: { value: new THREE.Color(1, 1, 1) }, uShadeCol: { value: new THREE.Color(0.5, 0.45, 0.66) },
     uRimCol: { value: new THREE.Color(0, 0, 0) }, uInk: { value: new THREE.Color(INK) },
     uFace: { value: 0 }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uHeadC2: { value: new THREE.Vector4(0, 0, 0, 0) }, uBellyR: { value: 0.25 },
