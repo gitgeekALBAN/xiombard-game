@@ -42,6 +42,14 @@ const SOUNDS = {
   flop: (v) => { noise(0.12, 400, 0.4 * v); tone('sine', 200, 60, 0.2, 0.3 * v); },
   thud: (v) => { noise(0.15, 300, 0.5 * v); tone('sine', 90, 40, 0.2, 0.4 * v); },
   honk: (v) => { tone('square', 330, 320, 0.22, 0.12 * v); tone('square', 262, 255, 0.3, 0.12 * v, 0.25); },
+  // the night shift
+  swish: (v) => noise(0.16, 2600, 0.22 * v),
+  bonk: (v) => { tone('sine', 520, 140, 0.16, 0.45 * v); noise(0.07, 1400, 0.4 * v); tone('triangle', 900, 300, 0.07, 0.2 * v); },
+  groan: (v) => { tone('sawtooth', 110, 72, 0.7, 0.13 * v); tone('sine', 92, 60, 0.8, 0.2 * v, 0.05); },
+  bark: (v) => { tone('square', 520, 300, 0.09, 0.14 * v); tone('square', 600, 320, 0.1, 0.14 * v, 0.14); },
+  poof: (v) => { noise(0.4, 700, 0.3 * v); tone('sine', 300, 700, 0.3, 0.1 * v); },
+  night: (v) => { [196, 185, 147].forEach((f, i) => tone('sine', f, f * 0.98, 1.3, 0.2 * v, i * 0.5)); },
+  rooster: (v) => { [[660, 880, 0.14], [880, 990, 0.14], [990, 1180, 0.5], [1180, 700, 0.35]].reduce((t, [a, b, d]) => { tone('square', a, b, d, 0.09 * v, t); return t + d; }, 0); },
   bury: (v) => { [523, 466, 392, 311].forEach((f, i) => tone('triangle', f, f, 0.5, 0.18 * v, i * 0.16)); },
 };
 

@@ -1,18 +1,19 @@
 import * as THREE from 'three';
 import { SdfCharacter } from '../sdf/shader.js';
-import { CP, NCREW, crewRig } from '../shared/crew.js';
+import { CP, NCREW } from '../shared/crew.js';
 import { MOON_DIR, INK } from '../shaders/toon.js';
 import { buildShovel } from './models/characters.js';
 import { isTouchDevice } from '../touch.js';
 
-// One digger of the crew in the game: six empty groups that follow the snapshot transforms (camera, labels and
-// the shovel hang off them) and one raymarched SDF character drawn from those six frames.
+// One shader character in the game (a digger of the crew, or a zombie): six empty groups that follow the snapshot
+// transforms (camera, labels and the shovel hang off them) and one raymarched SDF character drawn from those frames.
+// rig comes from crewRig() or zombieRig(); opts.shovel puts a shovel in the right mitten.
 const RIM_DIR = new THREE.Vector3(0.6, 0.3, 0.75).normalize(); // opposite the moon, so the shadow side keeps an edge
 const _lo = new THREE.Vector3(), _hi = new THREE.Vector3(), _c = new THREE.Vector3(), _h = new THREE.Vector3();
 const _t = new THREE.Matrix4();
 
-export function buildCrew(look, camera) {
-  const rig = crewRig(look), S = rig.S;
+export function buildCrew(rig, camera, opts = {}) {
+  const S = rig.S;
   const groups = Array.from({ length: NCREW }, () => new THREE.Group());
   const sdf = new SdfCharacter(rig.def, camera, { scale: S, fog: true, lanterns: true, lite: isTouchDevice() });
   const u = sdf.material.uniforms;
@@ -29,13 +30,15 @@ export function buildCrew(look, camera) {
   sdf.mesh.frustumCulled = false; // the box is moved by hand every frame
 
   // the shovel rides in the right mitten, upright while the arms chop (see crewPose)
-  const shovel = buildShovel();
-  const hand = rig.hand.clone().setX(-rig.hand.x).sub(rig.rest[CP.armR]);
-  shovel.scale.setScalar(0.85);
-  shovel.position.set(hand.x, hand.y - 0.2, hand.z + 0.04);
-  shovel.rotation.set(0.4, 0, -0.55, 'ZXY');
-  groups[CP.armR].add(shovel);
-  groups[CP.armR].userData.shovel = shovel;
+  if (opts.shovel) {
+    const shovel = buildShovel();
+    const hand = rig.hand.clone().setX(-rig.hand.x).sub(rig.rest[CP.armR]);
+    shovel.scale.setScalar(0.85);
+    shovel.position.set(hand.x, hand.y - 0.2, hand.z + 0.04);
+    shovel.rotation.set(0.4, 0, -0.55, 'ZXY');
+    groups[CP.armR].add(shovel);
+    groups[CP.armR].userData.shovel = shovel;
+  }
 
   const parts = Array.from({ length: NCREW }, () => new THREE.Matrix4());
   const scale = new THREE.Vector3(S, S, S), rest = rig.rest.map((r) => r.clone().divideScalar(S));

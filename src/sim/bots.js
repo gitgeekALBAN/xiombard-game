@@ -111,7 +111,7 @@ export function createBots(sim, opts = {}) {
     if (W && Wt === T) return W;
     const corpses = [], coffins = [], diggers = [];
     for (const e of sim.ents) {
-      if (e.kind === 'corpse') corpses.push(e);
+      if (e.kind === 'corpse') { if (!e.z) corpses.push(e); } // a body on its feet is a zombie, not cargo
       else if (e.kind === 'coffin') coffins.push(e);
       else if (e.kind === 'digger') diggers.push(e);
     }

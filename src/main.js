@@ -98,7 +98,9 @@ function playerName() {
 async function host() {
   unlockAudio();
   setStatus('Opening the graveyard gates...');
-  sim = new Sim();
+  // ?daylen=<s>&nightlen=<s> shorten or stretch the two halves of the shift (testing, tuning)
+  const q = new URLSearchParams(location.search);
+  sim = new Sim({ dayLen: +q.get('daylen') || 0, nightLen: +q.get('nightlen') || 0 });
   myId = sim.addPlayer(playerName()).id;
   // AI teammates so nobody digs alone: ?bots=N (0..5), 3 by default; they step aside for joining humans
   bots = createBots(sim);
@@ -172,6 +174,14 @@ function showRoom(code, note) {
 function applyState(st) {
   view.setState(st);
   $('score').textContent = st.score;
+  if (st.phase) {
+    const [night, left, day, light, zombies] = st.phase;
+    view.setDay?.(light);
+    document.body.classList.toggle('night', !!night);
+    const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+    $('phase').innerHTML = night ? `<b>Night ${day}</b> ${clock} to dawn<small>${zombies ? `${zombies} on their feet: whack them!` : 'quiet... for now'}</small>`
+      : `<b>Day ${day}</b> ${clock} to dusk<small>bury them before dark</small>`;
+  }
   const me = st.players.find((p) => p.id === myId);
   $('hint').textContent = me ? hintText(me.hint) : '';
   const grip = me ? me.grip : -1;
@@ -181,7 +191,7 @@ function applyState(st) {
   $('players').innerHTML = st.players.map((p) => `<li style="--c:${p.color}">${escapeHtml(p.name)}${p.id === myId ? ' (you)' : ''}</li>`).join('');
 }
 // Hints are written by the host in keyboard terms; on a touch screen show the button names instead.
-const TOUCH_WORDS = [[/Hold F/g, 'Hold DIG'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'],
+const TOUCH_WORDS = [[/Hold F/g, 'Hold DIG'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'], [/Click to whack/g, 'Tap GRAB to whack'],
   [/Click to drop/g, 'GRAB to drop'], [/Press R/g, 'Tap LIMP']];
 const hintText = (h) => (touch.active ? TOUCH_WORDS.reduce((t, [re, w]) => t.replace(re, w), h) : h);
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

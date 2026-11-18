@@ -1,7 +1,8 @@
 import * as CANNON from 'cannon-es';
 import * as THREE from 'three';
-import { PARTS, NPARTS, P, fk, restRots, limpRots } from '../shared/skeleton.js';
+import { PARTS, NPARTS, P, fk, animRots, restRots, limpRots } from '../shared/skeleton.js';
 import { CREW, NCREW, crewRig, crewPose } from '../shared/crew.js';
+import { ZOMBIES, ZTYPE, Z_WALKERS, Z_DRAGGER, Z_DOGS, zombieRig, zombiePose } from '../shared/zombies.js';
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
   ROAD_Z, PILE, SPAWN, staticBoxes, plotAt,
@@ -9,11 +10,11 @@ import {
 import { rng, corpseName } from '../shared/rng.js';
 
 // Host-authoritative simulation. Only the host runs this; clients render its snapshots.
-const G_GROUND = 1, G_PLAYER = 2, G_PROP = 4, G_TRUCK = 8;
+const G_GROUND = 1, G_PLAYER = 2, G_PROP = 4, G_TRUCK = 8, G_ZOMBIE = 0x400;
 // Each player gets its own collision bit (bits 4..9) so whatever they carry can pass through them
 // instead of wedging against their legs.
 const PLAYER_BITS = 0x3f0;
-const ALL = G_GROUND | G_PROP | G_TRUCK | PLAYER_BITS;
+const ALL = G_GROUND | G_PROP | G_TRUCK | PLAYER_BITS | G_ZOMBIE;
 const STEP = 1 / 60;
 const CORPSE_MASS = 30, DIGGER_RAG_MASS = 45;
 const MAX_CORPSES = 9;
@@ -24,12 +25,27 @@ const COFFIN_HOLD_Y = 0.55;
 // Strong enough to feel snappy, weak enough that nothing gets launched. Coffins are held low, so they are dragged, not lifted.
 const CORPSE_GRIP_N = 1400, COFFIN_GRIP_N = 1100;
 const CORPSE_HOLD_Y = 1.3;
+// The shift has two halves. By day the truck delivers and the crew buries. At night nothing is delivered: zombies
+// climb out of the ground, every body left unburied gets up too, and the crew defends the yard with shovels.
+const DAY_LEN = 150, NIGHT_LEN = 80, TWILIGHT = 10; // seconds; the light fades over the last TWILIGHT of each half
+const MAX_ZOMBIES = 8;      // raymarched zombies alive at once (each one costs GPU time)
+const RISE_TIME = 1.6;      // seconds a zombie takes to climb out of the ground
+const SWING_TIME = 0.45;    // a shovel swing; the blow lands a third of the way in
+const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
 
 const v3 = (a) => new CANNON.Vec3(a[0], a[1], a[2]);
-const PARTS_OF = { digger: NCREW, corpse: NPARTS, coffin: 1, truck: 1 };
+const PARTS_OF = { digger: NCREW, zombie: NCREW, corpse: NPARTS, coffin: 1, truck: 1 };
 
 export class Sim {
-  constructor() {
+  // opts: { dayLen, nightLen } in seconds (for tests and tuning)
+  constructor(opts = {}) {
+    this.dayLen = opts.dayLen || DAY_LEN;
+    this.nightLen = opts.nightLen || NIGHT_LEN;
+    this.phase = 'day';
+    this.phaseT = 0;   // seconds into the current half
+    this.dayN = 1;
+    this.nightN = 0;
+    this.spawns = [];  // zombies still to come tonight: { t, look }
     const w = (this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) }));
     w.broadphase = new CANNON.SAPBroadphase(w);
     w.allowSleep = true;
@@ -55,9 +71,11 @@ export class Sim {
     this.seedCounter = 1;
     this.rand = rng(Date.now() & 0xffff);
     this._ray = new CANNON.RaycastResult();
-    this._pose = { speed: 0, phase: 0, t: 0, carry: null, dig: false, air: false };
+    this._pose = { speed: 0, phase: 0, t: 0, carry: null, dig: false, air: false, swing: 0, attack: 0 };
+    this._rots = restRots();
     this._root = new THREE.Matrix4();
 
+    this.obstacles = staticBoxes().filter((b) => b.c[1] + b.h[1] > 0.2); // things a zombie must not spawn inside
     for (const b of staticBoxes()) {
       const body = new CANNON.Body({ mass: 0, material: this.mGround, collisionFilterGroup: G_GROUND, collisionFilterMask: ALL });
       body.addShape(new CANNON.Box(v3(b.h)));
@@ -96,11 +114,12 @@ export class Sim {
       if (e.body) this.world.removeBody(e.body);
       this.world.removeBody(e.hand);
     }
+    if (e.z && e.z.mode !== 'down') this.world.removeBody(e.z.body);
     this.ents.splice(this.ents.indexOf(e), 1);
     this.version++;
   }
   bodiesOf(e) {
-    if (e.kind === 'digger') return e.rag ? e.rag.bodies : [];
+    if (e.kind === 'digger' || e.kind === 'zombie') return e.rag ? e.rag.bodies : [];
     if (e.kind === 'corpse') return e.bodies;
     if (e.kind === 'coffin') return [e.body];
     return [];
@@ -251,7 +270,7 @@ export class Sim {
     const p = this.addEnt({
       kind: 'digger', name: (name || CREW[look].name).slice(0, 16), color, look, seed: n + 1, body, hand, bit,
       yaw: Math.PI, input: { mx: 0, mz: 0, yaw: Math.PI, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 },
-      last: null, rag: null, ragT: 0, grab: null, phase: 0, grounded: true, turn: 0, hint: '', digging: false, jumpT: 0, slipT: 0,
+      last: null, rag: null, ragT: 0, grab: null, phase: 0, grounded: true, turn: 0, hint: '', digging: false, jumpT: 0, slipT: 0, swingT: -9, swingHit: true,
     });
     return p;
   }
@@ -314,7 +333,8 @@ export class Sim {
     const boxed = new Set(this.ents.filter((e) => e.kind === 'coffin' && this.coffinUp(e) > 0.5).map((e) => this.coffinContents(e)));
     for (const e of this.ents) {
       if (e === p) continue;
-      if (e.kind === 'corpse' || (e.kind === 'digger' && e.rag)) {
+      if (e.z && e.z.mode !== 'down') continue; // on its feet: whack it first
+      if (e.kind === 'corpse' || ((e.kind === 'digger' || e.kind === 'zombie') && e.rag)) {
         for (const b of this.bodiesOf(e)) {
           const d = b.position.distanceTo(hand) - b.grabR + (boxed.has(e) ? 0.8 : 0);
           if (d < bestD) { bestD = d; best = { body: b, ent: e, pivot: new CANNON.Vec3() }; }
@@ -434,7 +454,7 @@ export class Sim {
   coffinContents(coffin) {
     const b = coffin.body, loc = new CANNON.Vec3();
     for (const e of this.ents) {
-      if (e.kind !== 'corpse') continue;
+      if (e.kind !== 'corpse' || (e.z && e.z.mode !== 'down')) continue;
       let inside = true;
       for (const i of [P.pelvis, P.chest]) {
         b.pointToLocalFrame(e.bodies[i].position, loc);
@@ -514,6 +534,297 @@ export class Sim {
     }
   }
 
+  // ---------- day and night ----------
+  light() {
+    const ss = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
+    return this.phase === 'day' ? 1 - ss(this.dayLen - TWILIGHT, this.dayLen, this.phaseT) : ss(this.nightLen - TWILIGHT, this.nightLen, this.phaseT);
+  }
+  updatePhase(h) {
+    this.phaseT += h;
+    if (this.phase === 'day' && this.phaseT >= this.dayLen) this.startNight();
+    else if (this.phase === 'night' && this.phaseT >= this.nightLen) this.startDay();
+    if (this.phase !== 'night') return;
+    while (this.spawns.length && this.spawns[0].t <= this.time && this.ents.filter((e) => e.kind === 'zombie').length < MAX_ZOMBIES) {
+      const [x, z] = this.zombieSpot();
+      this.spawnZombie(this.spawns.shift().look, x, z);
+    }
+    for (const e of this.ents) if (e.kind === 'corpse' && e.riseAt && e.riseAt <= this.time && !e.z) { e.riseAt = 0; this.riseCorpse(e); }
+  }
+  startNight() {
+    this.phase = 'night';
+    this.phaseT = 0;
+    this.nightN++;
+    this.emit('toast', { text: 'Night falls. They are coming!', pos: [0, 3.5, 4], big: true });
+    this.emit('sfx', { name: 'night' });
+    const t = this.truck;
+    if (t.state === 'wait') { t.state = 'leave'; t.t = this.time; } // the driver does not work nights
+    // every body left above ground gets up, one after another
+    for (const e of this.ents) if (e.kind === 'corpse' && !e.z) e.riseAt = this.time + 2 + this.rand() * 7;
+    // tonight's visitors: the first night shows one of everything, later nights bring more
+    const pick = (a) => a[Math.floor(this.rand() * a.length)];
+    const looks = [pick(Z_WALKERS), Z_DOGS[0], pick(Z_WALKERS), Z_DRAGGER, Z_DOGS[1], pick(Z_WALKERS), Z_DOGS[2]];
+    for (let i = 0; i < Math.min(8, (this.dayN - 1) * 2); i++) { const r = this.rand(); looks.push(r < 0.5 ? pick(Z_WALKERS) : r < 0.8 ? pick(Z_DOGS) : Z_DRAGGER); }
+    const gap = (this.nightLen * 0.6) / looks.length;
+    this.spawns = looks.map((look, i) => ({ look, t: this.time + 3 + i * gap }));
+  }
+  startDay() {
+    this.phase = 'day';
+    this.phaseT = 0;
+    this.dayN++;
+    this.spawns = [];
+    this.emit('toast', { text: `Morning! Day ${this.dayN}`, pos: [0, 3.5, 4], big: true });
+    this.emit('sfx', { name: 'rooster' });
+    for (const e of [...this.ents]) {
+      e.riseAt = 0;
+      if (!e.z) continue;
+      if (e.kind === 'zombie') this.poof(e); // visitors crumble in the sun
+      else this.layDown(e);                  // risen bodies drop where they stand, still unburied
+    }
+  }
+  // a free spot in the old part of the yard, away from diggers, graves and anything solid
+  zombieSpot() {
+    const diggers = this.ents.filter((e) => e.kind === 'digger');
+    for (let i = 0; i < 40; i++) {
+      const x = (this.rand() * 2 - 1) * 22, z = -22 + this.rand() * 27;
+      if (diggers.some((d) => Math.hypot(this.feet(d).x - x, this.feet(d).z - z) < 7)) continue;
+      if (PLOTS.some((p) => Math.abs(x - p.x) < PLOT_HALF.x + 1 && Math.abs(z - p.z) < PLOT_HALF.z + 1)) continue;
+      if (this.obstacles.some((b) => Math.abs(x - b.c[0]) < b.h[0] + 0.7 && Math.abs(z - b.c[2]) < b.h[2] + 0.7)) continue;
+      return [x, z];
+    }
+    return [0, -15];
+  }
+
+  // ---------- zombies ----------
+  // Anything on its feet at night has a walker in `e.z`: a simple capsule that is steered around, plus a pose.
+  // Visitors are entities of kind 'zombie' (six parts, drawn by the crew shader). A delivered body that gets up stays
+  // a 'corpse' entity: its ragdoll bodies turn into ghosts that follow the pose, and turn back into a ragdoll when hit.
+  makeWalker(x, y, z, def) {
+    const dog = def.type === ZTYPE.dog;
+    const body = new CANNON.Body({ mass: dog ? 25 : 60, fixedRotation: true, material: this.mPlayer, collisionFilterGroup: G_ZOMBIE, collisionFilterMask: ALL, allowSleep: false });
+    body.addShape(new CANNON.Sphere(dog ? 0.26 : 0.3), new CANNON.Vec3(0, dog ? 0.26 : 0.3, 0));
+    if (!dog) body.addShape(new CANNON.Sphere(0.28), new CANNON.Vec3(0, 0.95, 0));
+    body.position.set(x, y, z);
+    this.world.addBody(body);
+    return { body, def, yaw: this.rand() * Math.PI * 2, phase: 0, speed: 0, hp: def.hp, mode: 'rise', t: this.time, think: 0, target: null, cool: 0, hit: false, digT: 0, slow: 0, hop: 0 };
+  }
+  spawnZombie(look, x, z) {
+    const e = this.addEnt({ kind: 'zombie', look, seed: this.seedCounter++, rag: null });
+    e.z = this.makeWalker(x, 0.05, z, ZOMBIES[look]);
+    this.emit('sfx', { name: ZOMBIES[look].type === ZTYPE.dog ? 'bark' : 'groan', pos: [x, 0.5, z] });
+    return e;
+  }
+  ghost(e, on) {
+    for (const b of e.bodies) {
+      b.type = on ? CANNON.Body.KINEMATIC : CANNON.Body.DYNAMIC;
+      b.collisionFilterGroup = on ? 0 : G_PROP;
+      b.collisionFilterMask = on ? 0 : ALL;
+      b.velocity.setZero(); b.angularVelocity.setZero();
+      b.wakeUp();
+    }
+  }
+  riseCorpse(e) {
+    if (e.z || e.rested === this.nightN) return;
+    this.releaseGrabsOn(new Set(e.bodies));
+    const q = e.bodies[P.pelvis].position;
+    this.ghost(e, true);
+    e.z = this.makeWalker(q.x, Math.max(q.y - 0.12, -PLOT_MAX_DEPTH - 0.1), q.z, RISEN);
+    this.emit('sfx', { name: 'groan', pos: [q.x, 0.5, q.z] });
+    this.emit('toast', { text: `${e.name} is up!`, pos: [q.x, 1.8, q.z] });
+  }
+  walkerRoot(e) {
+    const z = e.z, b = z.body.position;
+    // visitors climb out of the ground; a body that was lying there just stands up
+    const k = z.mode === 'rise' && e.kind === 'zombie' ? 1 - Math.min(1, (this.time - z.t) / RISE_TIME) : 0;
+    const depth = k * k * (z.def.type === ZTYPE.dog ? 0.9 : 2.1);
+    return this._root.makeRotationY(z.yaw).setPosition(b.x, b.y - depth, b.z);
+  }
+  attackOf(z) {
+    if (z.mode !== 'attack') return 0;
+    return Math.min(1, (this.time - z.t) / (z.def.type === ZTYPE.dog ? 0.4 : z.def.type === ZTYPE.dragger ? 1.1 : 0.75));
+  }
+  zombieXf(e, out) {
+    const z = e.z, s = this._pose;
+    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z);
+    return zombiePose(zombieRig(e.look), this.walkerRoot(e), s, out);
+  }
+  // a risen body: the old walk cycle with both arms out, written straight into its ghost bodies
+  poseRisen(e) {
+    const z = e.z, r = this._rots, a = this.attackOf(z);
+    animRots({ speed: z.speed * 1.6, phase: z.phase, t: this.time + e.id, carry: 'corpse', dig: false, air: false }, r);
+    const wind = a ? Math.sin(Math.min(a / 0.55, 1) * Math.PI * 0.5) : 0, slam = a > 0.55 ? Math.min((a - 0.55) / 0.2, 1) : 0;
+    r[P.uarmL][0] = r[P.uarmR][0] = -1.35 - wind * 1.1 + slam * 1.3;
+    r[P.head][2] = 0.4; r[P.head][0] = 0.15;
+    r[P.chest][0] += 0.14 + slam * 0.3; r[P.chest][2] = Math.sin(z.phase) * 0.1;
+    const xf = fk(this.walkerRoot(e), r, e.xf);
+    e.bodies.forEach((b, i) => {
+      const o = i * 7;
+      b.position.set(xf[o], xf[o + 1], xf[o + 2]);
+      b.quaternion.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]);
+    });
+  }
+  pickTarget(e) {
+    const z = e.z, q = z.body.position, dog = z.def.type === ZTYPE.dog;
+    let near = null, nd = Infinity;
+    for (const d of this.ents) {
+      if (d.kind !== 'digger' || d.rag) continue;
+      const dist = Math.hypot(d.body.position.x - q.x, d.body.position.z - q.z);
+      if (dist < nd) { nd = dist; near = d; }
+    }
+    if (near && (dog || nd < 9)) return { p: near }; // dogs chase anyone, the rest only bother with someone close
+    let plot = null, pd = Infinity;
+    for (const pl of this.plots) {
+      if (!pl.buried) continue;
+      const dist = Math.hypot(pl.x - q.x, pl.z - q.z);
+      if (dist < pd) { pd = dist; plot = pl; }
+    }
+    if (plot && !dog) return { plot }; // otherwise: dig up the crew's work
+    return near ? { p: near } : null;
+  }
+  updateWalker(e, h) {
+    const z = e.z, b = z.body, def = z.def, dog = def.type === ZTYPE.dog;
+    if (z.mode === 'down') {
+      const lying = this.time - z.t, held = this.holders(e);
+      if (z.hp > 0 ? lying > (held ? 6 : 3.2) : lying > 2 && !held) { if (z.hp > 0) this.standWalker(e); else if (e.kind === 'zombie') this.poof(e); else this.layDown(e); }
+      return;
+    }
+    if (e.kind === 'corpse') this.poseRisen(e);
+    if (z.mode === 'rise') {
+      b.velocity.x = b.velocity.z = 0;
+      if (this.time - z.t > (e.kind === 'zombie' ? RISE_TIME : 1)) z.mode = 'walk';
+      return;
+    }
+    if (this.time > z.think) { z.think = this.time + 0.4 + this.rand() * 0.3; z.target = this.pickTarget(e); }
+    const tg = z.target, q = b.position;
+    let tx = 0, tz = -4, stop = 0.5;
+    if (tg && tg.p) {
+      if (tg.p.rag || !this.ents.includes(tg.p)) { z.target = null; z.think = 0; }
+      else { tx = tg.p.body.position.x; tz = tg.p.body.position.z; stop = def.reach * 0.75; }
+    } else if (tg && tg.plot) {
+      if (!tg.plot.buried) { z.target = null; z.think = 0; }
+      else { tx = tg.plot.x; tz = tg.plot.z; stop = 1.5; }
+    }
+    const dx = tx - q.x, dz = tz - q.z, dist = Math.hypot(dx, dz);
+    let dy = Math.atan2(dx, dz) - z.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    const turn = (dog ? 7 : 3.5) * h;
+    z.yaw += Math.max(-turn, Math.min(turn, dy));
+
+    if (z.mode === 'attack') {
+      const a = this.attackOf(z);
+      if (!z.hit && a >= 0.6) {
+        z.hit = true;
+        const p = tg && tg.p;
+        if (p && !p.rag && dist < def.reach + 0.6) {
+          const k = dog ? 2.5 : def.type === ZTYPE.dragger ? 8 : 3.8, n = Math.max(dist, 0.01);
+          this.toRagdoll(p, new CANNON.Vec3((dx / n) * k, dog ? 2 : def.type === ZTYPE.dragger ? 5.5 : 3.2, (dz / n) * k));
+          this.emit('sfx', { name: dog ? 'bark' : 'bonk', pos: [tx, 1, tz] });
+          this.emit('toast', { text: dog ? 'Chomp!' : def.type === ZTYPE.dragger ? 'WHAM!' : 'Oof!', pos: [tx, 1.9, tz] });
+        }
+      }
+      if (a >= 1) { z.mode = 'walk'; z.cool = this.time + 1.3; }
+    } else if (tg && tg.p && dist < def.reach && this.time > z.cool && Math.abs(dy) < 0.6) {
+      z.mode = 'attack'; z.t = this.time; z.hit = false;
+    }
+    if (tg && tg.plot && dist < stop + 0.2) { // scratching at a grave until its tenant comes back out
+      z.digT += h;
+      if (Math.floor(z.digT / 0.6) !== Math.floor((z.digT - h) / 0.6)) this.emit('sfx', { name: 'dig', pos: [tx, 0, tz] });
+      if (z.digT > 6) { z.digT = 0; this.unbury(tg.plot); z.target = null; z.think = 0; }
+    } else z.digT = Math.max(0, z.digT - h);
+
+    let sp = dist > stop ? def.speed : 0;
+    if (z.mode === 'attack') sp = dog ? def.speed * 0.7 : 0;
+    sp *= Math.max(0, Math.cos(dy));
+    const k = Math.min(1, h * 8);
+    b.velocity.x += (Math.sin(z.yaw) * sp - b.velocity.x) * k;
+    b.velocity.z += (Math.cos(z.yaw) * sp - b.velocity.z) * k;
+    z.speed = Math.hypot(b.velocity.x, b.velocity.z);
+    z.phase += z.speed * h * (dog ? 5 : 3.2);
+    // stuck against something, or down a hole: hop
+    z.slow = sp > 0.5 && z.speed < 0.3 ? z.slow + h : 0;
+    if ((z.slow > 0.7 || q.y < -0.3) && this.time > z.hop) { z.hop = this.time + 1; z.slow = 0; b.velocity.y = 5.8; b.velocity.x += Math.cos(z.yaw) * 1.5; b.velocity.z -= Math.sin(z.yaw) * 1.5; }
+  }
+  // knocked off its feet: back to a ragdoll, flying
+  knock(e, vx, vy, vz) {
+    const z = e.z;
+    if (!z || z.mode === 'down') return false;
+    z.hp--;
+    if (e.kind === 'zombie') {
+      const xf = this.zombieXf(e, new Float32Array(NCREW * 7));
+      e.rag = this.makeCrewRagdoll(zombieRig(e.look), xf, z.def.type === ZTYPE.dog ? 14 : 38);
+      for (const b of e.rag.bodies) b.ent = e;
+    } else this.ghost(e, false);
+    const bodies = this.bodiesOf(e);
+    for (const b of bodies) b.velocity.set(vx, vy, vz);
+    bodies[0].angularVelocity.set((this.rand() - 0.5) * 9, (this.rand() - 0.5) * 5, (this.rand() - 0.5) * 9);
+    this.world.removeBody(z.body);
+    z.mode = 'down'; z.t = this.time; z.speed = 0;
+    return true;
+  }
+  standWalker(e) {
+    const z = e.z, bodies = this.bodiesOf(e), q = bodies[0].position;
+    this.releaseGrabsOn(new Set(bodies));
+    z.body.position.set(q.x, Math.max(q.y - 0.12, -PLOT_MAX_DEPTH - 0.1), q.z);
+    z.body.velocity.setZero();
+    if (e.kind === 'zombie') {
+      for (const c of e.rag.constraints) this.world.removeConstraint(c);
+      for (const b of bodies) this.world.removeBody(b);
+      e.rag = null;
+    } else this.ghost(e, true);
+    this.world.addBody(z.body);
+    z.mode = 'walk'; z.think = 0; z.cool = this.time + 0.8;
+  }
+  // a risen body goes back to being an ordinary one (it will not get up again tonight)
+  layDown(e) {
+    const z = e.z;
+    if (z.mode !== 'down') { this.ghost(e, false); this.world.removeBody(z.body); }
+    e.z = null;
+    e.rested = this.nightN;
+  }
+  poof(e) {
+    const q = e.rag ? e.rag.bodies[0].position : e.z.body.position;
+    this.emit('sfx', { name: 'poof', pos: [q.x, 0.5, q.z] });
+    this.emit('toast', { text: 'poof', pos: [q.x, 0.8, q.z] });
+    this.removeEnt(e);
+  }
+  unbury(plot) {
+    plot.buried = false;
+    this.score = Math.max(0, this.score - 1);
+    const m = new THREE.Matrix4().makeTranslation(plot.x, 0.35, plot.z - 0.9).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+    const e = this.spawnCorpse(m, restRots(), plot.seed);
+    e.greeted = true;
+    this.emit('toast', { text: `${plot.name} is back!`, pos: [plot.x, 2, plot.z], big: true });
+    this.riseCorpse(e);
+  }
+
+  // ---------- the shovel ----------
+  swinging(p) { return this.time - p.swingT < SWING_TIME; }
+  // zombies on their feet within a shovel's reach in front of the digger
+  whackable(p) {
+    const f = this.fwd(p), b = p.body.position, out = [];
+    for (const e of this.ents) {
+      if (!e.z || e.z.mode === 'down') continue;
+      const q = e.z.body.position, dx = q.x - b.x, dz = q.z - b.z, d = Math.hypot(dx, dz);
+      if (d < 2.2 && Math.abs(q.y - b.y) < 1.6 && (d < 0.6 || (dx * f.x + dz * f.z) / d > 0.3)) out.push(e);
+    }
+    return out;
+  }
+  whack(p) {
+    if (this.time - p.swingT < SWING_TIME + 0.12) return;
+    p.swingT = this.time;
+    p.swingHit = false;
+    this.emit('sfx', { name: 'swish', pos: [p.body.position.x, 1.2, p.body.position.z] });
+  }
+  landWhack(p) {
+    p.swingHit = true;
+    const f = this.fwd(p), hit = this.whackable(p);
+    for (const e of hit) {
+      const q = e.z.body.position;
+      this.knock(e, f.x * 6.5 + (this.rand() - 0.5) * 2, 4.2 + this.rand(), f.z * 6.5 + (this.rand() - 0.5) * 2);
+      this.emit('toast', { text: this.rand() < 0.5 ? 'BONK!' : 'THWACK!', pos: [q.x, 1.8, q.z] });
+    }
+    if (hit.length) this.emit('sfx', { name: 'bonk', pos: [p.body.position.x, 1.2, p.body.position.z] });
+  }
+
   // ---------- main loop ----------
   update(dt) {
     this.acc = Math.min(this.acc + dt, STEP * 4);
@@ -523,7 +834,9 @@ export class Sim {
 
   step(h) {
     this.time += h;
+    this.updatePhase(h);
     this.updateTruck(h);
+    for (const e of [...this.ents]) if (e.z) this.updateWalker(e, h);
     for (const e of this.ents) if (e.kind === 'digger') this.updatePlayer(e, h);
     for (const e of this.ents) if (e.kind === 'digger' && e.grab) this.updateHand(e, h);
     this.world.step(h);
@@ -577,7 +890,14 @@ export class Sim {
     p.speed = Math.hypot(b.velocity.x, b.velocity.z);
     p.phase += p.speed * h * 2.6;
 
-    if (inp.g !== last.g) { last.g = inp.g; if (p.grab) this.drop(p, true); else this.grab(p); }
+    // one button: let go of what you hold, whack a zombie in reach, grab what is there, or swing at the air
+    if (inp.g !== last.g) {
+      last.g = inp.g;
+      if (p.grab) this.drop(p, true);
+      else if (this.whackable(p).length || !this.findGrab(p)) this.whack(p);
+      else this.grab(p);
+    }
+    if (!p.swingHit && this.time - p.swingT >= SWING_TIME * 0.35) this.landWhack(p);
     if (inp.th !== last.th) { last.th = inp.th; this.throwHeld(p); }
 
     if (p.digging) {
@@ -654,6 +974,9 @@ export class Sim {
           e.body.position.set(SPAWN.x, 0.5, SPAWN.z);
           e.body.velocity.set(0, 0, 0);
         }
+      } else if (e.kind === 'zombie') {
+        const pos = e.rag ? e.rag.bodies[0].position : e.z.body.position;
+        if (pos.y < -8 || Math.abs(pos.x) > 45 || Math.abs(pos.z) > 45) this.removeEnt(e);
       } else if (e.kind === 'corpse' || e.kind === 'coffin') {
         const pos = e.kind === 'corpse' ? e.bodies[P.pelvis].position : e.body.position;
         if (pos.y < -8 || Math.abs(pos.x) > 45 || Math.abs(pos.z) > 45) {
@@ -700,7 +1023,7 @@ export class Sim {
 
   corpsesInBed() {
     const tb = this.truck.body.position;
-    return this.ents.filter((e) => e.kind === 'corpse').filter((e) => {
+    return this.ents.filter((e) => e.kind === 'corpse' && !e.z).filter((e) => {
       const q = e.bodies[P.pelvis].position;
       const lx = q.x - tb.x, lz = q.z - tb.z;
       return lx > TRUCK.bed.x0 - 0.2 && lx < TRUCK.bed.x1 + 0.3 && Math.abs(lz) < 1.1 && q.y > 0.6;
@@ -725,7 +1048,7 @@ export class Sim {
       if (x < -TRUCK_START_X) { t.state = 'away'; t.t = this.time; b.position.x = TRUCK_SPAWN_X; b.aabbNeedsUpdate = true; }
     } else if (t.state === 'away') {
       const corpses = this.ents.filter((e) => e.kind === 'corpse').length;
-      if (this.time - t.t > 14 && corpses < MAX_CORPSES - 2) {
+      if (this.time - t.t > 14 && corpses < MAX_CORPSES - 2 && this.phase === 'day' && this.phaseT < this.dayLen - 35) {
         t.loads++;
         this.spawnLoad(Math.min(5, 2 + Math.ceil(t.loads / 2)));
         t.state = 'arrive';
@@ -745,6 +1068,7 @@ export class Sim {
       if (p.grab.coffin) return this.holders(p.grab.ent) > 1 ? 'Teamwork! Drop it into a dug grave.' : 'Heavy! Get a friend on the other end. Click to drop.';
       return 'Put them in a coffin · Click to drop · Right-click to throw';
     }
+    if (this.whackable(p).length) return 'Click to whack!';
     const plot = this.nearestPlot(p);
     if (plot) return this.plotStatus(plot).hint;
     if (this.findGrab(p)) return 'Click to grab';
@@ -757,10 +1081,12 @@ export class Sim {
     this._root.makeRotationY(p.yaw).setPosition(b.x, b.y + (p.grounded ? Math.abs(Math.sin(p.phase)) * 0.05 * Math.min(1, (p.speed || 0) / 3) : 0), b.z);
     this._pose.speed = p.speed || 0; this._pose.phase = p.phase; this._pose.t = this.time + p.id;
     this._pose.carry = p.grab ? (p.grab.coffin ? 'coffin' : 'corpse') : null; this._pose.dig = p.digging; this._pose.air = !p.grounded;
+    this._pose.swing = this.swinging(p) ? (this.time - p.swingT) / SWING_TIME : 0;
     return crewPose(crewRig(p.look), this._root, this._pose, out);
   }
   writeXf(e) {
     if (e.kind === 'digger' && !e.rag) { this.diggerPose(e, e.xf); return; }
+    if (e.kind === 'zombie' && !e.rag) { this.zombieXf(e, e.xf); return; }
     const bodies = e.kind === 'truck' ? [e.body] : this.bodiesOf(e);
     for (let i = 0; i < bodies.length; i++) {
       const b = bodies[i], o = i * 7, xf = e.xf;
@@ -783,8 +1109,11 @@ export class Sim {
       score: this.score,
       plots: this.plots.map((p) => [+p.depth.toFixed(3), +p.fill.toFixed(3), p.buried ? 1 : 0, p.seed, p.name]),
       truck: [+this.truck.wheel.toFixed(3), this.truck.state === 'wait' ? 1 : 0],
+      // night flag, seconds left in this half, day number, light (1 day .. 0 night), zombies on their feet
+      phase: [this.phase === 'night' ? 1 : 0, Math.ceil((this.phase === 'day' ? this.dayLen : this.nightLen) - this.phaseT), this.dayN, +this.light().toFixed(3),
+        this.ents.filter((e) => e.z).length],
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
-        id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging,
+        id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging || this.swinging(e),
         grip: e.grab && !e.grab.coffin ? +e.grab.grip.toFixed(2) : -1,
       })),
       ev,

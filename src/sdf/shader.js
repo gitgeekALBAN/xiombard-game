@@ -37,6 +37,15 @@ uniform vec3 uLightDir, uLightCol, uShadeCol, uRimDir, uRimCol, uInk;
 uniform float uLine, uGrain, uPix;
 uniform float uScale;   // rest units -> world meters (the matrices carry the same scale)
 uniform float uNoHead;  // 1 = leave out the head and hat (your own digger seen from inside its head)
+uniform float uFace;    // 0 = happy crew, 1 = zombie, 2 = zombie dog
+#ifdef DOG
+uniform vec4 uDog;      // half body length, body radius, body height
+uniform vec4 uDogHead;  // head radius, snout length, snout radius
+uniform vec4 uDogLeg;   // x, z, radius
+uniform vec4 uDogEar;   // 0 flap / 1 long wavy flap / 2 pompom, length, width
+uniform vec4 uDogTail;  // length, radius, lift
+uniform vec4 uDogPom;   // pompom radii: head, ankles, tail tip
+#endif
 #ifdef USE_FOG
 uniform vec3 fogColor; uniform float fogDensity;
 #endif
@@ -95,6 +104,57 @@ float tail(vec3 p, float belly, float x, float len) {
   return max(max(abs(belly - 0.022) - 0.012, dr), -p.z); // a strip of cloth lying on the belly
 }
 
+#ifdef DOG
+// A dog on the same six frames: body, head, and four legs (front pair first). Part centers must match dogRig().
+vec3 dogHead() { return vec3(0.0, uDog.z + uDog.y * 0.55 + uDogHead.x * 0.55, uDog.x + uDogHead.x * 0.45); }
+float fluff(vec3 p, float r) { return length(p) - r + 0.007 * sin(p.x * 70.0) * sin(p.y * 70.0 + 1.0) * sin(p.z * 70.0 + 2.0); }
+vec3 map(vec3 pw) {
+  vec3 p0 = (uInv[0] * vec4(pw, 1.0)).xyz, p1 = (uInv[1] * vec4(pw, 1.0)).xyz;
+  vec3 p2 = (uInv[2] * vec4(pw, 1.0)).xyz, p3 = (uInv[3] * vec4(pw, 1.0)).xyz;
+  vec3 p4 = (uInv[4] * vec4(pw, 1.0)).xyz, p5 = (uInv[5] * vec4(pw, 1.0)).xyz;
+  p3.x = -p3.x; p5.x = -p5.x;
+  float L = uDog.x, r = uDog.y, h = uDog.z, hr = uDogHead.x, sl = uDogHead.y, sr = uDogHead.z, lr = uDogLeg.z;
+  vec3 res = vec3(1e9, 0.0, 1e9), hc = dogHead();
+
+  // fur: a sausage body, a round head, a snout and a tail in one piece
+  float skin = sdRoundCone(p0, vec3(0.0, h, -L + r), vec3(0.0, h + r * 0.06, L - r * 0.9), r * 0.9, r);
+  skin = smin(skin, length(p1 - hc) - hr, 0.06);
+  vec3 sn = hc + vec3(0.0, -hr * 0.25, hr * 0.7), tip = sn + vec3(0.0, -sl * 0.12, sl);
+  skin = smin(skin, sdRoundCone(p1, sn, tip, sr * 1.25, sr), 0.035);
+  vec3 ta = vec3(0.0, h + r * 0.5, -L + r * 0.3), tb = ta + uDogTail.x * normalize(vec3(0.0, uDogTail.z, uDogTail.z - 1.2));
+  skin = smin(skin, sdRoundCone(p0, ta, tb, uDogTail.y * 1.3, uDogTail.y), 0.03);
+  take(res, skin, 1.0);
+
+  // what is left of a scarf: a ring under the chin and a short end
+  vec3 qc = p1 - (hc + vec3(0.0, -hr * 0.8, -hr * 0.2));
+  float collar = length(vec2(length(qc.xz) - hr * 0.8, qc.y)) - 0.026;
+  take(res, min(collar, sdEll(qc - vec3(0.03, -0.055, hr * 0.8), vec3(0.03, 0.06, 0.018))), 2.0);
+
+  // ears, and a poodle's pompoms
+  vec3 pe = vec3(abs(p1.x), p1.yz) - hc;
+  float ear;
+  if (uDogEar.x < 0.5) ear = sdEll(pe - vec3(hr * 0.92, -uDogEar.y * 0.35, -hr * 0.1), vec3(0.024, uDogEar.y * 0.55, uDogEar.z));
+  else if (uDogEar.x < 1.5) ear = sdEll(pe - vec3(hr * 0.97, -uDogEar.y * 0.45, 0.0), vec3(0.036, uDogEar.y * 0.6, uDogEar.z)) + 0.007 * sin(pe.y * 70.0 + pe.z * 30.0);
+  else ear = fluff(pe - vec3(hr * 0.95, -hr * 0.25, -0.01), uDogEar.y);
+  if (uDogPom.x > 0.0) {
+    ear = min(ear, fluff(p1 - hc - vec3(0.0, hr * 0.95, -0.01), uDogPom.x));
+    ear = min(ear, fluff(p0 - tb, uDogPom.z));
+    float ay = lr * 2.0 + uDogPom.y;
+    ear = min(ear, min(min(fluff(p2 - vec3(uDogLeg.x, ay, uDogLeg.y), uDogPom.y), fluff(p3 - vec3(uDogLeg.x, ay, uDogLeg.y), uDogPom.y)),
+                       min(fluff(p4 - vec3(uDogLeg.x, ay, -uDogLeg.y), uDogPom.y), fluff(p5 - vec3(uDogLeg.x, ay, -uDogLeg.y), uDogPom.y))));
+  }
+  take(res, ear, 3.0);
+
+  vec3 la = vec3(uDogLeg.x, h, uDogLeg.y), lb = vec3(uDogLeg.x, lr * 1.1, uDogLeg.y), lz = vec3(1.0, 1.0, -1.0);
+  float legs = min(min(sdRoundCone(p2, la, lb, lr, lr), sdRoundCone(p3, la, lb, lr, lr)), min(sdRoundCone(p4, la * lz, lb * lz, lr, lr), sdRoundCone(p5, la * lz, lb * lz, lr, lr)));
+  take(res, legs, 6.0);
+  vec3 pawR = vec3(lr * 1.35, lr * 0.95, lr * 1.8), pf = vec3(uDogLeg.x, lr * 0.9, uDogLeg.y + lr * 0.6), pb = vec3(uDogLeg.x, lr * 0.9, -uDogLeg.y + lr * 0.6);
+  take(res, min(min(sdEll(p2 - pf, pawR), sdEll(p3 - pf, pawR)), min(sdEll(p4 - pb, pawR), sdEll(p5 - pb, pawR))), 7.0);
+  take(res, length(p1 - tip - vec3(0.0, sr * 0.45, sr * 0.55)) - sr * 0.62, 8.0);
+  take(res, sdEll(p1 - sn - vec3(sr * 0.55, -sr * 1.0 - 0.025, sl * 0.72), vec3(0.02, 0.05, 0.013)), 9.0); // the tongue hangs out
+  return vec3(res.x * uScale, res.y, res.z * uScale);
+}
+#else
 vec3 map(vec3 pw) {
   vec3 p0 = (uInv[0] * vec4(pw, 1.0)).xyz, p1 = (uInv[1] * vec4(pw, 1.0)).xyz;
   vec3 p2 = (uInv[2] * vec4(pw, 1.0)).xyz, p3 = (uInv[3] * vec4(pw, 1.0)).xyz;
@@ -126,7 +186,8 @@ vec3 map(vec3 pw) {
   take(res, min(boot(p4), boot(p5)), 7.0);
   if (!hasHead) return vec3(res.x * uScale, res.y, res.z * uScale);
 
-  // hat, worn a touch crooked
+  // hat, worn a touch crooked (a crown radius of 0 means bare-headed)
+  if (uHat.z > 0.0) {
   vec3 ph = p1 - vec3(0.0, uHat.x, 0.0);
   ph.xy = mat2(0.9976, 0.0698, -0.0698, 0.9976) * ph.xy;
   float cr = uHat.z, ch = uHat.w, crown;
@@ -145,6 +206,7 @@ vec3 map(vec3 pw) {
   take(res, hat, 3.0);
   float bandR = (uHat2.x > 0.5 ? cr * sqrt(max(1.0 - pow(uHat2.y * 0.5 / ch, 2.0), 0.0)) : cr * 0.97) + uHat2.z;
   take(res, sdCyl(ph - vec3(0.0, uHat2.y * 0.5 + 0.012, 0.0), bandR, uHat2.y * 0.5, min(uHat2.y * 0.45, uHat2.z + 0.008)), 4.0);
+  }
 
   take(res, sdEll(p1 - vec3(0.0, uHead.x - uHead.y * 0.1, uHead.y * zs * 0.98), uHead.y * vec3(0.17, 0.15, 0.24)), 8.0);
   if (uHair > 0.5) {
@@ -153,6 +215,7 @@ vec3 map(vec3 pw) {
   }
   return vec3(res.x * uScale, res.y, res.z * uScale);
 }
+#endif
 
 vec3 normalAt(vec3 p) {
   vec2 e = vec2(0.0012, -0.0012);
@@ -169,11 +232,33 @@ float shadow(vec3 p, vec3 l) {
   return clamp(res, 0.0, 1.0);
 }
 
-// the face is painted straight onto the head: closed happy eyes, a lopsided smile, rosy cheeks
+// one staring ring of an eye and one cross: shared by the zombies and their dogs
+float deadEyes(vec2 f, float s, float lw) {
+  vec2 q = f - vec2(-0.4, 0.34) * s;
+  float ink = smoothstep(lw * 0.5, -lw * 0.2, abs(length(q) - 0.2 * s) - lw);
+  ink = max(ink, smoothstep(0.07 * s, 0.04 * s, length(q - vec2(0.05, -0.05) * s)));
+  q = f - vec2(0.42, 0.36) * s;
+  if (max(abs(q.x), abs(q.y)) < 0.18 * s) ink = max(ink, smoothstep(lw * 1.3, lw * 0.5, min(abs(q.x - q.y), abs(q.x + q.y)) * 0.707));
+  return ink;
+}
+// the face is painted straight onto the head: closed happy eyes, a lopsided smile, rosy cheeks.
+// returns blush, ink, shade (sunken eyes)
 vec4 face(vec3 p1) {
+  #ifdef DOG
+  vec3 hc = dogHead(); float s = uDogHead.x; vec2 f = p1.xy - hc.xy;
+  if (p1.z < hc.z) return vec4(0.0);
+  return vec4(0.0, deadEyes(f, s, 0.045 * s), 0.0, 0.0);
+  #else
   float s = uHead.y; vec2 f = p1.xy - vec2(0.0, uHead.x);
   if (p1.z < 0.0) return vec4(0.0);
   float lw = 0.03 * s, ink = 0.0;
+  if (uFace > 0.5) {
+    ink = deadEyes(f, s, lw * 1.1);
+    vec2 q = f - vec2(0.0, -0.3) * s; // a stitched zigzag of a mouth
+    if (abs(q.x) < 0.42 * s) ink = max(ink, smoothstep(lw * 1.3, lw * 0.5, abs(q.y - (abs(fract(q.x / (0.2 * s)) - 0.5) * 0.2 - 0.05) * s)));
+    float bags = max(smoothstep(0.36 * s, 0.14 * s, length(f - vec2(-0.4, 0.3) * s)), smoothstep(0.36 * s, 0.14 * s, length(f - vec2(0.42, 0.32) * s)));
+    return vec4(0.0, ink, bags * 0.3, 0.0);
+  }
   for (int i = 0; i < 2; i++) {
     vec2 c = vec2(i == 0 ? -0.4 : 0.4, 0.36) * s, q = f - c;
     float d = abs(length(q) - 0.2 * s) - lw;
@@ -184,6 +269,7 @@ vec4 face(vec3 p1) {
   if (a > -0.6 && a < 0.9) ink = max(ink, smoothstep(lw * 0.5, -lw * 0.2, d));
   float blush = max(smoothstep(0.17 * s, 0.06 * s, length(f - vec2(-0.6, -0.02) * s)), smoothstep(0.17 * s, 0.06 * s, length(f - vec2(0.6, -0.02) * s)));
   return vec4(blush * 0.42, ink, 0.0, 0.0);
+  #endif
 }
 
 void main() {
@@ -226,8 +312,11 @@ void main() {
       float dash = noise(vec3(a * 4.0, pl.y * 60.0, 3.0)) * smoothstep(0.45, 0.75, noise(vec3(a * 2.3, pl.y * 7.0, 7.0)));
       col *= 1.0 - 0.11 * smoothstep(0.5, 0.72, dash);
       vec4 fc = uNoHead < 0.5 ? face(p1) : vec4(0.0);
-      col = mix(col, vec3(0.86, 0.5, 0.55), fc.x);
+      col = mix(col, vec3(0.86, 0.5, 0.55), fc.x) * (1.0 - fc.z);
       line = max(line, fc.y);
+      #ifdef DOG
+      if (uDogEar.x > 0.5 && uDogEar.x < 1.5) col = mix(col, uCol[2] * 0.9, smoothstep(0.52, 0.58, noise(p0 * 5.0 + 3.0))); // spaniel patches
+      #endif
     } else if (id == 2) col *= 0.93 + 0.07 * sin(pl.y * 150.0 + 6.0 * noise(pl * 30.0));          // woven
     else if (id == 3 && uHat2.x > 0.5) col *= 0.88 + 0.12 * sin(atan(p1.x, p1.z) * 30.0);       // knitted ribs
     else if (id == 4 && uHat2.z > 0.012) col *= 0.86 + 0.14 * sin(atan(p1.x, p1.z) * 44.0);
@@ -269,19 +358,22 @@ const HALF = new THREE.Vector3(1.3, 1.5, 1.3);
 // lite (cheaper march for weak GPUs).
 export class SdfCharacter {
   constructor(def, camera, opts = {}) {
-    const k = def.look, col = (h) => new THREE.Color(h);
+    const k = def.look, g = k.dog, col = (h) => new THREE.Color(h), v4 = (a) => new THREE.Vector4(...(a || []), 0, 0, 0, 0);
     this.inv = Array.from({ length: 6 }, () => new THREE.Matrix4());
     this.half = HALF.clone();
     this.material = new THREE.ShaderMaterial({
-      defines: { ...(opts.lanterns ? { LANTERNS: 1 } : {}), ...(opts.lite ? { LITE: 1 } : {}) },
+      defines: { ...(opts.lanterns ? { LANTERNS: 1 } : {}), ...(opts.lite ? { LITE: 1 } : {}), ...(g ? { DOG: 1 } : {}) },
       fog: !!opts.fog,
       uniforms: {
         ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uScale: { value: opts.scale || 1 }, uNoHead: { value: 0 },
         uInv: { value: this.inv }, uProj: { value: camera.projectionMatrix }, uBoxC: { value: new THREE.Vector3() }, uBoxH: { value: this.half },
-        uBean: { value: new THREE.Vector4(...k.bean) }, uHead: { value: new THREE.Vector3(...k.head) },
-        uShoulder: { value: new THREE.Vector3(...k.shoulder) }, uHand: { value: new THREE.Vector3(...k.hand) }, uArm: { value: new THREE.Vector2(...k.arm) },
-        uLeg: { value: new THREE.Vector4(...k.leg) }, uHat: { value: new THREE.Vector4(...k.hat) }, uHat2: { value: new THREE.Vector4(...k.hat2) },
-        uScarf: { value: new THREE.Vector4(...k.scarf) }, uTail: { value: new THREE.Vector3(...k.tail) }, uHair: { value: k.hair ? 1 : 0 },
+        uFace: { value: k.face || 0 },
+        ...(g ? { uDog: { value: new THREE.Vector4(g.len, g.r, g.h, 0) }, uDogHead: { value: v4(g.head) }, uDogLeg: { value: v4(g.leg) },
+          uDogEar: { value: v4(g.ear) }, uDogTail: { value: v4(g.tail) }, uDogPom: { value: v4(g.pom) } } : {}),
+        uBean: { value: v4(k.bean) }, uHead: { value: new THREE.Vector3(...(k.head || [0, 1, 1])) },
+        uShoulder: { value: new THREE.Vector3(...(k.shoulder || [0, 0, 0])) }, uHand: { value: new THREE.Vector3(...(k.hand || [0, 0, 0])) }, uArm: { value: new THREE.Vector2(...(k.arm || [0, 0])) },
+        uLeg: { value: v4(k.leg) }, uHat: { value: v4(k.hat) }, uHat2: { value: v4(k.hat2) },
+        uScarf: { value: v4(k.scarf) }, uTail: { value: new THREE.Vector3(...(k.tail || [0, 9, 0])) }, uHair: { value: k.hair ? 1 : 0 },
         uCol: { value: ['skin', 'scarf', 'hat', 'band', 'mitten', 'leg', 'boot', 'nose', 'hair'].map((n) => col(k.colors[n] || '#000')) },
         uLightDir: { value: new THREE.Vector3() }, uLightCol: { value: new THREE.Color() }, uShadeCol: { value: new THREE.Color() },
         uRimDir: { value: new THREE.Vector3() }, uRimCol: { value: new THREE.Color() }, uInk: { value: new THREE.Color() },

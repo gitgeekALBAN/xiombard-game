@@ -61,16 +61,14 @@ const LOOKS = [
 ];
 
 // the same numbers give the six-part skeleton for animation and the ragdoll
-export const CREW = LOOKS.map((d) => {
-  const k = d.look, [yB, rB, yN] = k.bean, [yH, rH, zs] = k.head;
+export function lookRig(k) {
+  const [yB, rB, yN] = k.bean, [yH, rH, zs] = k.head;
   return {
-    ...d,
-    rig: {
-      body: { c: [0, (yB - rB + yN) / 2, 0], r: [rB * 0.9, (yN - yB + rB) / 2, rB * zs * 0.9] }, head: { c: [0, yH, 0], r: rH }, neck: [0, yN, 0],
-      shoulder: k.shoulder, hand: k.hand, armR: Math.max(k.arm[0], 0.04), hip: [k.leg[0], k.leg[1], 0], legR: Math.max(k.leg[2], 0.04),
-    },
+    body: { c: [0, (yB - rB + yN) / 2, 0], r: [rB * 0.9, (yN - yB + rB) / 2, rB * zs * 0.9] }, head: { c: [0, yH, 0], r: rH }, neck: [0, yN, 0],
+    shoulder: k.shoulder, hand: k.hand, armR: Math.max(k.arm[0], 0.04), hip: [k.leg[0], k.leg[1], 0], legR: Math.max(k.leg[2], 0.04),
   };
-});
+}
+export const CREW = LOOKS.map((d) => ({ ...d, rig: lookRig(d.look) }));
 export const TEAM = CREW.slice(0, 5); // the lineup from the concept sheet
 
 // ---------- the crew in the game ----------
@@ -86,8 +84,12 @@ const rigs = new Map();
 //   shapes[i] ragdoll collider and mass share, joints[i] cone limits, radius[i] a sphere that encloses the drawn part
 export function crewRig(look) {
   const index = ((look % CREW.length) + CREW.length) % CREW.length;
-  if (rigs.has(index)) return rigs.get(index);
-  const def = CREW[index], k = def.look, r = def.rig, S = CREW_SCALE, mx = (a) => [-a[0], a[1], a[2]];
+  if (!rigs.has(index)) rigs.set(index, humanRig(CREW[index], CREW_SCALE, index));
+  return rigs.get(index);
+}
+// the same for any two-legged character drawn by the crew shader (the zombies reuse it)
+export function humanRig(def, S, index = 0) {
+  const k = def.look, r = def.rig, mx = (a) => [-a[0], a[1], a[2]];
   const mid = (a, b) => v3(a, S).add(v3(b, S)).multiplyScalar(0.5);
   const rest = [v3(r.body.c, S), v3(r.head.c, S), mid(r.shoulder, r.hand), mid(mx(r.shoulder), mx(r.hand)),
     new THREE.Vector3(r.hip[0] * S, r.hip[1] * S / 2, 0), new THREE.Vector3(-r.hip[0] * S, r.hip[1] * S / 2, 0)];
@@ -104,12 +106,10 @@ export function crewRig(look) {
     { mass: 0.12, box: [limb(r.legR), r.hip[1] * S / 2, limb(r.legR) * 1.25] },
   ];
   const joints = [null, { cone: 0.5, up: true }, { cone: 1.35 }, { cone: 1.35 }, { cone: 0.9 }, { cone: 0.9 }];
-  const hatTop = (k.hat[0] - k.head[0] + k.hat[3] + k.hat2[3] * 1.6) * S;
-  const radius = [r.body.r[1] * S + 0.12, Math.max(hatTop, k.hat[1] * S, r.head.r * S) + 0.06, armLen / 2 + k.arm[1] * S * 2.4,
+  const hatTop = k.hat ? (k.hat[0] - k.head[0] + k.hat[3] + k.hat2[3] * 1.6) * S : r.head.r * S;
+  const radius = [r.body.r[1] * S + 0.12, Math.max(hatTop, k.hat ? k.hat[1] * S : 0, r.head.r * S) + 0.06, armLen / 2 + k.arm[1] * S * 2.4,
     armLen / 2 + k.arm[1] * S * 2.4, Math.hypot(r.hip[1] * S / 2 + 0.04, k.leg[2] * S * 4.6) + 0.03, Math.hypot(r.hip[1] * S / 2 + 0.04, k.leg[2] * S * 4.6) + 0.03];
-  const rig = { index, def, S, rest, pivot, shapes, joints, radius, hatTop, belly: k.bean[1] * S, hand: v3(r.hand, S) };
-  rigs.set(index, rig);
-  return rig;
+  return { index, def, S, rest, pivot, shapes, joints, radius, hatTop, armLen, belly: k.bean[1] * S, hand: v3(r.hand, S) };
 }
 
 const _body = new THREE.Matrix4(), _m = new THREE.Matrix4(), _a = new THREE.Matrix4(), _b = new THREE.Matrix4(), _r = new THREE.Matrix4();
@@ -119,7 +119,7 @@ const set = (r, x, y, z) => { r[0] = x; r[1] = y; r[2] = z; };
 const about = (out, parent, j, r) => out.copy(parent).multiply(_a.makeTranslation(j.x, j.y, j.z))
   .multiply(_r.makeRotationFromEuler(_e.set(r[0], r[1], r[2], 'XYZ'))).multiply(_b.makeTranslation(-j.x, -j.y, -j.z));
 
-// Procedural digger animation, straight to part transforms. s = { speed, phase, t, carry, dig, air }.
+// Procedural digger animation, straight to part transforms. s = { speed, phase, t, carry, dig, air, swing 0..1 }.
 // Writes 7 floats per part (px,py,pz,qx,qy,qz,qw) into `out` from `off`. The legs hang from the root, so a leaning
 // body keeps its feet under it; head and arms ride on the body.
 export function crewPose(rig, root, s, out, off = 0) {
@@ -143,6 +143,12 @@ export function crewPose(rig, root, s, out, off = 0) {
     set(R[3], -0.8 + c * 0.5, 0, 0.55);
     set(R[4], -0.3, 0, 0);
     set(R[5], 0.2, 0, 0);
+  }
+  if (s.swing) { // the shovel goes up over the head and comes down hard
+    const w = Math.min(s.swing / 0.3, 1), c = s.swing > 0.3 ? Math.min((s.swing - 0.3) / 0.25, 1) : 0, up = -2.7 * w * w * (3 - 2 * w) + 2.1 * c * c * (3 - 2 * c);
+    set(R[2], up, 0, -0.5);
+    set(R[3], up, 0, 0.5);
+    R[0][0] += -0.2 * w + 0.5 * c;
   }
   if (s.air) {
     set(R[4], -0.6, 0, 0);

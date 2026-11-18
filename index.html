@@ -36,6 +36,12 @@
       #hud.visible { opacity: 1; }
       #score-box { position: absolute; left: 16px; top: 14px; font-size: 22px; text-shadow: 2px 2px 0 #000; }
       #score-box small { display: block; font-size: 13px; color: var(--muted); }
+      #phase { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); text-align: center; font-size: 16px; text-shadow: 2px 2px 0 #000;
+        background: var(--panel); padding: 6px 14px; border-radius: 14px 6px 14px 6px; border: 2px solid #f0c060; white-space: nowrap; }
+      #phase b { color: #f0c060; margin-right: 6px; letter-spacing: .06em; }
+      #phase small { display: block; font-size: 12px; color: var(--muted); }
+      body.night #phase { border-color: #9fd66a; }
+      body.night #phase b { color: #9fd66a; }
       #room { position: absolute; right: 16px; top: 14px; font-size: 15px; text-align: right; pointer-events: auto;
         background: var(--panel); padding: 8px 12px; border-radius: 12px; max-width: calc(100vw - 180px); }
       #room b { letter-spacing: .2em; color: var(--accent); }
@@ -115,6 +121,7 @@
     </div>
     <div id="hud">
       <div id="score-box"><span id="score">0</span> buried<small>keep the yard tidy</small></div>
+      <div id="phase"></div>
       <ul id="players"></ul>
       <div id="room"></div>
       <div id="hint"></div>
@@ -122,7 +129,7 @@
       <div id="help" class="open">
         <div class="keys">
           <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> run · <kbd>Space</kbd> jump · mouse look<br />
-          <kbd>Click</kbd>/<kbd>E</kbd> grab &amp; drop · <kbd>Right-click</kbd>/<kbd>Q</kbd> throw<br />
+          <kbd>Click</kbd>/<kbd>E</kbd> grab &amp; drop, or swing the shovel · <kbd>Right-click</kbd>/<kbd>Q</kbd> throw<br />
           <kbd>F</kbd> hold to dig / fill a grave · <kbd>R</kbd> go limp (ragdoll)<br />
         </div>
         <kbd>V</kbd> first / third person · <kbd>H</kbd> toggle help

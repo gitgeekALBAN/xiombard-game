@@ -4,7 +4,8 @@ import { buildCharacter, buildCoffin, buildTruck } from './models.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
 import { PLOTS, PLOT_HALF } from '../shared/layout.js';
-import { CP } from '../shared/crew.js';
+import { CP, crewRig } from '../shared/crew.js';
+import { zombieRig } from '../shared/zombies.js';
 import { buildCrew } from './crew.js';
 import { sfx } from '../audio.js';
 import { isTouchDevice } from '../touch.js';
@@ -118,8 +119,8 @@ export class View {
     this.order = list.map((d) => {
       let e = this.ents.get(d.id);
       if (!e) {
-        // diggers are the shader crew (six frames + one raymarched character), everything else is built from meshes
-        const crew = d.kind === 'digger' ? buildCrew(d.look, this.camera) : null;
+        // diggers and zombies are shader characters (six frames + one raymarched SDF), everything else is built from meshes
+        const crew = d.kind === 'digger' ? buildCrew(crewRig(d.look), this.camera, { shovel: true }) : d.kind === 'zombie' ? buildCrew(zombieRig(d.look), this.camera) : null;
         const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed) : d.kind === 'truck' ? buildTruck() : buildCharacter(d.kind, d.seed, d.color);
         const root = new THREE.Group();
         for (const g of groups) root.add(g);
