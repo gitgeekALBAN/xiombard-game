@@ -31,6 +31,7 @@ const DAY_LEN = 150, NIGHT_LEN = 80, TWILIGHT = 10; // seconds; the light fades 
 const MAX_ZOMBIES = 8;      // raymarched zombies alive at once (each one costs GPU time)
 const RISE_TIME = 1.6;      // seconds a zombie takes to climb out of the ground
 const SWING_TIME = 0.45;    // a shovel swing; the blow lands a third of the way in
+const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it has to be dodged or hit first
 const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
 
 const v3 = (a) => new CANNON.Vec3(a[0], a[1], a[2]);
@@ -642,7 +643,7 @@ export class Sim {
   }
   attackOf(z) {
     if (z.mode !== 'attack') return 0;
-    return Math.min(1, (this.time - z.t) / (z.def.type === ZTYPE.dog ? 0.4 : z.def.type === ZTYPE.dragger ? 1.1 : 0.75));
+    return Math.min(1, (this.time - z.t) / (z.def.type === ZTYPE.dog ? 0.4 : z.def.type === ZTYPE.dragger ? 0.95 : 0.75));
   }
   zombieXf(e, out) {
     const z = e.z, s = this._pose;
@@ -806,10 +807,20 @@ export class Sim {
     const f = this.fwd(p), b = p.body.position, out = [];
     for (const e of this.ents) {
       if (!e.z || e.z.mode === 'down') continue;
+      if (e.kind === 'zombie' && e.z.mode === 'rise' && this.time - e.z.t < RISE_TIME * 0.6) continue; // still mostly underground
       const q = e.z.body.position, dx = q.x - b.x, dz = q.z - b.z, d = Math.hypot(dx, dz);
-      if (d < 2.2 && Math.abs(q.y - b.y) < 1.6 && (d < 0.6 || (dx * f.x + dz * f.z) / d > 0.3)) out.push(e);
+      if (d < SHOVEL_REACH && Math.abs(q.y - b.y) < 1.6 && (d < 0.6 || (dx * f.x + dz * f.z) / d > 0.3)) out.push(e);
     }
     return out;
+  }
+  // a zombie closing in from the front: the click should be a swing, not a grab at whatever lies nearby
+  threatened(p) {
+    const f = this.fwd(p), b = p.body.position;
+    return this.ents.some((e) => {
+      if (!e.z || e.z.mode !== 'walk' && e.z.mode !== 'attack') return false;
+      const q = e.z.body.position, dx = q.x - b.x, dz = q.z - b.z, d = Math.hypot(dx, dz);
+      return d < 4.5 && (dx * f.x + dz * f.z) / (d + 1e-6) > 0.5;
+    });
   }
   whack(p) {
     if (this.time - p.swingT < SWING_TIME + 0.12) return;
@@ -898,7 +909,7 @@ export class Sim {
     if (inp.g !== last.g) {
       last.g = inp.g;
       if (p.grab) this.drop(p, true);
-      else if (this.whackable(p).length || !this.findGrab(p)) this.whack(p);
+      else if (this.whackable(p).length || this.threatened(p) || !this.findGrab(p)) this.whack(p);
       else this.grab(p);
     }
     if (!p.swingHit && this.time - p.swingT >= SWING_TIME * 0.35) this.landWhack(p);

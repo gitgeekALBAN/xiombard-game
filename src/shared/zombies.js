@@ -27,7 +27,7 @@ const draggerLook = {
   leg: [0.1, 0.25, 0.042, 0.1], hat: null, hat2: [1, 0.05, 0.01, 0], scarf: [0.85, 0.2, 0.042, 0.26], tail: [0.1, 9, 0.045],
   colors: { skin: '#7fa56a', scarf: '#5b3f52', hat: '#333', band: '#333', mitten: '#6f8468', leg: '#59665a', boot: '#2f3530', nose: '#5f7359' },
 };
-const dragger = { name: 'Knuckles', type: ZTYPE.dragger, hp: 3, speed: 1.5, reach: 1.7, look: draggerLook, rig: lookRig(draggerLook) };
+const dragger = { name: 'Knuckles', type: ZTYPE.dragger, hp: 3, speed: 1.5, reach: 2.05, look: draggerLook, rig: lookRig(draggerLook) };
 
 // dog: half body length, body radius, body height; head [radius, snout length, snout radius];
 // leg [x, z, radius]; ear [0 flap / 1 long wavy flap / 2 pompom, length, width]; tail [length, radius, lift 0..1];
