@@ -6,13 +6,14 @@ import { touch, initTouch, isTouchDevice } from './touch.js';
 import { createBots } from './sim/bots.js';
 
 const $ = (id) => document.getElementById(id);
-// which build is this? Shown in the corner on the menu and in the game (see build-info.js)
+// which build is this? Shown at the bottom edge, on the menu and in the game (see build-info.js); the middle of the
+// bottom edge is free on phones too, between the stick and the buttons
 const BUILD = typeof __BUILD__ === 'string' ? __BUILD__ : 'dev build';
 {
   const el = document.createElement('div');
   el.id = 'build';
   el.textContent = BUILD;
-  el.style.cssText = 'position:fixed;z-index:3;right:calc(14px + env(safe-area-inset-right, 0px));top:58px;font:11px/1.2 system-ui,sans-serif;color:#efe6d6;opacity:.62;text-shadow:1px 1px 0 #000;pointer-events:none;letter-spacing:.02em';
+  el.style.cssText = 'position:fixed;z-index:3;left:50%;transform:translateX(-50%);bottom:calc(4px + env(safe-area-inset-bottom, 0px));font:11px/1.2 system-ui,sans-serif;color:#efe6d6;opacity:.62;text-shadow:1px 1px 0 #000;pointer-events:none;letter-spacing:.02em;white-space:nowrap';
   document.body.appendChild(el);
 }
 const view = new View(document.body);
