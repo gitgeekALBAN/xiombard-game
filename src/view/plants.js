@@ -186,7 +186,7 @@ export function buildPlants(spots = {}) {
   // size 0 small (~0.12 m), 1 medium (~0.2 m), 2 large (~0.32 m, tall: not by the work area)
   function tuft(x, z, size, dry = 0) {
     const r = rng(Math.floor(x * 977 + z * 131 + 7)); // a tuft's look depends only on where it stands
-    const n = [5, 5, 6][size], h0 = [0.12, 0.19, 0.31][size] * r.range(0.8, 1.15);
+    const n = [5, 5, 5][size], h0 = [0.15, 0.22, 0.42][size] * r.range(0.85, 1.15);
     const tip = mixC(mixC(C.grassTip, C.grassTipY, r()), C.dryTip, dry), baseC = mixC(r() < 0.5 ? C.grassBase : C.grassBaseD, C.dry, dry * 0.6);
     const o = { kind: K.blade, c: baseC, c2: tip, seed: r(), upN: 0.55 };
     const a0 = r() * 6.28;
@@ -194,11 +194,11 @@ export function buildPlants(spots = {}) {
       const a = a0 + (i / n) * 6.28 + r.range(-0.4, 0.4);
       const h = h0 * r.range(0.65, 1.15) * (i % 3 === 0 ? 1.15 : 1);
       const lean = r.range(0.25, 0.75), dx = Math.cos(a), dz = Math.sin(a);
-      const w = h0 * 0.09 * r.range(0.8, 1.2);
+      const w = h0 * 0.11 * r.range(0.8, 1.2);
       const pts = [V(x + dx * 0.02, 0, z + dz * 0.02), V(x + dx * (0.02 + lean * h * 0.3), h * 0.55, z + dz * (0.02 + lean * h * 0.3)),
         V(x + dx * (0.02 + lean * h * 0.9), h, z + dz * (0.02 + lean * h * 0.9))];
-      // small tufts: one triangle per blade; larger ones bend in the middle
-      if (size === 0) veg.ribbon([pts[0], pts[2]], [w, 0], V(-dz, 0, dx), { ...o, wind: h * 0.6 });
+      // small and medium tufts: one triangle per blade; large ones bend in the middle
+      if (size < 2) veg.ribbon([pts[0], pts[2]], [w, 0], V(-dz, 0, dx), { ...o, wind: h * 0.6 });
       else veg.ribbon(pts, [w, w * 0.75, 0], V(-dz, 0, dx), { ...o, wind: h * 0.6 });
     }
     count(['tuft S', 'tuft M', 'tuft L'][size]);
@@ -208,7 +208,7 @@ export function buildPlants(spots = {}) {
   // ---- 2. tall dry grass with seed heads, cattail reeds ----
   function dryGrass(x, z) {
     const r = rng(Math.floor(x * 613 + z * 59 + 3));
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 4; i++) {
       const a = r() * 6.28, h = r.range(0.4, 0.75), lean = r.range(0.15, 0.4), dx = Math.cos(a), dz = Math.sin(a);
       const pts = [V(x, 0, z), V(x + dx * lean * h * 0.35, h * 0.55, z + dz * lean * h * 0.35), V(x + dx * lean * h, h, z + dz * lean * h)];
       veg.ribbon(pts, [0.016, 0.012, 0], V(-dz, 0, dx), { kind: K.blade, c: C.dry, c2: C.dryTip, seed: r(), wind: h, upN: 0.5 });
@@ -229,7 +229,7 @@ export function buildPlants(spots = {}) {
       const a = r() * 6.28, h = r.range(0.7, 1.25), lean = r.range(0.1, 0.35), dx = Math.cos(a), dz = Math.sin(a);
       const ox = x + r.range(-0.15, 0.15), oz = z + r.range(-0.15, 0.15);
       const pts = [V(ox, 0, oz), V(ox + dx * lean * h * 0.2, h * 0.5, oz + dz * lean * h * 0.2), V(ox + dx * lean * h * 0.6, h * 0.85, oz + dz * lean * h * 0.6), V(ox + dx * lean * h, h, oz + dz * lean * h)];
-      veg.ribbon(pts, [0.03, 0.028, 0.018, 0], V(-dz, 0, dx), { kind: K.blade, c: C.reed, c2: C.reedTip, seed: r(), wind: h * 0.8, upN: 0.45 });
+      veg.ribbon(pts, [0.045, 0.04, 0.025, 0], V(-dz, 0, dx), { kind: K.blade, c: C.reed, c2: C.reedTip, seed: r(), wind: h * 0.8, upN: 0.45 });
     }
     for (let i = 0; i < 2 + (r() < 0.5); i++) {
       const ox = x + r.range(-0.12, 0.12), oz = z + r.range(-0.12, 0.12), h = r.range(1.1, 1.5), lx = r.range(-0.06, 0.06), lz = r.range(-0.06, 0.06);
@@ -244,12 +244,13 @@ export function buildPlants(spots = {}) {
   function toadstool(x, z, k, glow = 0, red = true) {
     const r = rng(Math.floor(x * 1013 + z * 377 + 5));
     const tilt = new THREE.Euler(r.range(-0.15, 0.15), r() * 6.28, r.range(-0.15, 0.15));
+    k *= 1.5;
     const m = new THREE.Matrix4().compose(V(x, 0, z), new THREE.Quaternion().setFromEuler(tilt), V(k, k, k));
     const stemC = red ? C.stem : C.pale;
     if (red) {
       veg.lathe([[0.024, 0], [0.017, 0.11]], 5, m, { kind: K.plain, c: stemC, seed: r() });
-      veg.lathe([[0.075, 0.1], [0.068, 0.13], [0.042, 0.152], [0, 0.16]], 7, m, { kind: K.cap, c: glow ? C.glowCap : C.red, c2: C.spot, glow, seed: r() });
-      gills(m, 0.075, 0.1, glow, 7);
+      veg.lathe([[0.075, 0.1], [0.06, 0.137], [0, 0.16]], 6, m, { kind: K.cap, c: glow ? C.glowCap : C.red, c2: C.spot, glow, seed: r() });
+      gills(m, 0.075, 0.1, glow, 6);
     } else {
       const h = r.range(0.13, 0.2);
       veg.lathe([[0.012, 0], [0.009, h * 0.6], [0.008, h]], 4, m, { kind: K.plain, c: stemC, seed: r() });
@@ -334,7 +335,7 @@ export function buildPlants(spots = {}) {
       const ox = x + r.range(-0.12, 0.12), oz = z + r.range(-0.12, 0.12), h = r.range(0.1, maxH);
       const top = V(ox + r.range(-0.03, 0.03), h, oz + r.range(-0.03, 0.03));
       veg.ribbon([V(ox, 0, oz), V((ox + top.x) / 2, h * 0.5, (oz + top.z) / 2), top], [0.004, 0.003, 0.002], V(1, 0, 0).applyAxisAngle(UP, r() * 3), { kind: K.blade, c: C.grassBase, c2: C.dandLeaf, seed: r(), wind: h, upN: 0.5 });
-      const s = r.range(0.022, 0.032);
+      const s = r.range(0.03, 0.045);
       veg.cross(top.clone().add(V(0, -s, 0)), V(0, s * 2, 0), s, { kind: K.flower, c: pc, c2: cc, seed: r(), windBase: h, wind: h, upN: 0.3 });
     }
     count('wildflowers');
@@ -353,7 +354,7 @@ export function buildPlants(spots = {}) {
     veg.ribbon(vine, [0.006, 0.006, 0.005, 0.004, 0.003], vd, { kind: K.plain, c: C.vine, seed: r(), upN: 0 });
     for (let i = 0; i < leaves; i++) {
       // denser near the ground
-      const ly = Math.pow(r(), 1.6) * h, lx = r.range(-w / 2, w / 2), s = r.range(0.045, 0.075) * (1.2 - (ly / h) * 0.4);
+      const ly = Math.pow(r(), 1.6) * h, lx = r.range(-w / 2, w / 2), s = r.range(0.06, 0.095) * (1.2 - (ly / h) * 0.4);
       const a = r.range(-1.2, 1.2);
       const up = V(Math.sin(a), Math.cos(a), 0).multiplyScalar(s * 1.8);
       const side = V(Math.cos(a), -Math.sin(a), 0).multiplyScalar(s * 0.9);
@@ -455,8 +456,9 @@ export function buildPlants(spots = {}) {
   // ======== placement ========
   // tufts world.js asks for (stones, fence posts, trees, the shed, lanterns): large where tall is allowed
   for (const [x, z, k] of spots.tufts || []) {
-    tryTuft(x, z, k >= 1.2 ? 2 : k >= 1 && R() < 0.4 ? 1 : 0);
-    if (R() < 0.3) tryTuft(x + R.range(-0.3, 0.3), z + R.range(-0.3, 0.3), 0);
+    if (k === 1.1) continue; // fence bars: the fence band below is denser
+    tryTuft(x, z, k >= 1.1 ? 2 : k >= 1 ? 1 : 0);
+    if (R() < 0.35) tryTuft(x + R.range(-0.25, 0.25), z + R.range(-0.25, 0.25), k >= 1.1 ? 1 : 0);
   }
   // headstone bases: tufts both sides, flowers, the odd seed grass behind
   DECOR.stones.forEach((st, i) => {
@@ -502,11 +504,16 @@ export function buildPlants(spots = {}) {
   for (const [along, fixed] of [['x', -FENCE], ['x', FENCE], ['z', -FENCE], ['z', FENCE]]) {
     const pt = (u, off) => (along === 'x' ? [u, fixed + off] : [fixed + off, u]);
     const inward = -Math.sign(fixed);
-    for (let u = -FENCE + 1; u < FENCE - 1; u += R.range(1.2, 2.6)) {
-      const [x, z] = pt(u, inward * R.range(0.25, 0.9));
+    for (let u = -FENCE + 1; u < FENCE - 1; u += R.range(1.1, 1.7)) {
+      // a hedge of large tufts hugging the fence line, then a taller plant a little further in
+      for (let k = 0; k < 2; k++) {
+        const [gx, gz] = pt(u + k * 0.6 + R.range(-0.2, 0.2), inward * R.range(0.1, 0.45));
+        tryTuft(gx, gz, 2);
+      }
+      const [x, z] = pt(u, inward * R.range(0.35, 0.9));
       if (!ok(x, z, true)) { if (ok(x, z)) tuft(x, z, 1); continue; }
       const roll = R();
-      if (roll < 0.35) tuft(x, z, 2);
+      if (roll < 0.25) tuft(x, z, 1);
       else if (roll < 0.6) dryGrass(x, z);
       else if (roll < 0.72) fern(x, z);
       else if (roll < 0.82) thistle(x, z);
@@ -516,9 +523,9 @@ export function buildPlants(spots = {}) {
       const [ox, oz] = pt(u + R.range(-0.4, 0.4), -inward * R.range(0.3, 2.5));
       if (!ok(ox, oz, true)) continue;
       const o2 = R();
-      if (o2 < 0.3) dryGrass(ox, oz);
-      else if (o2 < 0.65) tuft(ox, oz, 2);
-      else if (o2 < 0.7) bramble(ox, oz);
+      if (o2 < 0.2) dryGrass(ox, oz);
+      else if (o2 < 0.45) tuft(ox, oz, 2);
+      else if (o2 < 0.5) bramble(ox, oz);
     }
   }
   // the road: low tufts along both edges, cattails by the puddles near the gates and outside the fence
@@ -549,20 +556,20 @@ export function buildPlants(spots = {}) {
   pumpkin(SH.x + SH.hx + 0.45, SH.z + 0.9, 1.15);
   pumpkin(SH.x + SH.hx + 0.6, SH.z + 0.35, 0.8);
   pumpkin(SH.x + SH.hx + 0.25, SH.z + 1.35, 0.6);
-  leafPile(SH.x - 0.6, SH.z + SH.hz + 0.6, 30, 0.6);
+  leafPile(SH.x - SH.hx - 0.7, SH.z - 0.9, 30, 0.6);
   for (const [x, z] of [[SH.x - SH.hx - 0.35, SH.z - 0.8], [SH.x + 0.8, SH.z + SH.hz + 0.35], [SH.x - SH.hx - 0.4, SH.z + 0.3]]) if (ok(x, z, true)) (R() < 0.5 ? fern : dryGrass)(x, z);
   // thistles, dandelions and flowers in the quiet parts of the lawn
-  for (let i = 0; i < 70; i++) {
+  for (let i = 0; i < 45; i++) {
     const x = R.range(-26, 26), z = R.range(-26, 26), roll = R();
     if (roll < 0.15) { if (ok(x, z, true) && Math.abs(z) > 6) thistle(x, z); } else if (roll < 0.55) { if (ok(x, z)) dandelion(x, z, false); } else if (ok(x, z)) wildflowers(x, z, 0.2);
   }
   // a thin scatter of tufts over the whole lawn
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 40; i++) {
     const x = R.range(-27.5, 27.5), z = R.range(-27.5, 27.5);
     if (ok(x, z)) tuft(x, z, R() < 0.55 ? 0 : 1, R() < 0.15 ? 0.5 : 0);
   }
   // beyond the fence, where the yard meets the hills: a looser band of tall grass
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 20; i++) {
     const a = R() * 6.28, d = FENCE + R.range(2.5, 7), x = Math.cos(a) * d * 1.3, z = Math.sin(a) * d * 1.3;
     const cx = Math.max(-FENCE - 7, Math.min(FENCE + 7, x)), cz = Math.max(-FENCE - 7, Math.min(FENCE + 7, z));
     if (ok(cx, cz, true)) (R() < 0.5 ? dryGrass : (px, pz) => tuft(px, pz, 2))(cx, cz);
