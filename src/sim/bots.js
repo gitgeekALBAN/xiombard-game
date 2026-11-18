@@ -14,6 +14,11 @@
 //   load    — carry a loose corpse to an empty coffin (one waiting in a grave is best) and let go over it
 //   dig     — keep one to three graves open ahead of the coffins and corpses on their way
 //   flip    — right a tipped coffin (also inside a grave, where it blocks the burial)
+// At night one job outranks all of these whenever a zombie on its feet needs a shovel (see threatScore):
+//   fight   — drop what you carry, run over, face it and click when sim.whackable says the blow will land; wait beside
+//             it while it is down but will get up again. After me > scratching at a grave > dog > chasing a teammate >
+//             near. Teammates already on it make it less attractive, so several zombies get spread over the crew.
+// Knocked over at night, a bot gets up as soon as the sim allows; theatrical flops wait until no zombie is within 8 m.
 // Every frame it steers along a small visibility-graph path around the truck, open graves, plots, coffins, posts
 // and the shed, with a turn-rate limit. The sim is only ever read; bots act through the same input a human sends,
 // so they slip, drop and fumble like one. Stalls trigger a back-off and sidestep, a snagged coffin gets a toss and
