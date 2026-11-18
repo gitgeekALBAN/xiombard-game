@@ -167,6 +167,10 @@ vec3 lawnOn(vec2 p, float px, vec3 earth, float bare) {
       col = mix(col, lc, lf);
     }
   }
+  // dabbed mottling a stride or two across: it is what still reads as paint in the middle distance, where the
+  // blades are already smaller than a pixel
+  float mot = vnoise(p * 0.5 + 9.0) * 0.6 + vnoise(p * 1.25 - 4.0) * 0.4 * aaFade(1.25, px);
+  col *= 0.9 + 0.22 * smoothstep(0.3, 0.72, mot) * (1.0 - bareG);
   // drifts of low mist (by night)
   col = mix(col, ${srgb('#4a4466')}, smoothstep(0.55, 0.8, vnoise(p * 0.025 + 21.0)) * 0.13 * (1.0 - dp));
   return col;
