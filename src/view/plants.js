@@ -416,17 +416,17 @@ export function buildPlants(spots = {}) {
   }
   function bush(x, z) {
     const r = rng(Math.floor(x * 919 + z * 13 + 29));
-    const top = V(x + r.range(-0.1, 0.1), r.range(0.35, 0.5), z + r.range(-0.1, 0.1));
-    veg.tube([V(x, 0, z), V(x + r.range(-0.05, 0.05), top.y * 0.5, z + r.range(-0.05, 0.05)), top], [0.06, 0.045, 0.035], { kind: K.plain, c: C.twig, seed: r() }, 4);
+    const top = V(x + r.range(-0.12, 0.12), r.range(0.55, 0.75), z + r.range(-0.12, 0.12));
+    veg.tube([V(x, 0, z), V(x + r.range(-0.05, 0.05), top.y * 0.5, z + r.range(-0.05, 0.05)), top], [0.08, 0.06, 0.045], { kind: K.plain, c: C.twig, seed: r() }, 4);
     for (let b = 0; b < 5; b++) {
       const a = (b / 5) * 6.28 + r.range(-0.3, 0.3), dir = V(Math.cos(a), r.range(0.9, 1.6), Math.sin(a)).normalize();
-      const pts = spiral(top.clone(), dir, r.range(0.5, 0.75), 1.1, r.range(0.09, 0.14), 0.15);
-      veg.ribbon(pts, pts.map((_, i) => 0.026 * (1 - (i / pts.length) * 0.8)), V(-dir.z, 0, dir.x).normalize(), { kind: K.plain, c: C.twig, seed: r(), wind: 0.2, upN: 0.2 });
+      const pts = spiral(top.clone(), dir, r.range(0.75, 1.05), 1.1, r.range(0.13, 0.2), 0.15);
+      veg.ribbon(pts, pts.map((_, i) => 0.04 * (1 - (i / pts.length) * 0.8)), V(-dir.z, 0, dir.x).normalize(), { kind: K.plain, c: C.twig, seed: r(), wind: 0.2, upN: 0.2 });
     }
     // round clumps of small leaves around the crown
     for (let i = 0; i < 12; i++) {
-      const a = r() * 6.28, rad = r.range(0.15, 0.5), y = top.y + r.range(0.0, 0.55);
-      const p = V(x + Math.cos(a) * rad, y, z + Math.sin(a) * rad), s = r.range(0.14, 0.22);
+      const a = r() * 6.28, rad = r.range(0.2, 0.7), y = top.y + r.range(0.05, 0.8);
+      const p = V(x + Math.cos(a) * rad, y, z + Math.sin(a) * rad), s = r.range(0.2, 0.32);
       veg.cross(p.clone().add(V(0, -s, 0)), V(0, s * 2, 0), s, { kind: K.foliage, c: C.bush, c2: C.bush2, seed: r(), windBase: 0.15, wind: 0.25, upN: 0.5 });
     }
     count('bush');
@@ -563,18 +563,11 @@ export function buildPlants(spots = {}) {
     const x = R.range(-26, 26), z = R.range(-26, 26), roll = R();
     if (roll < 0.15) { if (ok(x, z, true) && Math.abs(z) > 6) thistle(x, z); } else if (roll < 0.55) { if (ok(x, z)) dandelion(x, z, false); } else if (ok(x, z)) wildflowers(x, z, 0.2);
   }
-  // a thin scatter of tufts over the whole lawn
-  for (let i = 0; i < 40; i++) {
+  // a thin scatter of tufts over the whole lawn (one triangle per blade, so they are cheap)
+  for (let i = 0; i < 150; i++) {
     const x = R.range(-27.5, 27.5), z = R.range(-27.5, 27.5);
     if (ok(x, z)) tuft(x, z, R() < 0.55 ? 0 : 1, R() < 0.15 ? 0.5 : 0);
   }
-  // beyond the fence, where the yard meets the hills: a looser band of tall grass
-  for (let i = 0; i < 20; i++) {
-    const a = R() * 6.28, d = FENCE + R.range(2.5, 7), x = Math.cos(a) * d * 1.3, z = Math.sin(a) * d * 1.3;
-    const cx = Math.max(-FENCE - 7, Math.min(FENCE + 7, x)), cz = Math.max(-FENCE - 7, Math.min(FENCE + 7, z));
-    if (ok(cx, cz, true)) (R() < 0.5 ? dryGrass : (px, pz) => tuft(px, pz, 2))(cx, cz);
-  }
-
   const mat = plantMaterial();
   const mesh = new THREE.Mesh(veg.build(), mat);
   mesh.name = 'plants';
