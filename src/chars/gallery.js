@@ -70,7 +70,7 @@ for (const [i, c] of cast.entries()) {
   c.el = el;
 }
 const buildMs = performance.now() - t0, rows = Math.ceil(cast.length / perRow);
-$('stats').textContent = `${cast.length} characters · ${Math.round(tris / cast.length).toLocaleString('en')} triangles each · sculpted in ${Math.round(buildMs)} ms`;
+$('stats').textContent = `${cast.length} characters · ${Math.round(tris / cast.length).toLocaleString('en')} triangles each · sculpted in ${Math.round(buildMs)} ms · ${typeof __BUILD__ === 'string' ? __BUILD__ : 'dev build'}`;
 
 // ---------- look ----------
 const MODES = { sheet: { bg: '#d8d4cf', ground: '#cdc8c4', day: 1, shadow: 0.26 }, night: { bg: '#2b2348', ground: '#342c50', day: 0, shadow: 0.5 } };
