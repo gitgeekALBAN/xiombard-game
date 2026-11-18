@@ -240,14 +240,14 @@ void main() {
   } else if (pat == 13) {
     // heaped earth: dark foot, mottle and painted clods
     base = mix(${lin("#35262a")}, base, smoothstep(0.0, 0.7, o.y));
-    vec2 cc = o.xz * 5.0 + o.y * 2.0;
+    vec2 cc = o.xz * 3.6 + o.y * 2.0;
     vec2 ci = floor(cc), cf = fract(cc) - 0.5;
     vec2 off = vec2(hash12(ci), hash12(ci + 9.1)) - 0.5;
     float d = length(cf - off * 0.5);
-    float r = 0.12 + 0.12 * hash12(ci + 3.3);
+    float r = 0.16 + 0.14 * hash12(ci + 3.3);
     float clod = 1.0 - smoothstep(r - 0.04, r, d);
     float lit = smoothstep(r * 0.2, -r * 0.6, dot(cf - off * 0.5, vec2(0.6, -0.8)));
-    base = mix(base, base * mix(0.55, 1.35, lit), clod * step(0.45, hash12(ci + 1.7)));
+    base = mix(base, base * mix(0.5, 1.45, lit), clod * step(0.4, hash12(ci + 1.7)));
     mot = 1.0;
   }
 

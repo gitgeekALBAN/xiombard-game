@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { groundMaterial } from '../shaders/ground.js';
 import { outlineMat, LANTERN_Y, lampsOn } from '../shaders/toon.js';
-import { glowSprites } from '../shaders/paint-env.js';
+import { glowSprites, paintMat, paintAttrs } from '../shaders/paint-env.js';
 import { buildHeadstone, geo } from './models.js';
 import { outlineGeo } from './models/common.js';
 import {
@@ -48,12 +48,10 @@ function mergeStatic(groups, name) {
 export function buildWorld(scene) {
   const s = scene;
   const groundMat = groundMaterial();
-  for (const b of groundBoxes()) {
-    const m = new THREE.Mesh(geo.BOX, groundMat);
-    m.position.set(...b.c);
-    m.scale.set(b.h[0] * 2, b.h[1] * 2, b.h[2] * 2);
-    s.add(m);
-  }
+  // the ground boxes (world-space shaded) baked into one mesh
+  const ground = new THREE.Mesh(mergeGeometries(groundBoxes().map((b) => geo.BOX.clone().scale(b.h[0] * 2, b.h[1] * 2, b.h[2] * 2).translate(...b.c))), groundMat);
+  ground.name = 'ground';
+  s.add(ground);
 
   s.add(mergeStatic(DECOR.stones.map((st) => {
     const g = buildHeadstone(st.kind, st.w, st.h, st.seed);
@@ -162,7 +160,7 @@ export function buildWorld(scene) {
     tuft(x + pr.range(-0.4, 0.4), z + pr.range(-0.4, 0.4), 1.3);
   }
   // bars are nearly ink-dark already, so they go without a hull (saves a draw call and 5k triangles)
-  const barMesh = new THREE.InstancedMesh(spear, MAT.iron, bars.length);
+  const barMesh = new THREE.InstancedMesh(paintAttrs(spear, MAT.iron), paintMat(), bars.length);
   bars.forEach((m, i) => barMesh.setMatrixAt(i, m));
   barMesh.frustumCulled = false;
   s.add(barMesh);

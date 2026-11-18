@@ -19,7 +19,7 @@ const looseDirt = toon(PAL.dirtLight, { mottle: 1, rim: 0.5 });
 
 // Lumpy earth: a dome pushed around by noise, its rim pressed onto the ground. Only the upper half of a sphere:
 // the rest would lie flat under the ground. footN > 2 squares the footprint off (a superellipse) so a heap can
-// cover a rectangular hole. Clods are a few low balls (the dug mounds paint theirs instead).
+// cover a rectangular hole. Clods are a few low balls rolled off around the foot.
 function earth(seed, { sx, sy, sz, footN = 2, lump = 0.18, freq = 2.2, clods = 0, peak = 2, seg = [16, 6] }) {
   const g = new THREE.SphereGeometry(1, seg[0], seg[1], 0, Math.PI * 2, 0, Math.PI / 2);
   const p = g.attributes.position, v = new THREE.Vector3();
@@ -113,8 +113,9 @@ function plate(name, face, seed) {
 }
 
 export function createGraves(scene, groundMat) {
-  // the dug mounds: one instanced dome for all plots (clods painted), with its instanced ink hull
-  const pile = paintAttrs(earth(3, { sx: 1, sy: 1, sz: 1, lump: 0.35, freq: 3.4, peak: 1.6 }).toNonIndexed(), spec(PAL.dirtLight, { pat: P.dirt, rim: 0.6 }));
+  // the dug mounds: one instanced dome for all plots (small clods painted, the loose ones around it kept), with its
+  // instanced ink hull
+  const pile = paintAttrs(earth(3, { sx: 1, sy: 1, sz: 1, lump: 0.35, freq: 3.4, clods: 9, peak: 1.6 }), spec(PAL.dirtLight, { pat: P.dirt, rim: 0.6 }));
   const mounds = new THREE.InstancedMesh(pile, paintMat(), PLOTS.length);
   const moundHull = new THREE.InstancedMesh(outlineGeo(pile), outlineMat(0.02), PLOTS.length);
   for (const im of [mounds, moundHull]) { im.frustumCulled = false; im.name = 'mounds'; scene.add(im); }
