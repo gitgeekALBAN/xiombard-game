@@ -9,7 +9,7 @@ import { COFFIN } from '../shared/layout.js';
 // pleated lining, bevels, carved motifs, inscriptions, cracks, moss, windows, the grille, spokes, hubcaps,
 // curls) is painted here from a per-vertex paint space, so one object is one draw call plus its ink hull.
 // Per vertex: color (base color, linear), aK = (paint id, three params), aQ = four more params,
-// aP = position in the paint space of the part (meters), aRig = which moving part it rides on (truck only).
+// aP / aPN = position (meters) and normal in the paint space of the part, aRig = which moving part it rides on (truck only).
 // Lighting is the shared toon lighting (lightingGLSL) with the shared day/night uniform, like toon().
 
 export const PAINT = {
@@ -29,7 +29,7 @@ const HANDLES = [];
 for (const [a, b] of [[CO[1], CO[2]], [CO[5], CO[0]]]) for (const t of [0.3, 0.72]) HANDLES.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
 
 const vert = /* glsl */ `
-attribute vec3 color; attribute vec4 aK; attribute vec4 aQ; attribute vec3 aP;
+attribute vec3 color; attribute vec4 aK; attribute vec4 aQ; attribute vec3 aP; attribute vec3 aPN;
 varying vec3 vN; varying vec3 vW; varying vec3 vCol; varying vec4 vK; varying vec4 vQ; varying vec3 vP; varying vec3 vON;
 #ifdef RIG
 attribute float aRig;
@@ -46,7 +46,7 @@ void main() {
   #endif
   vec4 w = modelMatrix * vec4(pos, 1.0); vW = w.xyz;
   vN = normalize(mat3(modelMatrix) * nor);
-  vON = normal; vCol = color; vK = aK; vQ = aQ; vP = aP;
+  vON = aPN; vCol = color; vK = aK; vQ = aQ; vP = aP;
   vec4 mvPosition = viewMatrix * w;
   gl_Position = projectionMatrix * mvPosition;
   #include <fog_vertex>
@@ -159,20 +159,17 @@ vec2 motifSD(int kind, vec2 q, float s) {
   return vec2(carve, raised) * s;
 }
 
-// rows of carved lettering: short strokes in cells, every row a little shorter than the one above
+// rows of carved lettering, read from afar as words: rounded bars broken by gaps, each row a little shorter
 float letters(vec2 p, vec2 at, float width, float n, float seed) {
-  float d = 1e3;
   float row = floor((at.y - p.y) / 0.055 + 0.5);
-  if (row < 0.0 || row >= n) return d;
+  if (row < 0.0 || row >= n) return 1e3;
   float y = at.y - row * 0.055, ww = width * (1.0 - row * 0.18) * (0.8 + 0.2 * h1(seed + row * 3.1));
-  if (abs(p.x - at.x) > ww * 0.5) return d;
-  float cw = 0.026, cell = floor((p.x - at.x + ww * 0.5) / cw);
-  float g = h1(seed * 1.3 + row * 17.0 + cell * 5.7);
-  vec2 c = vec2(p.x - (at.x - ww * 0.5 + (cell + 0.5) * cw), p.y - y);
-  if (g < 0.12) return d; // a gap between words
-  d = sdSeg(c, vec2(-0.006, -0.009), vec2(-0.006 + 0.012 * step(0.5, g), 0.009)) - 0.0028;
-  d = min(d, sdSeg(c, vec2(0.006, -0.009), vec2(0.006 - 0.012 * step(0.7, fract(g * 7.0)), 0.009)) - 0.0028);
-  if (fract(g * 13.0) < 0.5) d = min(d, sdSeg(c, vec2(-0.007, 0.0), vec2(0.007, 0.0)) - 0.0025);
+  float x = p.x - at.x + ww * 0.5;
+  if (x < 0.0 || x > ww) return 1e3;
+  // three or four words per row, cut where the hash says
+  float nw = 1.0 + floor(h1(seed + row * 7.7) * 2.6), cell = floor(x / ww * nw), x0 = cell * ww / nw, x1 = x0 + ww / nw;
+  float cx = (x0 + x1) * 0.5, hw = (x1 - x0) * 0.5 - (nw > 1.0 ? 0.008 : 0.0) - 0.006 * h1(seed + row * 3.0 + cell);
+  float d = sdRound(vec2(x - cx, p.y - y), vec2(max(hw, 0.005), 0.01), 0.006);
   return d;
 }
 
@@ -185,7 +182,7 @@ float crackSD(vec2 p, vec2 o, float dir, float len, float seed) {
   float yy = 0.0;
   for (int j = 1; j < 4; j++) if (float(j) <= i) yy += (h1(seed + float(j)) - 0.55) * 0.11;
   float y = o.y + yy + mix(0.0, b, fk);
-  return abs(p.y - y) - (0.008 * (1.0 - t) + 0.0015);
+  return abs(p.y - y) - (0.011 * (1.0 - t) + 0.0028);
 }
 
 void stonePaint(inout vec3 col, inout float ink, vec3 p, vec3 on) {
@@ -199,7 +196,7 @@ void stonePaint(inout vec3 col, inout float ink, vec3 p, vec3 on) {
   float moss = smoothstep(0.55, 0.75, m) * (smoothstep(0.35, 0.05, p.y) + smoothstep(h - 0.25, h, p.y) * 0.8 + 0.25);
   col = mix(col, vec3(0.06, 0.085, 0.045), clamp(moss, 0.0, 1.0) * 0.6);
   col *= 0.94 + 0.12 * vnoise(p.xy * 60.0 + seed);   // grit
-  if (vnoise(p.xy * 110.0 + p.z * 40.0 + seed) > 0.86) col *= 0.82; // pits
+  col *= 1.0 - 0.12 * smoothstep(0.86, 0.9, vnoise(p.xy * 45.0 + p.z * 20.0 + seed)); // pits
   bool front = on.z > 0.6 && p.y > ph + 0.005;
   if (!front) {
     return;
@@ -262,7 +259,8 @@ void stonePaint(inout vec3 col, inout float ink, vec3 p, vec3 on) {
   if (carve < 0.01) {
     float cin = fill(carve);
     col *= 1.0 + 0.22 * (fill(carve - 0.0035) - cin);
-    col = mix(col, ${V('#353048')} * (0.9 + 0.2 * vnoise(q * 80.0)), cin * 0.92);
+    col = mix(col, ${V('#2a2538')} * (0.85 + 0.25 * vnoise(q * 80.0)), cin);
+    ink = max(ink, 0.45 * line(carve, 0.0012));
   }
 }
 
@@ -289,11 +287,11 @@ void coffinWood(inout vec3 col, inout float ink, vec3 p, vec3 on) {
   col = mix(col, ${V('#6a6478')}, fill(nail - 0.0075));
   ink = max(ink, 0.7 * line(nail - 0.0075, 0.0016));
   // iron: one band or two, with rivets; corner posts; plates where the handles hang
-  vec3 iron = ${V('#3c3848')} * (0.85 + 0.3 * vnoise(p.xz * 30.0 + p.y * 9.0));
+  vec3 iron = ${V('#4a4558')} * (0.85 + 0.3 * vnoise(p.xz * 30.0 + p.y * 9.0));
   float band = 1e3;
-  if (vK.y < 0.5) band = abs(p.y + 0.03) - 0.028;
-  else band = min(abs(p.y + 0.11), abs(p.y - 0.07)) - 0.028;
-  float post = dc - 0.028;
+  if (vK.y < 0.5) band = abs(p.y + 0.03) - 0.032;
+  else band = min(abs(p.y + 0.11), abs(p.y - 0.07)) - 0.032;
+  float post = dc - 0.036;
   float ir = min(band, post);
   for (int i = 0; i < 4; i++) {
     vec2 d = vec2(length(p.xz - HANDLE[i]), p.y - 0.035);
@@ -335,7 +333,8 @@ void glass(inout vec3 col, inout float ink, inout float em, inout float rim, vec
   float k = fill(d);
   if (k <= 0.0) return;
   vec3 g = ${V('#1f2240')} * (0.85 + 0.3 * smoothstep(-0.3, 0.3, q.y));
-  float streak = line(dot(q, vec2(0.7, 0.7)) - 0.2 * floor(dot(q, vec2(0.7, 0.7)) / 0.2 + 0.5) , 0.018) * 0.35;
+  float dq = dot(q, vec2(0.6, 0.8));
+  float streak = max(line(dq + 0.12, 0.035), line(dq + 0.02, 0.012)) * 0.22;
   g = mix(g, vec3(0.42, 0.45, 0.62), streak);
   col = mix(col, g, k);
   em = mix(em, 0.2, k);
@@ -470,8 +469,8 @@ void main() {
   else if (id == ${PAINT.COFFIN_WOOD}) { mottle = 0.4; coffinWood(col, ink, p, on); }
   else if (id == ${PAINT.COFFIN_LINING}) { mottle = 0.2; rim = 0.4; coffinLining(col, ink, em, p, on); }
   else if (id == ${PAINT.COFFIN_RAIL}) {
-    // striped top rail: the stripe count is carried in aP.x, so the blocks follow the coffin's outline
-    float u = vQ.x, odd = mod(floor(u), 2.0);
+    // striped top rail: the stripe index is carried in aQ.xy as (u * q, q), so the blocks follow the coffin's outline
+    float u = vQ.x / vQ.y, odd = mod(floor(u), 2.0);
     float fu = fract(u), aa = max(fwidth(u), 1e-4);
     float edge = smoothstep(-aa, aa, abs(fu - 0.5) - 0.5 + aa * 1.5);
     col = odd > 0.5 ? vK.yzw : col;

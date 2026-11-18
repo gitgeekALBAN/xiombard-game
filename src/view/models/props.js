@@ -66,15 +66,19 @@ export function buildCoffin(seed) {
   let odd = 0;
   for (let e = 0; e < 6; e++) {
     const f = (e + 1) % 6, n = Math.max(2, Math.round(Math.hypot(ro[f][0] - ro[e][0], ro[f][1] - ro[e][1]) / 0.09));
-    const P = (A, y) => [A[0], y, A[1]], o = outward(out[e], out[f]), u = [odd, odd, odd + n, odd + n];
-    rail.face(P(ro[e], t1), P(ri[e], t1), P(ri[f], t1), P(ro[f], t1), [0, 1, 0], u);
-    rail.face(P(ro[e], t0), P(ro[e], t1), P(ro[f], t1), P(ro[f], t0), o, u);
-    rail.face(P(ri[e], t0), P(ri[e], t1), P(ri[f], t1), P(ri[f], t0), o.map((x) => -x), u);
-    rail.face(P(ro[e], t0), P(ri[e], t0), P(ri[f], t0), P(ro[f], t0), [0, -1, 0], u);
+    const P = (A, y) => [A[0], y, A[1]], o = outward(out[e], out[f]);
+    // the top and bottom are trapezoids: u rides as (u * q, q) with q the length of the side it is on, so the
+    // stripes divide both sides evenly and run straight across (projective interpolation)
+    const qo = Math.hypot(ro[f][0] - ro[e][0], ro[f][1] - ro[e][1]), qi = Math.hypot(ri[f][0] - ri[e][0], ri[f][1] - ri[e][1]);
+    const U = (u, q) => [u * q, q];
+    rail.face(P(ro[e], t1), P(ri[e], t1), P(ri[f], t1), P(ro[f], t1), [0, 1, 0], [U(odd, qo), U(odd, qi), U(odd + n, qi), U(odd + n, qo)]);
+    rail.face(P(ro[e], t0), P(ro[e], t1), P(ro[f], t1), P(ro[f], t0), o, [U(odd, 1), U(odd, 1), U(odd + n, 1), U(odd + n, 1)]);
+    rail.face(P(ri[e], t0), P(ri[e], t1), P(ri[f], t1), P(ri[f], t0), o.map((x) => -x), [U(odd, 1), U(odd, 1), U(odd + n, 1), U(odd + n, 1)]);
+    rail.face(P(ro[e], t0), P(ri[e], t0), P(ri[f], t0), P(ro[f], t0), [0, -1, 0], [U(odd, qo), U(odd, qi), U(odd + n, qi), U(odd + n, qo)]);
     odd += n;
   }
   k.add(rail.geometry(), { id: PAINT.COFFIN_RAIL, color: rimA, k: [rimB.r, rimB.g, rimB.b] });
-  { const Q = k.parts[k.parts.length - 1].attributes.aQ; rail.u.forEach((v, i) => Q.setX(i, v)); }
+  { const Q = k.parts[k.parts.length - 1].attributes.aQ; rail.u.forEach(([uq, q], i) => Q.setXY(i, uq, q)); }
   // ring handles on the long sides (their plates are painted on the wall)
   for (const [a, b] of [[out[1], out[2]], [out[5], out[0]]]) {
     const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz), nx = dz / l * Math.sign(a[0] + b[0]), nz = -dx / l * Math.sign(a[0] + b[0]);
@@ -154,7 +158,7 @@ export function buildHeadstone(kind, w, h, seed, opts = {}) {
     const b = 0.022, y1 = ph + pH - 0.03, top = h - b, bw = Math.min(0.095, Math.max(0.065, w * 0.12)), aw = w / 2 - b, ay = y1 + (top - y1) * 0.66, f = 1.4;
     const B = bw + b, A = w / 2, F = bw * f + b, E = bw * f + b;
     lean(slabGeo(poly([[-B, y1], [B, y1], [B, ay - B], [A, ay - F], [A, ay + F], [B, ay + B], [E, h], [-E, h], [-B, ay + B], [-A, ay + F], [-A, ay - F], [-B, ay - B]]), 0.17));
-    lean(new THREE.TorusGeometry(aw * 0.6, 0.026, 3, 10), mat4([0, ay, 0], [0, 0, 0], [1, 1, 4]));
+    lean(new THREE.TorusGeometry(aw * 0.6, 0.026, 4, 9), mat4([0, ay, 0], [0, 0, 0], [1, 1, 4]));
     motif = R() < 0.6 ? MOTIF.skull : MOTIF.dot;
     cracked = R() < 0.5;
   } else { // obelisk
@@ -183,5 +187,25 @@ export function buildHeadstone(kind, w, h, seed, opts = {}) {
   }
   g.add(new THREE.Mesh(hullGeo, outlineMat(0.018)));
   if (face) g.userData.face = face;
+  return g;
+}
+
+// All the old headstones of the yard in one painted mesh and one ink hull (2 draw calls for the lot instead of 2
+// each). stones: [{ kind, w, h, seed, x, z, rx, ry, rz }] as in DECOR.stones; each one looks exactly as
+// buildHeadstone(kind, w, h, seed) placed at (x, 0, z) with rotation (rx, ry, rz). The paint reads the stone's own
+// coordinates (aP, aPN), so baking the placement into the vertices does not move the carvings.
+export function buildHeadstoneField(stones) {
+  const paint = [], hull = [];
+  const m = new THREE.Matrix4(), e = new THREE.Euler(), q = new THREE.Quaternion(), one = new THREE.Vector3(1, 1, 1);
+  for (const st of stones) {
+    const g = buildHeadstone(st.kind, st.w, st.h, st.seed);
+    m.compose(new THREE.Vector3(st.x, 0, st.z), q.setFromEuler(e.set(st.rx || 0, st.ry || 0, st.rz || 0)), one);
+    const [p, h] = g.children.map((c) => c.geometry.clone().applyMatrix4(m));
+    paint.push(p);
+    hull.push(h);
+  }
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(mergeGeometries(paint), propPaint()));
+  g.add(new THREE.Mesh(mergeGeometries(hull), outlineMat(0.018)));
   return g;
 }
