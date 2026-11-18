@@ -87,6 +87,24 @@ export class View {
       transparent: true, depthWrite: false, fog: true,
       polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
     });
+    // puffs: lumpy little clouds that swell and fade where a zombie crumbles (0), a shovel lands (1) or the ground breaks (2)
+    this.puffs = Array.from({ length: 10 }, () => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: new THREE.Color() }, uT: { value: 0 } },
+        vertexShader: 'varying vec2 vUv; void main(){ vUv = uv * 2.0 - 1.0; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: /* glsl */ `uniform vec3 uColor; uniform float uT; varying vec2 vUv;
+          void main(){ float r = length(vUv), a = atan(vUv.y, vUv.x), edge = 0.8 + 0.13 * sin(a * 7.0 + uT * 4.0) + 0.05 * sin(a * 13.0);
+            float al = smoothstep(edge, edge - 0.22, r) * smoothstep(uT * 1.25 - 0.45, uT * 1.25, r + 0.45 * (1.0 - uT)) * (1.0 - uT * uT) * 0.85;
+            if (al < 0.01) discard; gl_FragColor = vec4(uColor, al);
+            #include <colorspace_fragment>
+          }`,
+        transparent: true, depthWrite: false,
+      }));
+      m.visible = false; m.renderOrder = 3; m.userData.billboard = true;
+      this.scene.add(m);
+      this.billboards.push(m);
+      return m;
+    });
     // Debug: set view.debugCam = { p: [x, y, z], t: [x, y, z] } to override the camera (screenshots, tuning).
     this.debugCam = null;
     this.ents = new Map();
@@ -161,6 +179,7 @@ export class View {
     for (const ev of st.ev || []) {
       if (ev.type === 'sfx') sfx(ev.name, ev.pos, this.camera.position);
       else if (ev.type === 'toast') this.toast(ev.text, ev.pos, ev.big);
+      else if (ev.type === 'puff') this.puff(ev.pos, ev.kind);
     }
     st.plots.forEach(([d, f, b, seed, name], i) => {
       this.graves.setPlot(i, d, f, b, seed, name, this.time);
@@ -216,6 +235,12 @@ export class View {
       }
     }
     this.graves.update(this.time);
+    for (const m of this.puffs) {
+      if (!m.visible) continue;
+      const t = (m.material.uniforms.uT.value += dt / 0.6);
+      m.scale.setScalar(m.userData.size * (0.35 + 0.65 * (1 - (1 - t) * (1 - t))));
+      if (t >= 1) m.visible = false;
+    }
 
     if (fp) {
       // eye in the head, nudged forward so the near plane clears the face; smoothed so ragdoll jitter and the
@@ -299,6 +324,15 @@ export class View {
       el.style.transform = `translate(-50%, -50%) translate(${(v.x * 0.5 + 0.5) * innerWidth}px, ${(-v.y * 0.5 + 0.5) * innerHeight}px)`;
     }
     for (const el of [...this.labels.querySelectorAll('.nametag')]) if (!seen.has(+el.dataset.id)) el.remove();
+  }
+
+  puff(pos, kind) {
+    const m = this.puffs.find((p) => !p.visible) || this.puffs[0];
+    m.material.uniforms.uColor.value.set(['#b9d68a', '#fff3c8', '#7a5f4a'][kind] || '#ffffff');
+    m.material.uniforms.uT.value = 0;
+    m.userData.size = [2.2, 1.5, 1.6][kind] || 1.5;
+    m.position.set(pos[0], pos[1], pos[2]);
+    m.visible = true;
   }
 
   toast(text, pos, big) {

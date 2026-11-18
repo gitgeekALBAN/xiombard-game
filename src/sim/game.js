@@ -270,7 +270,7 @@ export class Sim {
     const p = this.addEnt({
       kind: 'digger', name: (name || CREW[look].name).slice(0, 16), color, look, seed: n + 1, body, hand, bit,
       yaw: Math.PI, input: { mx: 0, mz: 0, yaw: Math.PI, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 },
-      last: null, rag: null, ragT: 0, grab: null, phase: 0, grounded: true, turn: 0, hint: '', digging: false, jumpT: 0, slipT: 0, swingT: -9, swingHit: true,
+      last: null, rag: null, ragT: 0, grab: null, phase: 0, grounded: true, turn: 0, hint: '', digging: false, jumpT: 0, slipT: 0, swingT: -9, swingHit: true, upT: -9,
     });
     return p;
   }
@@ -312,6 +312,7 @@ export class Sim {
     for (const c of p.rag.constraints) this.world.removeConstraint(c);
     for (const b of p.rag.bodies) this.world.removeBody(b);
     p.rag = null;
+    p.upT = this.time;
     const y = this.groundY(pel.x, pel.y + 0.3, pel.z);
     p.body.position.set(pel.x, y + 0.05, pel.z);
     p.body.velocity.set(0, 0, 0);
@@ -611,6 +612,7 @@ export class Sim {
     const e = this.addEnt({ kind: 'zombie', look, seed: this.seedCounter++, rag: null });
     e.z = this.makeWalker(x, 0.05, z, ZOMBIES[look]);
     this.emit('sfx', { name: ZOMBIES[look].type === ZTYPE.dog ? 'bark' : 'groan', pos: [x, 0.5, z] });
+    this.emit('puff', { pos: [x, 0.25, z], kind: 2 }); // dirt flies where it breaks the ground
     return e;
   }
   ghost(e, on) {
@@ -721,8 +723,9 @@ export class Sim {
           this.emit('toast', { text: dog ? 'Chomp!' : def.type === ZTYPE.dragger ? 'WHAM!' : 'Oof!', pos: [tx, 1.9, tz] });
         }
       }
-      if (a >= 1) { z.mode = 'walk'; z.cool = this.time + 1.3; }
-    } else if (tg && tg.p && dist < def.reach && this.time > z.cool && Math.abs(dy) < 0.6) {
+      if (a >= 1) { z.mode = 'walk'; z.cool = this.time + (dog ? 3 : 2); }
+    // nobody gets hit again the moment they are back on their feet
+    } else if (tg && tg.p && dist < def.reach && this.time > z.cool && Math.abs(dy) < 0.6 && this.time - tg.p.upT > 1.5) {
       z.mode = 'attack'; z.t = this.time; z.hit = false;
     }
     if (tg && tg.plot && dist < stop + 0.2) { // scratching at a grave until its tenant comes back out
@@ -783,7 +786,7 @@ export class Sim {
   poof(e) {
     const q = e.rag ? e.rag.bodies[0].position : e.z.body.position;
     this.emit('sfx', { name: 'poof', pos: [q.x, 0.5, q.z] });
-    this.emit('toast', { text: 'poof', pos: [q.x, 0.8, q.z] });
+    this.emit('puff', { pos: [q.x, 0.7, q.z], kind: 0 });
     this.removeEnt(e);
   }
   unbury(plot) {
@@ -821,6 +824,7 @@ export class Sim {
       const q = e.z.body.position;
       this.knock(e, f.x * 6.5 + (this.rand() - 0.5) * 2, 4.2 + this.rand(), f.z * 6.5 + (this.rand() - 0.5) * 2);
       this.emit('toast', { text: this.rand() < 0.5 ? 'BONK!' : 'THWACK!', pos: [q.x, 1.8, q.z] });
+      this.emit('puff', { pos: [q.x, q.y + 1.0, q.z], kind: 1 });
     }
     if (hit.length) this.emit('sfx', { name: 'bonk', pos: [p.body.position.x, 1.2, p.body.position.z] });
   }
