@@ -13,35 +13,43 @@ function sick(hex, k = 0.55, dark = 0.82, green = '#7f9a6a') {
   const c = new THREE.Color(hex).lerp(new THREE.Color(green), k).multiplyScalar(dark);
   return '#' + c.getHexString();
 }
+// Walkers are the crew's own shapes gone grey-green: a ragged scarf in a faded version of the old color, a
+// moth-eaten hat (or none), earth all over, and a few patches stitched onto the belly.
+const PATCH = ['#8a5a44', '#4a6a8a', '#7a5a86', '#8a7a4a', '#5a7a66'];
 const walkers = CREW.map((d, i) => {
-  const c = d.look.colors;
+  const c = d.look.colors, [yB, rB] = d.look.bean, R = (n) => { const s = Math.sin((i + 1) * 12.9898 + n * 78.233) * 43758.5453; return s - Math.floor(s); };
+  const patches = [0, 1, 2].slice(0, 2 + (i % 2)).map((n) => [(n - 0.9) * 0.85 + R(n) * 0.3 - 0.1, yB + (R(n + 5) - 0.55) * rB * 0.9, 0.034 + R(n + 9) * 0.016, 0.03 + R(n + 13) * 0.016, PATCH[(i + n * 2) % PATCH.length]]);
   const look = {
-    ...d.look, face: 1, hair: false, hat: i % 2 ? d.look.hat : null, // every other one lost its hat in the ground
-    colors: { skin: sick(c.skin, 0.72, 0.8, '#6fae58'), scarf: sick(c.scarf, 0.3, 0.7), hat: sick(c.hat, 0.35, 0.8), band: sick(c.band, 0.3, 0.7),
-      mitten: sick(c.mitten, 0.4, 0.75), leg: sick(c.leg, 0.5, 0.75), boot: sick(c.boot, 0.3, 0.8), nose: sick(c.nose, 0.6, 0.7) },
+    ...d.look, face: 1, hair: false, torn: true, grime: 0.85, patches, hat: i % 3 === 0 ? null : d.look.hat, // every third one lost its hat in the ground
+    colors: { skin: sick(c.skin, 0.8, 0.86, '#93ad84'), scarf: sick(c.scarf, 0.22, 0.74), hat: sick(c.hat, 0.3, 0.82), band: sick(c.band, 0.25, 0.72), pom: sick(c.band, 0.25, 0.78),
+      mitten: sick(c.scarf, 0.3, 0.6), leg: sick(c.leg, 0.5, 0.7), boot: sick(c.boot, 0.3, 0.8), nose: sick(c.nose, 0.6, 0.7) },
   };
   return { name: 'Zombie', type: ZTYPE.walker, hp: 2, speed: 2.1, reach: 1.15, look, rig: lookRig(look) };
 });
+// The dragger: a hunched boulder, face sunk between the shoulders, arms longer than it is tall. `brute` selects
+// its own sculptor; the usual arrays still describe the rig (and so the ragdoll and the pose).
 const draggerLook = {
-  face: 1, bean: [0.5, 0.27, 0.9, 0.17], head: [1.0, 0.17, 0.9], shoulder: [0.25, 0.83, 0], hand: [0.62, -0.02, 0], arm: [0.05, 0.135],
-  leg: [0.1, 0.25, 0.042, 0.1], hat: null, hat2: [1, 0.05, 0.01, 0], scarf: [0.85, 0.2, 0.042, 0.26], tail: [0.1, 9, 0.045],
-  colors: { skin: '#7fa56a', scarf: '#5b3f52', hat: '#333', band: '#333', mitten: '#6f8468', leg: '#59665a', boot: '#2f3530', nose: '#5f7359' },
+  face: 1, brute: true, grime: 1, faceAt: [0, 0.76, 0.2, 0.15],
+  bean: [0.5, 0.33, 0.76, 0.22], head: [0.76, 0.15, 0.9], shoulder: [0.3, 0.76, 0], hand: [0.5, 0.07, 0.02], arm: [0.085, 0.15],
+  leg: [0.13, 0.21, 0.05, 0.1], hat: null, hat2: [1, 0.05, 0.01, 0], scarf: null, tail: [0.1, 9, 0.045],
+  patches: [[-0.75, 0.42, 0.05, 0.045, '#6a5a48'], [0.9, 0.55, 0.04, 0.04, '#4a5f6a']],
+  colors: { skin: '#8c9d86', scarf: '#6b4f3f', hat: '#333', band: '#333', mitten: '#6f8468', leg: '#5c6a5e', boot: '#2f3530', nose: '#5f7359' },
 };
 const dragger = { name: 'Knuckles', type: ZTYPE.dragger, hp: 3, speed: 1.5, reach: 2.05, look: draggerLook, rig: lookRig(draggerLook) };
 
 // dog: half body length, body radius, body height; head [radius, snout length, snout radius];
 // leg [x, z, radius]; ear [0 flap / 1 long wavy flap / 2 pompom, length, width]; tail [length, radius, lift 0..1];
 // pom [on the head, at the ankles, on the tail tip] radii (poodles only)
-const dogColors = (fur, ear, collar, paw) => ({ skin: sick(fur, 0.35, 0.92), scarf: collar, hat: sick(ear, 0.3, 0.9), band: '#000', mitten: '#000',
-  leg: sick(fur, 0.4, 0.82), boot: sick(paw, 0.3, 0.85), nose: '#2a2030', hair: '#d77f95' });
+const dogColors = (fur, ear, collar, paw) => ({ skin: sick(fur, 0.42, 0.92), scarf: collar, hat: sick(ear, 0.3, 0.9), band: '#000', mitten: '#000',
+  leg: sick(fur, 0.45, 0.84), boot: sick(paw, 0.2, 0.8), nose: '#241c2a', hair: '#d77f95' });
 const dogs = [
-  { name: 'Dachshund', dog: { len: 0.4, r: 0.125, h: 0.25, head: [0.12, 0.17, 0.055], leg: [0.085, 0.3, 0.036], ear: [0, 0.16, 0.06], tail: [0.26, 0.022, 0.5], pom: [0, 0, 0] },
-    colors: dogColors('#9a6238', '#6a3f22', '#c63a2f', '#6a3f22'), speed: 4.6 },
-  { name: 'Spaniel', dog: { len: 0.25, r: 0.15, h: 0.38, head: [0.135, 0.11, 0.065], leg: [0.1, 0.17, 0.042], ear: [1, 0.27, 0.085], tail: [0.1, 0.035, 0.7], pom: [0, 0, 0] },
-    colors: dogColors('#e8e2d6', '#9a5a34', '#2f6fc0', '#e8e2d6'), speed: 5.0 },
-  { name: 'Poodle', dog: { len: 0.2, r: 0.125, h: 0.5, head: [0.11, 0.12, 0.045], leg: [0.085, 0.14, 0.027], ear: [2, 0.085, 0.07], tail: [0.2, 0.018, 1.0], pom: [0.095, 0.062, 0.07] },
-    colors: dogColors('#f0dfe6', '#f0dfe6', '#e0679f', '#f0dfe6'), speed: 5.2 },
-].map((d) => ({ name: d.name, type: ZTYPE.dog, hp: 1, speed: d.speed, reach: 0.95, look: { dog: d.dog, face: 2, colors: d.colors } }));
+  { name: 'Dachshund', dog: { len: 0.42, r: 0.125, h: 0.25, head: [0.125, 0.19, 0.05], leg: [0.085, 0.3, 0.036], ear: [0, 0.2, 0.075], tail: [0.28, 0.02, 0.62], pom: [0, 0, 0] },
+    colors: dogColors('#8f9a6a', '#4a4650', '#3f8f8a', '#5a3f56'), speed: 4.6 },
+  { name: 'Spaniel', dog: { len: 0.26, r: 0.15, h: 0.38, head: [0.135, 0.12, 0.06], leg: [0.1, 0.17, 0.042], ear: [1, 0.3, 0.09], tail: [0.16, 0.04, 0.75], pom: [0, 0, 0] },
+    colors: dogColors('#d9d6a8', '#c9b27a', '#c9722e', '#5a3f56'), speed: 5.0 },
+  { name: 'Poodle', dog: { len: 0.2, r: 0.125, h: 0.5, head: [0.11, 0.13, 0.042], leg: [0.085, 0.14, 0.028], ear: [2, 0.085, 0.07], tail: [0.2, 0.018, 1.0], pom: [0.1, 0.06, 0.07] },
+    colors: dogColors('#cfd6c8', '#e6e2d6', '#8a4f9a', '#b9a6c6'), speed: 5.2 },
+].map((d) => ({ name: d.name, type: ZTYPE.dog, hp: 1, speed: d.speed, reach: 0.95, look: { dog: d.dog, face: 2, grime: 0.5, colors: d.colors } }));
 
 // index = the `look` number sent over the network: 0-5 walkers, 6 dragger, 7-9 dogs — do not reorder
 export const ZOMBIES = [...walkers, dragger, ...dogs];
@@ -95,7 +103,7 @@ export function zombiePose(rig, root, s, out, off = 0) {
   const k = Math.min(s.speed / 2.2, 1.3), sw = Math.sin(s.phase), t = s.t, R = _rot, drag = type === ZTYPE.dragger;
   const a = s.attack || 0, wind = a ? Math.sin(Math.min(a / 0.55, 1) * Math.PI * 0.5) : 0, slam = a > 0.55 ? ease(Math.min((a - 0.55) / 0.2, 1)) : 0;
   // a lurching body, a head hanging to one side, stiff little steps
-  set(R[0], (drag ? 0.42 : 0.14) + Math.sin(t * 1.3) * 0.03 - wind * 0.25 + slam * 0.5, sw * 0.12 * k, sw * 0.13 * k + Math.sin(t * 0.8) * 0.03);
+  set(R[0], (drag ? 0.2 : 0.14) + Math.sin(t * 1.3) * 0.03 - wind * 0.25 + slam * 0.5, sw * 0.12 * k, sw * 0.13 * k + Math.sin(t * 0.8) * 0.03);
   set(R[1], drag ? -0.3 : 0.05, Math.sin(t * 0.6) * 0.15, 0.38 + Math.sin(t * 1.1) * 0.06);
   set(R[4], sw * 0.5 * k, 0, 0.04);
   set(R[5], -sw * 0.5 * k, 0, -0.04);

@@ -21,7 +21,7 @@ const FOG_DENSITY = 0.0145;
 const FOG_DAY = [FOG_COLOR, '#7a4a66', '#eed6c2'], FOG_DENSITY_DAY = [FOG_DENSITY, 0.0125, 0.0062];
 const SHADOW_DAY = ['#07040d', '#1a0c22', '#2a1f3c'];
 
-const _q = new THREE.Quaternion(), _size = new THREE.Vector2(), _rgb = { r: 0, g: 0, b: 0 };
+const _q = new THREE.Quaternion(), _rgb = { r: 0, g: 0, b: 0 };
 
 export class View {
   constructor(container) {
@@ -162,9 +162,9 @@ export class View {
     this.order = list.map((d) => {
       let e = this.ents.get(d.id);
       if (!e) {
-        // every character is a shader character (six frames + one raymarched SDF); coffins and the truck are meshes
-        const crew = d.kind === 'digger' ? buildCrew(crewRig(d.look), this.camera, { shovel: true }) : d.kind === 'zombie' ? buildCrew(zombieRig(d.look), this.camera)
-          : d.kind === 'corpse' ? buildCrew(corpseRig(d.seed), this.camera, { lite: true }) : null;
+        // every character is six frames plus one low-poly mesh sculpted from its formulas; coffins and the truck are hand-built meshes
+        const crew = d.kind === 'digger' ? buildCrew(crewRig(d.look), { shovel: true }) : d.kind === 'zombie' ? buildCrew(zombieRig(d.look))
+          : d.kind === 'corpse' ? buildCrew(corpseRig(d.seed), { q: 0.64 }) : null;
         const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed) : buildTruck();
         const root = new THREE.Group();
         for (const g of groups) root.add(g);
@@ -238,15 +238,13 @@ export class View {
     const fp = !!(me && this.firstPerson && !meState?.rag);
     const fov = fp ? 74 : 62;
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
-    this.renderer.getDrawingBufferSize(_size);
-    const pix = (2 * Math.tan((this.camera.fov * Math.PI) / 360)) / _size.y;
     for (const e of this.order) {
       for (let i = 0; i < e.groups.length; i++) {
         e.groups[i].position.lerp(e.tpos[i], a);
         e.groups[i].quaternion.slerp(e.tq[i], a);
       }
       // your own head and hat would fill the screen in first person, so that body is drawn without them
-      if (e.crew) e.crew.update(pix, e === me && fp && !this.debugCam);
+      if (e.crew) e.crew.update(e === me && fp && !this.debugCam);
       if (e.shadow) {
         const c = e.groups[0].position; // coffin, pelvis or belly
         const gy = this.groundHeight(c.x, c.z);

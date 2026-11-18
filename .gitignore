@@ -4,3 +4,4 @@ dist/
 *.log
 dist-showcase/
 dist-sdf/
+dist-cast/

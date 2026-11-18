@@ -1,33 +1,23 @@
 import * as THREE from 'three';
-import { SdfCharacter } from '../sdf/shader.js';
+import { Character } from '../chars/index.js';
 import { CP, NCREW } from '../shared/crew.js';
-import { INK, keyLight } from '../shaders/toon.js';
+import { keyLight } from '../shaders/toon.js';
 import { buildShovel } from './models/shovel.js';
-import { isTouchDevice } from '../touch.js';
 
-// One shader character in the game (a digger of the crew, a zombie, or a body waiting to be buried): six empty groups that follow the snapshot
-// transforms (camera, labels and the shovel hang off them) and one raymarched SDF character drawn from those frames.
+// One character in the game (a digger of the crew, a zombie, a dog, or a body waiting to be buried): six empty
+// groups that follow the snapshot transforms (camera, labels and the shovel hang off them) and one low-poly mesh
+// sculpted from the character's formulas, skinned to those six frames (see src/chars/).
 // rig comes from crewRig(), zombieRig() or corpseRig(); opts.shovel puts a shovel in the right mitten,
-// opts.lite uses the cheaper march (bodies lie in piles, and there are many of them).
-const RIM_DIR = new THREE.Vector3(0.6, 0.3, 0.75).normalize(); // opposite the moon, so the shadow side keeps an edge
-const _lo = new THREE.Vector3(), _hi = new THREE.Vector3(), _c = new THREE.Vector3(), _h = new THREE.Vector3();
+// opts.q sets the mesh detail (bodies are many and come and go, so they are built a little coarser).
 const _t = new THREE.Matrix4();
 
-export function buildCrew(rig, camera, opts = {}) {
-  const S = rig.S;
+export function buildCrew(rig, opts = {}) {
+  const S = rig.S, k = rig.def.look;
   const groups = Array.from({ length: NCREW }, () => new THREE.Group());
-  const sdf = new SdfCharacter(rig.def, camera, { scale: S, fog: true, lanterns: true, lite: isTouchDevice() || !!opts.lite });
-  const u = sdf.material.uniforms;
-  // the key light (moon, low sun or high sun) is copied from the toon shader every frame, so the crew sits in the scene
-  u.uRimDir.value.copy(RIM_DIR);
-  u.uInk.value.set(INK);
-  u.uLine.value = 0.013;
-  u.uGrain.value = 0.05;
-  sdf.mesh.renderOrder = -1; // before the other see-through things (shadows, glows): it writes depth
-  sdf.mesh.frustumCulled = false; // the box is moved by hand every frame
+  const ch = new Character(rig.def, { q: opts.q }), u = ch.uniforms;
+  u.uThick.value = 0.011;
 
-  // the shovel rides in the right mitten, upright while the arms chop (see crewPose)
-  if (opts.shovel) {
+  if (opts.shovel) { // the shovel rides in the right mitten, upright while the arms chop (see crewPose)
     const shovel = buildShovel();
     const hand = rig.hand.clone().setX(-rig.hand.x).sub(rig.rest[CP.armR]);
     shovel.scale.setScalar(0.85);
@@ -37,31 +27,27 @@ export function buildCrew(rig, camera, opts = {}) {
     groups[CP.armR].userData.shovel = shovel;
   }
 
-  const parts = Array.from({ length: NCREW }, () => new THREE.Matrix4());
   const scale = new THREE.Vector3(S, S, S), rest = rig.rest.map((r) => r.clone().divideScalar(S));
-  // call once per frame after the groups moved: pix = world size of one pixel at distance 1
-  function update(pix, noHead) {
-    _lo.setScalar(Infinity); _hi.setScalar(-Infinity);
+  // call once per frame after the groups moved; noHead leaves out the head and hat (your own digger in first person)
+  function update(noHead) {
     for (let i = 0; i < NCREW; i++) {
-      const g = groups[i], r = rig.radius[i];
-      parts[i].compose(g.position, g.quaternion, scale).multiply(_t.makeTranslation(-rest[i].x, -rest[i].y, -rest[i].z));
-      _lo.min(_c.copy(g.position).subScalar(r));
-      _hi.max(_c.copy(g.position).addScalar(r));
+      const g = groups[i];
+      ch.parts[i].compose(g.position, g.quaternion, scale).multiply(_t.makeTranslation(-rest[i].x, -rest[i].y, -rest[i].z));
     }
-    sdf.update(parts, 0, _c.addVectors(_lo, _hi).multiplyScalar(0.5), _h.subVectors(_hi, _lo).multiplyScalar(0.5));
+    // the key light (moon, low sun or high sun) is the toon shader's, so everyone sits in the same scene
     const key = keyLight();
     u.uLightDir.value.copy(key.dir);
-    u.uLightCol.value.copy(key.lit).multiplyScalar(0.78); // dimmer than the toon key: these bodies are almost white all over
+    u.uLightCol.value.copy(key.lit).multiplyScalar(0.82); // a touch dimmer: these bodies are almost white all over
     u.uShadeCol.value.copy(key.shade);
-    u.uRimCol.value.copy(key.shade).multiplyScalar(0.55);
-    u.uPix.value = pix;
+    u.uRimCol.value.copy(key.shade).multiplyScalar(0.5);
     u.uNoHead.value = noHead ? 1 : 0;
   }
-  // a body that got up at night wears a zombie's face and goes green until it lies down again
-  const face = rig.def.look.face || 0;
+  // a body that got up at night wears a zombie's face, goes green and earthy until it lies down again
+  const face = k.face || 0, grime = k.grime || 0;
   function setRisen(on) {
     u.uFace.value = on ? 1 : face;
-    u.uTint.value.set(0.27, 0.52, 0.22, on ? 0.82 : 0);
+    u.uTint.value.set(0.33, 0.47, 0.27, on ? 0.75 : 0);
+    u.uGrime.value = on ? 0.7 : grime;
   }
-  return { groups, mesh: sdf.mesh, rig, update, setRisen };
+  return { groups, mesh: ch.group, rig, update, setRisen };
 }
