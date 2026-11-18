@@ -21,6 +21,7 @@ const walkers = CREW.map((d, i) => {
   const patches = [0, 1, 2].slice(0, 2 + (i % 2)).map((n) => [(n - 0.9) * 0.85 + R(n) * 0.3 - 0.1, yB + (R(n + 5) - 0.55) * rB * 0.9, 0.034 + R(n + 9) * 0.016, 0.03 + R(n + 13) * 0.016, PATCH[(i + n * 2) % PATCH.length]]);
   const look = {
     ...d.look, face: 1, hair: false, torn: true, grime: 0.85, patches, hat: i % 3 === 0 ? null : d.look.hat, // every third one lost its hat in the ground
+    hatPatch: [0.9 - i * 0.5, d.look.hat[0] + d.look.hat[3] * 0.5, 0.032, 0.028, PATCH[(i + 3) % PATCH.length]],
     colors: { skin: sick(c.skin, 0.8, 0.86, '#93ad84'), scarf: sick(c.scarf, 0.22, 0.74), hat: sick(c.hat, 0.3, 0.82), band: sick(c.band, 0.25, 0.72), pom: sick(c.band, 0.25, 0.78),
       mitten: sick(c.scarf, 0.3, 0.6), leg: sick(c.leg, 0.5, 0.7), boot: sick(c.boot, 0.3, 0.8), nose: sick(c.nose, 0.6, 0.7) },
   };

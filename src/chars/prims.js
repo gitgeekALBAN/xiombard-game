@@ -4,7 +4,8 @@
 // A primitive is { pos, nrm, idx } in rest space and goes into a piece as `mesh` (see meshPieces).
 
 // Solid of revolution around the y axis. profile: [[radius, y], ...] from bottom to top; seg: sides.
-// opts: smooth (one normal per ring: a curved wall) or not (one per band: hard edges), zs (squash along z),
+// opts: smooth (one normal per ring: a curved wall) or not (one per band: hard edges), closed (with smooth: the
+// profile is a loop, counter-clockwise in (radius, y), which makes a ring-shaped tube), zs (squash along z),
 // lift(ring index, angle) -> extra height for a vertex (a splintered rim), flip (faces look inward: an inside wall)
 export function lathe(profile, seg, opts = {}) {
   const { smooth = false, zs = 1, lift, flip = false } = opts, pos = [], nrm = [], idx = [], TAU = Math.PI * 2;
@@ -21,12 +22,13 @@ export function lathe(profile, seg, opts = {}) {
   };
   const quads = (a, b) => { for (let i = 0; i < seg; i++) { if (flip) idx.push(a + i, b + i, a + i + 1, a + i + 1, b + i, b + i + 1); else idx.push(a + i, a + i + 1, b + i, a + i + 1, b + i + 1, b + i); } };
   if (smooth) {
+    const L = profile.length, closed = !!opts.closed; // closed: the profile is a loop (a tube bent into a ring)
     const rings = profile.map((p, k) => {
-      const n0 = k > 0 ? bandN(profile[k - 1], p) : null, n1 = k < profile.length - 1 ? bandN(p, profile[k + 1]) : null;
+      const n0 = k > 0 || closed ? bandN(profile[(k + L - 1) % L], p) : null, n1 = k < L - 1 || closed ? bandN(p, profile[(k + 1) % L]) : null;
       const n = n0 && n1 ? [(n0[0] + n1[0]) / 2, (n0[1] + n1[1]) / 2] : n0 || n1;
       return ring(p[0], p[1], n, k);
     });
-    for (let k = 0; k < rings.length - 1; k++) quads(rings[k], rings[k + 1]);
+    for (let k = 0; k < (closed ? L : L - 1); k++) quads(rings[k], rings[(k + 1) % L]);
   } else for (let k = 0; k < profile.length - 1; k++) { const n = bandN(profile[k], profile[k + 1]); quads(ring(profile[k][0], profile[k][1], n, k), ring(profile[k + 1][0], profile[k + 1][1], n, k + 1)); }
   return { pos, nrm, idx };
 }
@@ -43,4 +45,35 @@ export function place(m, f, ox = 0, oy = 0, oz = 0) {
     out.pos.push(p[0] + ox, p[1] + oy, p[2] + oz); out.nrm.push(n[0], n[1], n[2]);
   }
   return out;
+}
+
+// A strip of cloth with a little thickness. rows: from the top down, each a list of [x, y, z] points across the
+// strip (left to right as seen from the front, where +z looks at you). The edges are rounded for the ink hull.
+export function ribbon(rows, thick) {
+  const nr = rows.length, nc = rows[0].length, pos = [], nrm = [], idx = [], F = (i, j) => i * nc + j, B = (i, j) => nr * nc + i * nc + j;
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const N = [], Lat = [];
+  for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) {
+    const across = norm(sub(rows[i][Math.min(j + 1, nc - 1)], rows[i][Math.max(j - 1, 0)])), down = norm(sub(rows[Math.min(i + 1, nr - 1)][j], rows[Math.max(i - 1, 0)][j]));
+    N.push(norm(cross(down, across)));
+    const sj = j === 0 ? -1 : j === nc - 1 ? 1 : 0, si = i === nr - 1 ? 1 : 0; // which way is "off the edge" here
+    Lat.push([across[0] * sj + down[0] * si, across[1] * sj + down[1] * si, across[2] * sj + down[2] * si]);
+  }
+  for (const side of [1, -1]) for (let i = 0; i < nr; i++) for (let j = 0; j < nc; j++) {
+    const p = rows[i][j], n = N[i * nc + j], l = Lat[i * nc + j], o = side > 0 ? 0 : thick;
+    pos.push(p[0] - n[0] * o, p[1] - n[1] * o, p[2] - n[2] * o);
+    nrm.push(...norm([n[0] * side + l[0] * 0.9, n[1] * side + l[1] * 0.9, n[2] * side + l[2] * 0.9]));
+  }
+  for (let i = 0; i < nr - 1; i++) for (let j = 0; j < nc - 1; j++) {
+    idx.push(F(i, j), F(i + 1, j), F(i + 1, j + 1), F(i, j), F(i + 1, j + 1), F(i, j + 1));
+    idx.push(B(i, j), B(i + 1, j + 1), B(i + 1, j), B(i, j), B(i, j + 1), B(i + 1, j + 1));
+  }
+  const rim = []; // around the edge, counter-clockwise seen from the front: down the left, along the bottom, up the right, back along the top
+  for (let i = 0; i < nr - 1; i++) rim.push([i, 0]);
+  for (let j = 0; j < nc - 1; j++) rim.push([nr - 1, j]);
+  for (let i = nr - 1; i > 0; i--) rim.push([i, nc - 1]);
+  for (let j = nc - 1; j > 0; j--) rim.push([0, j]);
+  for (let e = 0; e < rim.length; e++) { const a = rim[e], b = rim[(e + 1) % rim.length]; idx.push(F(...a), B(...a), F(...b), F(...b), B(...a), B(...b)); }
+  return { pos, nrm, idx };
 }

@@ -36,6 +36,8 @@ uniform vec4 uHeadC2;    // a second face (two zombies in one coat); radius 0 = 
 uniform float uBellyR;   // for laying patches around the belly
 uniform vec4 uPatch[4];  // stitched-on patches: angle around the body, height, half width, half height (0 = none)
 uniform vec3 uPatchCol[4];
+uniform vec4 uHatPatch;  // a patch sewn on the hat: angle around the head, height, half width, half height (0 = none)
+uniform vec3 uHatPatchCol; uniform float uHatR;
 uniform vec4 uBarrel;    // a worn barrel: bottom y, top y, staves around, head depth squash (staves 0 = none)
 uniform float uGrime;    // 0 clean .. 1 fresh out of the ground
 uniform float uGrain;
@@ -59,6 +61,17 @@ float cross2(vec2 q, float r, float w) { return max(abs(q.x), abs(q.y)) < r ? st
 float knit(float u, float v, float su, float sv) {
   float k = fract(v * sv + abs(fract(u * su) - 0.5) * 1.3);
   return 0.84 + 0.16 * smoothstep(0.0, 0.45, k) - 0.05 * smoothstep(0.4, 0.5, abs(fract(u * su) - 0.5));
+}
+
+// a square of cloth sewn on with visible stitches, laid around an upright axis at radius R
+void sewn(inout vec3 col, inout float ink, vec3 p, float around, float R, vec4 pa, vec3 pc) {
+  float da = around - pa.x; da = atan(sin(da), cos(da));
+  vec2 q = vec2(da * R, p.y - pa.y), dd = abs(q) - pa.zw + 0.012;
+  float d = length(max(dd, 0.0)) + min(max(dd.x, dd.y), 0.0) - 0.012;
+  if (d < 0.0) col = pc * (0.86 + 0.14 * sin(q.x * 420.0) * sin(q.y * 420.0)) * (0.9 + 0.2 * fbm(p * 9.0));
+  ink = max(ink, stroke(abs(d), 0.0035));
+  float along = abs(dd.x) < abs(dd.y) ? q.y : q.x; // stitches straddle the edge
+  if (abs(d) < 0.011) ink = max(ink, 0.9 * stroke(abs(fract(along / 0.022) - 0.5) * 0.022, 0.0028));
 }
 
 // The face is painted onto the front of the head. Returns ink (x), eye white (y), shade (z), blush (w).
@@ -117,18 +130,7 @@ void main() {
       col = mix(col, col * vec3(0.72, 0.8, 0.66), uGrime * smoothstep(0.5, 0.7, fbm(p * 3.2 + 11.0)));
       col *= 1.0 - 0.22 * uGrime * smoothstep(0.74, 0.8, vnoise(p * 34.0 + 5.0));
     }
-    for (int i = 0; i < 4; i++) {
-      if (uPatch[i].z <= 0.0) continue;
-      float da = around - uPatch[i].x; da = atan(sin(da), cos(da));
-      vec2 q = vec2(da * uBellyR, p.y - uPatch[i].y), h = uPatch[i].zw;
-      vec2 dd = abs(q) - h + 0.012;
-      float d = length(max(dd, 0.0)) + min(max(dd.x, dd.y), 0.0) - 0.012;
-      if (d < 0.0) col = uPatchCol[i] * (0.86 + 0.14 * sin(q.x * 420.0) * sin(q.y * 420.0)) * (0.9 + 0.2 * fbm(p * 9.0));
-      ink = max(ink, stroke(abs(d), 0.0035));
-      // stitches straddle the edge
-      float along = abs(dd.x) < abs(dd.y) ? q.y : q.x;
-      if (abs(d) < 0.011) ink = max(ink, 0.9 * stroke(abs(fract(along / 0.022) - 0.5) * 0.022, 0.0028));
-    }
+    for (int i = 0; i < 4; i++) if (uPatch[i].z > 0.0) sewn(col, ink, p, around, uBellyR, uPatch[i], uPatchCol[i]);
     vec4 fc = faceAt(p, uHeadC);
     if (uHeadC2.w > 0.0) fc = max(fc, faceAt(p, uHeadC2));
     col = mix(col, vec3(0.86, 0.5, 0.55), fc.w) * (1.0 - fc.z);
@@ -136,6 +138,10 @@ void main() {
     ink = max(ink, fc.x);
   } else if (id == 2) col *= knit(around * 0.16 + p.x * 0.3, p.y, 46.0, 62.0);                     // scarf: chunky stitches
   else if (id == 3) col *= knit(around * 0.16, p.y, 60.0, 74.0);                                    // knitted hat
+  else if (id == 17) { // the fringe at the end of a scarf: loose strands with dark gaps between them
+    col *= knit(around * 0.16 + p.x * 0.3, p.y, 46.0, 62.0) * (0.9 + 0.2 * hash1(vec3(floor(p.x / 0.017), 1.0, 2.0)));
+    ink = max(ink, 0.9 * smoothstep(0.3, 0.44, abs(fract(p.x / 0.017) - 0.5)));
+  }
   else if (id == 4) col *= 0.82 + 0.18 * smoothstep(-0.3, 0.3, sin(around * 38.0 + p.x * 30.0));    // ribbed cuff or band
   else if (id == 5) col *= knit(p.x + p.z, p.y, 70.0, 84.0);                                        // mitten
   else if (id == 7) col *= mix(0.62, 1.0, smoothstep(0.012, 0.028, p.y)) * (1.0 + 0.25 * smoothstep(0.6, 0.9, N.y)); // boot: dark sole, worn top
@@ -174,6 +180,7 @@ void main() {
   else if (id == 15) col *= 0.9 + 0.1 * sin(p.x * 300.0) * sin(p.y * 300.0);                        // woven cloth
   else if (id == 16) col *= 0.85 + 0.5 * pow(max(dot(N, normalize(uLightDir + vec3(0.0, 0.4, 0.0))), 0.0), 6.0);    // iron: a dull glint
 
+  if (uHatPatch.z > 0.0 && (id == 3 || id == 10)) sewn(col, ink, p, atan(p.x - uHeadC.x, p.z - uHeadC.z + uHeadC.w * 0.225), uHatR, uHatPatch, uHatPatchCol);
   if (uGrime > 0.0 && id != 1) { // earth on everything that came out of the ground, thicker toward the feet and hands
     float low = smoothstep(0.42, 0.0, p.y) * 0.7 + 0.25;
     col = mix(col, vec3(0.2, 0.15, 0.1), uGrime * low * smoothstep(0.45, 0.75, fbm(p * 9.0 + 2.0)));
@@ -235,6 +242,7 @@ export function characterMaterials(opts = {}) {
     uRimCol: { value: new THREE.Color(0, 0, 0) }, uInk: { value: new THREE.Color(INK) },
     uFace: { value: 0 }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uHeadC2: { value: new THREE.Vector4(0, 0, 0, 0) }, uBellyR: { value: 0.25 },
     uPatch: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uPatchCol: { value: Array.from({ length: 4 }, () => new THREE.Color()) },
+    uHatPatch: { value: new THREE.Vector4(0, 0, 0, 0) }, uHatPatchCol: { value: new THREE.Color() }, uHatR: { value: 0.15 },
     uBarrel: { value: new THREE.Vector4(0, 0, 0, 1) }, uGrime: { value: 0 }, uGrain: { value: 0.05 }, uThick: { value: 0.0075 },
   };
   const fog = opts.fog !== false;

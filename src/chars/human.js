@@ -1,10 +1,10 @@
-import { smin, sphere, ellipsoid, roundCone, capsule, cylinder, turned, mirrorX, squashZ, noise3 } from './sdf.js';
-import { lathe, merge, place } from './prims.js';
+import { smin, sphere, ellipsoid, roundCone, capsule, turned, mirrorX, squashZ, noise3 } from './sdf.js';
+import { lathe, merge, place, ribbon } from './prims.js';
 
 // A two-legged character as a list of pieces for the mesher, sculpted from the numbers of its look (see
 // shared/crew.js for what each array means). Rest pose: feet on y = 0, facing +Z, +X is the character's left.
 // Parts: 0 body, 1 head, 2 armL, 3 armR, 4 legL, 5 legR. Material ids are read by the character shader:
-export const MAT = { skin: 1, scarf: 2, knit: 3, cuff: 4, mitten: 5, leg: 6, boot: 7, nose: 8, hair: 9, felt: 10, fluff: 11, fur: 12, wood: 13, tongue: 14, cloth: 15, iron: 16 };
+export const MAT = { skin: 1, scarf: 2, knit: 3, cuff: 4, mitten: 5, leg: 6, boot: 7, nose: 8, hair: 9, felt: 10, fluff: 11, fur: 12, wood: 13, tongue: 14, cloth: 15, iron: 16, fringe: 17 };
 
 export const lin = (hex) => hex.slice(1).match(/../g).map((h) => { const c = parseInt(h, 16) / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; });
 const box2 = (x, y, hx, hy) => { const dx = Math.abs(x) - hx, dy = Math.abs(y) - hy; return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0); };
@@ -87,48 +87,59 @@ export function humanPieces(k, q = 1) {
     }
   }
 
-  // ---- scarf: two loose wraps and one or two tails lying on the belly; torn ones are ragged and have lost a bite
+  // ---- scarf: primitives. Two wraps are tubes bent into rings; each tail is a ribbon laid on the belly. The
+  // stitches and the fringe are paint (materials `scarf` and `fringe`); a torn scarf simply ends in a ragged edge.
   if (k.scarf) {
-    const [ys, R, t, len] = k.scarf, torn = !!k.torn;
-    const wraps = (x, y, z) => {
-      const qz = z / zs, rr = Math.hypot(x, qz), ang = Math.atan2(x, qz), qy = y - ys;
-      const r1 = Math.hypot(rr - R, qy + 0.012 * Math.sin(ang * 2 + 0.6)) - t, r2 = Math.hypot(rr - R * 1.06, qy + t * 1.05 - 0.014 * Math.sin(ang * 2 + 2.2)) - t * 0.9;
-      let d = (smin(r1, r2, 0.012) + 0.0035 * Math.sin(ang * 11 + qy * 45)) * zs;
-      if (torn) d = Math.max(d, -(Math.hypot(x + R * 0.7, qy - t * 0.6, z - R * 0.7) - t * 0.9)); // a bite out of the upper wrap
-      return d;
+    const [ys, R, t, len] = k.scarf, torn = !!k.torn, TAU = Math.PI * 2;
+    const tube = (R0, y0, r, amp, ph) => lathe(Array.from({ length: 7 }, (_, i) => [R0 + r * Math.cos((i / 7) * TAU), y0 + r * Math.sin((i / 7) * TAU)]), 16,
+      { smooth: true, closed: true, zs, lift: (ring, a) => -amp * Math.sin(a * 2 + ph) });
+    out.push({ mesh: merge(tube(R, ys, t, 0.012, 0.6), tube(R * 1.06, ys - t * 1.05, t * 0.9, -0.014, 2.2)), mat: MAT.scarf, color: col.scarf, bone: 0 });
+    // where the belly's front surface is at (x, y); below the belly the cloth just hangs
+    const front = (x, y, last) => {
+      if (belly(x, y, 0) > 0.03) return last;
+      let lo = 0, hi = rB * zs + 0.15;
+      for (let n = 0; n < 16; n++) { const m = (lo + hi) / 2; if (belly(x, y, m) < 0.038) lo = m; else hi = m; }
+      return lo;
     };
-    out.push({ d: wraps, box: pad([-R, ys - t * 2.2, -R * zs, R, ys + t, R * zs], t + 0.03), cell: c(0.026), mat: MAT.scarf, color: col.scarf, bone: 0 });
-    const tail = (x0, ln, seed) => (x, y, z) => {
-      const rx = x - x0, ry = y - (ys - ln * 0.5), w = k.tail[2];
-      let dr = box2(rx, ry, w, ln * 0.5);
-      if (torn) dr = Math.max(dr, (ys - ln + 0.05 + 0.07 * noise3(x * 38 + seed, 1.5, 0.5)) - y); // a ragged, shorter end
-      else if (ry < -ln * 0.5 + 0.06) dr = Math.max(dr, (Math.abs(((rx / 0.046) % 1 + 1) % 1 - 0.5) - 0.3) * 0.046); // fringe
-      return Math.max(Math.abs(belly(x, y, z) - 0.026) - 0.016, dr, -z);
+    const strip = (x0, w, yTop, yEnd, nRows, nCols, ragged, seed) => {
+      const zc = new Array(nCols).fill(rB * zs);
+      return ribbon(Array.from({ length: nRows }, (_, i) => Array.from({ length: nCols }, (_, j) => {
+        const x = x0 - w + (2 * w * j) / (nCols - 1), jag = ragged && i === nRows - 1 ? 0.07 * noise3(j * 1.9 + seed, 0.5, 0.5) : 0;
+        const y = yTop + ((yEnd - yTop) * i) / (nRows - 1) + jag;
+        return [x, y, (zc[j] = front(x, y, zc[j]))];
+      })), 0.028);
     };
     const tails = [[k.tail[0], len, 1]];
     if (k.tail[1] < 5) tails.push([k.tail[1], len * 0.82, 7]);
-    for (const [x0, ln, seed] of tails) out.push({ d: tail(x0, ln, seed), box: [x0 - k.tail[2] - 0.02, ys - ln - 0.02, 0, x0 + k.tail[2] + 0.02, ys + 0.02, rB * zs + 0.07], cell: c(0.013), mat: MAT.scarf, color: col.scarf, bone: 0 });
+    for (const [x0, ln, seed] of tails) {
+      const w = k.tail[2], top = ys - t * 0.4, end = ys - ln;
+      if (torn) out.push({ mesh: strip(x0, w, top, end + 0.05, 7, 5, true, seed), mat: MAT.scarf, color: col.scarf, bone: 0 });
+      else {
+        out.push({ mesh: strip(x0, w, top, end + 0.055, 6, 3, false, seed), mat: MAT.scarf, color: col.scarf, bone: 0 });
+        out.push({ mesh: strip(x0, w, end + 0.055, end, 2, 3, false, seed), mat: MAT.fringe, color: col.scarf, bone: 0 });
+      }
+    }
   }
 
-  // ---- hat, worn a touch crooked: a knitted dome or a felt cylinder, an optional brim, a band and a pompom
+  // ---- hat, worn a touch crooked. All primitives: a knitted dome or a felt crown with a crease, an optional
+  // brim, and a band; only the pompom is sculpted (it is soft). Ribs, stitches and the patch are paint.
   if (k.hat) {
-    const [hb, brim, cr, ch] = k.hat, [dome, bh, bp, pom] = k.hat2, tilt = (d) => turned(d, 0, hb, 0, 0, 0, 0.07);
-    let crown;
-    if (dome > 0.5) { const e = ellipsoid(0, hb, 0, cr, ch, cr); crown = (x, y, z) => Math.max(e(x, y, z), hb - y); }
-    else {
-      const pinch = ellipsoid(0, hb + ch + 0.035, 0, cr * 0.42, 0.075, cr * 1.3);
-      crown = (x, y, z) => { const kk = 1 - 0.14 * Math.min(1, Math.max(0, (y - hb) / ch)), dx = Math.hypot(x, z) / kk - cr + 0.035, dy = Math.abs(y - hb - ch * 0.5) - ch * 0.5 + 0.035;
-        return Math.max((Math.min(Math.max(dx, dy), 0) + Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) - 0.035) * kk, -pinch(x, y, z)); };
+    const [hb, brim, cr, ch] = k.hat, [dome, bh, bp, pom] = k.hat2, parts = [], knit = dome > 0.5;
+    const cz = Math.cos(0.07), sz = Math.sin(0.07), tiltF = (x, y, z) => [x * cz - y * sz, x * sz + y * cz, z], set = (m) => place(m, tiltF, ho[0], hb + ho[1], ho[2]);
+    if (knit) parts.push(lathe([[cr, -0.012], ...Array.from({ length: 6 }, (_, i) => [Math.max(cr * Math.cos((i / 5) * Math.PI / 2), 0.001), ch * Math.sin((i / 5) * Math.PI / 2)])], 14, { smooth: true }));
+    else { // a felt crown: slightly tapered, rounded shoulder, a crease pressed into the top from front to back
+      const prof = [[cr * 0.99, -0.008], [cr * 0.97, ch * 0.5], [cr * 0.91, ch * 0.86], [cr * 0.76, ch], [cr * 0.42, ch - 0.01], [0.001, ch - 0.016]];
+      parts.push(lathe(prof, 14, { smooth: true, lift: (ring, a) => (ring > 2 ? -0.035 * Math.exp(-(((prof[ring][0] * Math.sin(a)) / (cr * 0.36)) ** 2)) : 0) }));
     }
-    let hat = crown;
-    if (brim > 0) { const disc = (x, y, z) => { const yy = y - hb - 0.32 * x * x + 0.12 * z * z, dx = Math.hypot(x, z) - brim + 0.014, dy = Math.abs(yy) - 0.006; return Math.min(Math.max(dx, dy), 0) + Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) - 0.016; }; const c0 = crown; hat = (x, y, z) => smin(c0(x, y, z), disc(x, y, z), 0.025); }
-    if (k.torn) { const h0 = hat, bite = sphere(cr * 0.75, hb + ch * 0.35, cr * 0.6, ch * 0.3); hat = (x, y, z) => Math.max(h0(x, y, z), -bite(x, y, z)); } // moth-eaten
-    const w = Math.max(cr, brim) + 0.03;
-    out.push({ d: moved(tilt(hat), ...ho), box: shift([-w, hb - 0.05, -w, w, hb + ch + 0.06, w], ...ho), cell: c(brim > 0 ? 0.02 : 0.024), mat: dome > 0.5 ? MAT.knit : MAT.felt, color: col.hat, bone: 1 });
-    const bandR = (dome > 0.5 ? cr * Math.sqrt(Math.max(1 - (bh * 0.5 / ch) ** 2, 0)) : cr * 0.97) + bp;
-    out.push({ d: moved(tilt(cylinder(0, hb + bh * 0.5 + 0.012, 0, bandR, bh * 0.5, Math.min(bh * 0.45, bp + 0.008))), ...ho), box: shift([-bandR - 0.03, hb - 0.03, -bandR - 0.03, bandR + 0.03, hb + bh + 0.05, bandR + 0.03], ...ho),
-      cell: c(0.024), mat: dome > 0.5 ? MAT.cuff : MAT.felt, color: col.band, bone: 1 });
-    if (pom > 0) { const py = hb + ch + pom * 0.55, s = sphere(0, py, 0, pom); out.push({ d: moved(tilt((x, y, z) => s(x, y, z) - 0.012 * noise3(x * 45, y * 45, z * 45)), ...ho), box: shift(pad([-pom, py - pom, -pom, pom, py + pom, pom], 0.035), ...ho), cell: c(0.02), mat: MAT.fluff, color: col.pom || col.hat, bone: 1 }); }
+    if (brim > 0) { // one loop around the brim's cross-section; the sides curl up a little
+      const prof = [[cr * 0.85, -0.012], [brim, -0.012], [brim + 0.007, -0.002], [brim, 0.008], [cr * 0.85, 0.008]];
+      parts.push(lathe(prof, 16, { smooth: true, lift: (ring, a) => { const r = prof[ring][0], x = r * Math.sin(a), z = r * Math.cos(a); return 0.32 * x * x - 0.12 * z * z; } }));
+    }
+    out.push({ mesh: set(merge(...parts)), mat: knit ? MAT.knit : MAT.felt, color: col.hat, bone: 1 });
+    const bandR = (knit ? cr * Math.sqrt(Math.max(1 - (bh * 0.5 / ch) ** 2, 0)) : cr * 0.97) + bp, y0 = 0.012, y1 = 0.012 + bh, rr = Math.min(bh * 0.3, 0.014);
+    const frayed = k.torn ? (ring, a) => (ring < 2 ? 0.016 * noise3(a * 3.1 + 4, 0.5, 0.5) - 0.008 : 0) : undefined; // a moth-eaten lower edge
+    out.push({ mesh: set(lathe([[bandR - 0.02, y0], [bandR, y0 + rr], [bandR, y1 - rr], [bandR - 0.02, y1]], 14, { smooth: true, lift: frayed })), mat: knit ? MAT.cuff : MAT.felt, color: col.band, bone: 1 });
+    if (pom > 0) { const py = hb + ch + pom * 0.55, s = sphere(0, py, 0, pom), tilt = (d) => turned(d, 0, hb, 0, 0, 0, 0.07); out.push({ d: moved(tilt((x, y, z) => s(x, y, z) - 0.012 * noise3(x * 45, y * 45, z * 45)), ...ho), box: shift(pad([-pom, py - pom, -pom, pom, py + pom, pom], 0.035), ...ho), cell: c(0.02), mat: MAT.fluff, color: col.pom || col.hat, bone: 1 }); }
   }
 
   if (!k.face) { // the living have a little button of a nose
