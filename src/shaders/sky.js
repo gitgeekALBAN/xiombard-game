@@ -2,15 +2,18 @@ import * as THREE from 'three';
 import { noise, noiseExtra } from './noise.glsl.js';
 import { MOON_DIR, DAY, dayGLSL } from './toon.js';
 
-// Gloomy storybook sky: a deep indigo gradient with a glow band at the horizon, a huge pale moon with a halo,
-// flat curly clouds whose edges catch the moonlight, and twinkling stars.
+// Storybook sky: a painted gradient with a glow band at the horizon, a huge pale moon with a halo, twinkling stars,
+// long dry-brush streaks high up and three rows of cumulus clouds painted on a cylinder around the viewer like a
+// stage backdrop: flat bottoms, puffs piled on top, a ragged brushed edge, a spiral here and there.
 // Colors are chosen in display (sRGB) space and decoded exactly, so at the horizon the sky lands on precisely
 // the scene fog color (`horizon`, a THREE.Color) and far ground melts into it without a seam.
 // The moon writes alpha < 1: the post pipeline reads (1 - alpha) as extra bloom, so the moon glows without
 // pushing its painted surface into clipped white. Every opaque material writes alpha 1.
 // Day/night follows the shared uDay uniform (toon.js): the stars and moon fade, a painted sun rises along sunDir()
-// (low and orange at dusk, warm white by day), the gradient turns pale blue into peach, and the same lobed clouds
-// turn into puffy cream ones lit from the sun. uHorizon must be kept equal to the fog color (View.setDay does).
+// (low and orange at dusk, warm white by day), the gradient goes from indigo through magenta to lavender-blue over
+// cream, and the same clouds change tone: violet with a silver lining toward the moon at night, dark with glowing
+// orange undersides at dusk, cream with lavender shade by day. uHorizon must be kept equal to the fog color
+// (View.setDay does).
 export const MOON_RADIUS = 0.15; // radians, about 8.6 degrees
 export const SUN_RADIUS = 0.075;
 
@@ -39,27 +42,85 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
       const float MR = ${MOON_RADIUS.toFixed(4)};
       const float SR = ${SUN_RADIUS.toFixed(4)};
 
-      // Storybook clouds are unions of round lobes, not noise fluff. Lobes sit on a jittered grid; a slow,
-      // stretched noise decides which cells belong to a cloud bank and how big their lobe is. Returns the
-      // signed distance (positive inside) and, for the winning lobe, its center offset and radius.
-      float bankAt(vec2 c) { return vnoise(c * vec2(0.16, 0.34) + 11.0) * 0.75 + vnoise(c * 0.6 + 3.0) * 0.25; }
-      vec4 lobes(vec2 p, float scale, float thr, out float rad) {
-        p *= scale;
-        vec2 g = floor(p);
-        vec4 best = vec4(-9.0, 0.0, 0.0, 0.0);
-        rad = 1.0;
-        for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) {
-          vec2 c = g + vec2(i, j);
-          vec2 ctr = c + 0.15 + 0.7 * hash22(c + scale);
-          float b = smoothstep(thr, thr + 0.22, bankAt(ctr / scale));
-          float r = b > 0.35 ? mix(0.6, 1.0, hash12(c + 4.0 + scale)) * (0.75 + 0.25 * b) : -9.0; // overlapping lobes form one bank
-          vec2 v = p - ctr;
-          float sd = r - length(v);
-          if (sd > best.x) { best = vec4(sd, v, hash12(c + 9.0)); rad = max(r, 1e-3); }
+      const float TAU = 6.2831853;
+      vec2 rot2(vec2 p, float a) { float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
+      float wrapA(float a) { return a - TAU * floor(a / TAU + 0.5); }
+
+      // Storybook clouds are painted on a cylinder around the viewer, like a backdrop: p = (azimuth, elevation) in
+      // radians. One row holds n cells per turn; a cell has a cloud or not. A cloud is a handful of round puffs
+      // standing on a flat base line, big in the middle and small at the ends; some are long flat streaks, some
+      // tower. Returns the distance into the nearest puff (positive inside) and, for that puff: the vector from
+      // its center (lv), its radius (lr), whether it carries a spiral and which way round (rnd), the height above the cloud's base (yb)
+      // and the cloud's height (ch).
+      float cloudRow(vec2 p, float n, float y0, float sz, float cov, float seed, out vec2 lv, out float lr, out float rnd, out float yb, out float ch) {
+        float cw = TAU / n, x = p.x / cw;
+        float best = -1.0;
+        lv = vec2(0.0, 1.0); lr = 1.0; rnd = 0.0; yb = -1.0; ch = sz;
+        for (int o = 0; o < 2; o++) {
+          float cell = floor(x) + (o == 0 ? 0.0 : (fract(x) < 0.5 ? -1.0 : 1.0));
+          float id = mod(cell, n);
+          vec2 h = hash22(vec2(id, seed));
+          if (h.x > cov) continue;
+          vec2 h2 = hash22(vec2(id + 17.0, seed + 3.0));
+          float H = sz * mix(0.7, 1.15, h2.y), W = H * mix(2.3, 3.3, h.y);
+          if (h2.x < 0.22) { W *= 1.35; H *= 0.36; } // a long flat streak
+          float base = y0 + (hash12(vec2(id, seed + 9.0)) - 0.5) * sz * 1.3;
+          vec2 q = vec2((x - cell - 0.5 - (h.y - 0.5) * 0.2) * cw, p.y - base);
+          if (abs(q.x) > W * 0.5 + H || q.y < -0.01 || q.y > H * 1.5) continue;
+          bool flat_ = h2.x < 0.22, tall = h2.x > 0.74;
+          // five puffs along the base, big in the middle; two more piled on top (three on a towering cloud)
+          for (int i = 0; i < 8; i++) {
+            if (i > 4 && flat_) break;
+            if (i == 7 && !tall) break;
+            vec2 hh = hash22(vec2(id * 9.0 + float(i), seed + 1.7));
+            float r; vec2 c;
+            if (i < 5) {
+              float fi = (float(i) + 0.5) / 5.0;
+              r = H * 0.5 * pow(sin(3.14159 * fi), 0.8) * (0.72 + 0.28 * hh.x);
+              c = vec2((fi - 0.5) * W + (hh.y - 0.5) * W * 0.06, r * 0.5);
+            } else if (i < 7) {
+              r = H * (0.36 + 0.14 * hh.x);
+              c = vec2((i == 5 ? -0.14 : 0.13) * W + (hh.y - 0.5) * W * 0.14, H * (0.5 + 0.12 * hh.x));
+            } else {
+              r = H * 0.34;
+              c = vec2((hh.y - 0.5) * W * 0.16, H * 1.02);
+            }
+            vec2 v = q - c;
+            float sd = r - length(v);
+            if (sd > best) { best = sd; lv = v; lr = r; rnd = i == 5 && h.y > 0.45 ? (h2.y > 0.5 ? 1.0 : -1.0) : 0.0; yb = q.y; ch = H; }
+          }
         }
-        best.x /= scale;
-        rad /= scale;
         return best;
+      }
+
+      // tones of a cloud by the hour (display space): the lit cap of a puff, its shaded side, the flat underside
+      // and the pale line on the edge that faces the moon or the low sun
+      vec3 cLit, cShade, cUnder, cRim; float rimAmt;
+      // paints one row over col; returns how much it covers
+      float paintRow(inout vec3 col, vec2 p, vec2 toL, float px, vec2 grain, vec3 hazeCol, float haze, float n, float y0, float sz, float cov, float seed) {
+        vec2 lv; float lr, rnd, yb, ch;
+        float sd = cloudRow(p, n, y0, sz, cov, seed, lv, lr, rnd, yb, ch);
+        if (sd < -sz * 0.2) return 0.0;
+        float g = (grain.x - 0.5) * sz * 0.055; // dry brush: the edge breaks up along the stroke
+        float a = smoothstep(-px, px, min(sd + g, yb + g * 0.25));
+        if (a <= 0.0) return 0.0;
+        // every puff has a lit cap on the side of the light; the rest of it is in shade
+        float cap = lr * 0.74 - length(lv - toL * lr * 0.3 - vec2(0.0, lr * 0.1));
+        vec3 c = mix(cShade, cLit, smoothstep(-px, px, cap + g * 0.8));
+        // the flat underside is the darkest tone by day and catches the low sun at dusk
+        float under = 1.0 - smoothstep(ch * 0.18, ch * 0.34, yb + g * 1.5 + (grain.y - 0.5) * ch * 0.22);
+        c = mix(c, cUnder, under * 0.9);
+        // a painted spiral in the big puffs of some clouds
+        if (rnd != 0.0) {
+          float rr = length(lv) / lr, an = atan(lv.y, lv.x) * rnd;
+          float sp = abs(fract(rr * 2.4 - an / TAU) - 0.5);
+          c = mix(c, mix(cShade, cRim, rimAmt * 0.6), smoothstep(0.11, 0.05, sp) * smoothstep(0.92, 0.75, rr) * smoothstep(0.05, 0.2, rr) * 0.7);
+        }
+        // the edge toward the light is a pale line (the moon's silver lining, the dusk's gold)
+        float edge = 1.0 - smoothstep(0.0, px * 2.5 + sz * 0.05, sd + g);
+        c = mix(c, cRim, edge * smoothstep(-0.1, 0.5, dot(normalize(lv + 1e-5), toL)) * step(ch * 0.1, yb) * rimAmt);
+        col = mix(col, mix(c, hazeCol, haze), a);
+        return a;
       }
 
       void main() {
@@ -75,8 +136,8 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         float moonVis = 1.0 - smoothstep(0.35, 0.85, k);
 
         // ---- gradient (display space) ----
-        vec3 zen = day3(vec3(0.028, 0.024, 0.07), vec3(0.13, 0.11, 0.3), vec3(0.4, 0.62, 0.86));
-        vec3 mid = day3(vec3(0.085, 0.064, 0.16), vec3(0.48, 0.3, 0.5), vec3(0.64, 0.79, 0.92));
+        vec3 zen = day3(vec3(0.05, 0.045, 0.13), vec3(0.2, 0.14, 0.36), vec3(0.5, 0.57, 0.86));
+        vec3 mid = day3(vec3(0.13, 0.105, 0.26), vec3(0.62, 0.3, 0.47), vec3(0.72, 0.77, 0.93));
         vec3 glow = uHorizon * day3(1.28, 1.12, 1.03) + day3(vec3(0.03, 0.02, 0.02), vec3(0.04, 0.02, 0.0), vec3(0.01, 0.0, -0.01));
         glow *= 1.0 + 0.3 * side * (1.0 - smoothstep(0.2, 0.55, k));
         // the low sun sets the horizon on fire on its own side, a rose band on the far side
@@ -156,60 +217,31 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         }
         alphaBloom += sDisc * 0.2 + exp(-sOff / 0.05) * 0.25 * sunVis * (1.0 - sDisc);
 
-        // ---- flat curly clouds ----
-        vec2 base = d.xz / (hh + 0.3) * 1.6;
-        vec2 cp = base + vec2(uTime * 0.01, uTime * 0.003);
-        // the clouds are lit by the moon at night and by the sun from dusk on
-        float sunW = smoothstep(0.2, 0.55, k);
-        vec2 moonP = uMoon.xz / (uMoon.y + 0.3) * 1.6;
-        vec2 sunP = sun.xz / (max(sun.y, 0.0) + 0.3) * 1.6;
-        vec2 toL = normalize(mix(normalize(moonP - base + 1e-4), normalize(sunP - base + 1e-4), sunW) + 1e-4);
-        float near = max(exp(-off / 0.35) * (1.0 - sunW), exp(-sOff / 0.35) * sunW * day3(1.0, 1.0, 0.35)); // moonlit (sunlit) zone
-        // fewer clouds right on the moon so it stays readable (clouds thin out over the sun instead, see below),
-        // a denser bank low in the sky; by day only a few
-        float thr = 0.5 - 0.08 * smoothstep(0.45, 0.12, h) + 0.25 * exp(-off / 0.1) * moonVis + day3(0.0, 0.02, 0.16);
-        float rBig, rSmall;
-        // the big flat night banks become smaller puffy cumulus by day; the switch hides inside a short gap at
-        // k = 0.62 where the clouds thin out to nothing, so no cloud ever pops
-        float cs = k < 0.62 ? 1.0 : 1.9;
-        float cGap = smoothstep(0.07, 0.0, abs(k - 0.62));
-        vec4 big = lobes(cp, cs, thr, rBig);
-        vec4 small = lobes(cp + 0.37, 2.3 * cs, thr + 0.04, rSmall);
-        bool useBig = big.x >= small.x;
-        float csd = max(big.x, small.x);
-        vec2 nrm = useBig ? big.yz : small.yz;
-        nrm = normalize(nrm + 1e-5);
-        // high up the planar projection blows lobes up into huge arcs, so clouds keep to the lower sky
-        float cover = smoothstep(day3(0.02, 0.03, 0.1), day3(0.14, 0.16, 0.22), h) * smoothstep(0.62, 0.3, h);
-        // by day the bright clouds show the blocky derivative at lobe-cell seams, so the edge width is capped
-        float aw = min(fwidth(csd) * 1.2, mix(1e3, 0.03, smoothstep(0.3, 0.7, k))) + 1e-4;
-        float shape = smoothstep(-aw, aw, csd) * cover;
-        // each lobe is shaded like a flat paper disc tilted to the moon: a bright crescent on the moon side
-        float ndl = dot(nrm, toL);
-        float rim = 1.0 - clamp(csd / (useBig ? rBig : rSmall) * 2.2, 0.0, 1.0); // 1 at the lobe edge
-        vec3 body = mix(day3(vec3(0.085, 0.065, 0.15), vec3(0.34, 0.2, 0.36), vec3(0.76, 0.78, 0.9)),
-                        day3(vec3(0.15, 0.115, 0.25), vec3(0.62, 0.34, 0.42), vec3(0.88, 0.88, 0.95)), keySide * day3(0.5, 0.5, 0.25) + near * 0.6);
-        body *= day3(0.85, 0.85, 0.9) + day3(0.3, 0.3, 0.2) * smoothstep(-0.6, 0.6, nrm.y); // a little darker underneath
-        vec3 litCol = mix(day3(vec3(0.24, 0.2, 0.37), vec3(0.85, 0.5, 0.42), vec3(1.0, 0.97, 0.92)),
-                          day3(vec3(0.62, 0.58, 0.82), vec3(1.0, 0.7, 0.45), vec3(1.0, 0.98, 0.9)), near);
-        body = mix(body, litCol, smoothstep(0.15, 0.55, ndl) * smoothstep(0.45, 0.95, rim));
-        // curls: some big lobes carry a painted spiral stroke
-        if (useBig && big.w > 0.84) {
-          float rr = length(big.yz) / rBig;
-          float an = atan(big.y, big.z) * (big.w > 0.86 ? 1.0 : -1.0);
-          float sp = abs(fract(rr * 2.6 - an / 6.2832) - 0.5);
-          float sw = fwidth(rr * 2.6) + 0.06;
-          body = mix(body, litCol * 0.8 + body * 0.2, smoothstep(sw, sw * 0.4, sp) * smoothstep(0.85, 0.6, rr) * smoothstep(0.08, 0.2, rr) * 0.45);
-        }
-        // outline: silver lining beside the moon, an ink line elsewhere (matches the outlined models)
-        float line = smoothstep(-aw, aw, csd) - smoothstep(aw, aw * 3.0 + 0.004, csd);
-        body = mix(body, day3(vec3(0.05, 0.035, 0.09), vec3(0.2, 0.1, 0.2), vec3(0.52, 0.52, 0.72)), line * (1.0 - near) * day3(0.4, 0.4, 0.6));
-        body += day3(vec3(0.6, 0.55, 0.8), vec3(0.6, 0.4, 0.25), vec3(0.1, 0.08, 0.05)) * line * near * (0.5 + 0.5 * max(ndl, 0.0));
-        float ca = shape * 0.95 * (1.0 - cGap);
-        ca *= 1.0 - sunVis * smoothstep(sr + 0.08, sr, sAng) * 0.8; // the sun shines through thin cloud
-        col = mix(col, body, ca);
-        star *= 1.0 - shape;
-        alphaBloom *= 1.0 - ca * 0.85;
+        // ---- clouds: high brushed streaks, then three rows of storybook clouds, far to near ----
+        float az = atan(d.x, d.z), el = asin(clamp(h, -1.0, 1.0));
+        float px = fwidth(el) * 1.2 + 1e-5; // a pixel in radians (elevation has no seam, azimuth does)
+        float sunW = smoothstep(0.2, 0.55, k); // lit by the moon at night, by the sun from dusk on
+        vec2 lightAE = mix(vec2(atan(uMoon.x, uMoon.z), asin(uMoon.y)), vec2(atan(sun.x, sun.z), asin(clamp(sun.y, -1.0, 1.0))), sunW);
+        vec2 toL = normalize(vec2(wrapA(lightAE.x - az), lightAE.y - el) + 1e-5);
+        vec2 grain = vec2(vnoise(vec2(az * 230.0, el * 270.0)), vnoise(vec2(az * 45.0, el * 60.0) + 7.0));
+        cLit = day3(vec3(0.3, 0.27, 0.47), vec3(0.52, 0.31, 0.45), vec3(0.955, 0.94, 0.9));
+        cShade = day3(vec3(0.2, 0.175, 0.35), vec3(0.34, 0.2, 0.37), vec3(0.81, 0.83, 0.94));
+        cUnder = day3(vec3(0.155, 0.135, 0.29), vec3(1.0, 0.57, 0.32), vec3(0.71, 0.74, 0.91));
+        cRim = day3(vec3(0.74, 0.71, 0.92), vec3(1.0, 0.82, 0.58), vec3(0.97, 0.96, 0.93));
+        rimAmt = day3(1.0, 0.85, 0.0);
+        float covered = 0.0;
+        // long thin streaks high up, laid on with a dry brush
+        vec2 sp2 = rot2(d.xz / (hh + 0.35), 0.5);
+        float streak = smoothstep(0.52, 0.74, vnoise(sp2 * vec2(0.45, 2.6) + 3.0)) * smoothstep(0.2, 0.75, vnoise(sp2 * vec2(3.0, 26.0)));
+        streak *= smoothstep(0.24, 0.55, h) * day3(0.12, 0.2, 0.26);
+        col = mix(col, mix(cLit, cRim, 0.3), streak);
+        covered = streak * 0.6;
+        float t = uTime;
+        covered = max(covered, paintRow(col, vec2(az + t * 0.0016, el), toL, px, grain, glow, 0.4, 16.0, 0.065, 0.068, 0.62, 1.0));
+        covered = max(covered, paintRow(col, vec2(az + t * 0.0026, el), toL, px, grain, glow, 0.16, 11.0, 0.17, 0.115, 0.62, 2.0));
+        covered = max(covered, paintRow(col, vec2(az + t * 0.004, el), toL, px, grain, glow, 0.0, 7.0, 0.36, 0.2, 0.6, 3.0));
+        star *= 1.0 - covered;
+        alphaBloom *= 1.0 - covered * 0.85;
         col += vec3(0.85, 0.85, 1.0) * star;
 
         // ---- horizon: land exactly on the fog color, then stay near it below ----
