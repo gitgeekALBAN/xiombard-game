@@ -1,20 +1,10 @@
 import * as THREE from 'three';
 import { noise } from './noise.glsl.js';
 import { lightingGLSL, dayGLSL, DAY } from './toon.js';
-import { PLOTS, PLOT_HALF, ROAD_Z, ROAD_HALF, PILE, TRUCK_STOP_X } from '../shared/layout.js';
+import { PLOTS, PLOT_HALF, ROAD_Z, ROAD_HALF, PATHS } from '../shared/layout.js';
 
 const f = (v) => v.toFixed(2);
 const srgb = (hex) => { const c = new THREE.Color(hex); return `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`; };
-
-// Worn footpaths (segment endpoints) between where the work happens: truck bed, coffin pile, the plot rows.
-const BED_X = TRUCK_STOP_X + 3.2;
-const PATHS = [
-  [BED_X, ROAD_Z - 2.4, PILE.x + 1.5, PILE.z + 0.6], // truck -> coffin pile
-  [PILE.x + 1, PILE.z - 0.8, -6.5, 5.2], // pile -> plots
-  [BED_X - 2, ROAD_Z - 2.5, 0.5, 5.4], // truck -> plots
-  [-10.5, 0.4, 8.5, 0.4], // walkway between the two rows
-  [0, 4.8, 0, -6.5], // to the back lantern and the old stones
-];
 
 // Lawn, road and path colors as a GLSL library: the yard shader and the backdrop hills share it, so the grass
 // runs on past the fence without a seam. Colors are linear. `px` is the pixel footprint in meters (from fwidth):

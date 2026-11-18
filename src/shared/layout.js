@@ -100,3 +100,14 @@ export function staticBoxes() {
 export function plotAt(x, z, margin = 0) {
   return PLOTS.findIndex((p) => Math.abs(x - p.x) < PLOT_HALF.x + margin && Math.abs(z - p.z) < PLOT_HALF.z + margin);
 }
+
+// Worn footpaths (segment endpoints [ax, az, bx, bz]) between where the work happens: truck bed, coffin pile, the
+// plot rows. The ground shader paints them and the plants keep off them.
+const BED_X = TRUCK_STOP_X + 3.2;
+export const PATHS = [
+  [BED_X, ROAD_Z - 2.4, PILE.x + 1.5, PILE.z + 0.6], // truck -> coffin pile
+  [PILE.x + 1, PILE.z - 0.8, -6.5, 5.2], // pile -> plots
+  [BED_X - 2, ROAD_Z - 2.5, 0.5, 5.4], // truck -> plots
+  [-10.5, 0.4, 8.5, 0.4], // walkway between the two rows
+  [0, 4.8, 0, -6.5], // to the back lantern and the old stones
+];
