@@ -9,15 +9,19 @@ procedural geometry — so we never buy store assets.
 
 ## Play
 
+**The job:** the hearse parks at the morgue. From inside, take each body in through the hatch, read its delivery note,
+hang the right name tag, dress them in the outfit on the note, lay them in a coffin, close the lid, nail it shut if you
+can spare the nails, drag it to a grave you dug and fill it in. Sloppy burials make restless graves.
+
 Host a game, share the 4-letter room code (or the invite link) with friends, they hit **Join**.
 
 | Key | Action |
 |---|---|
 | WASD / Shift / Space | move / run / jump |
 | Mouse (click to lock) or arrow keys | look |
-| Click or E | grab / drop |
-| Right-click or Q | throw what you hold |
-| F (hold) | dig a grave / fill it once a coffin with a body is inside |
+| Click or E | grab / drop, take a body through the hatch, take a name tag or outfit, use it on a body |
+| Right-click or Q | throw what you hold / put a tag or outfit back |
+| F (hold) | work: dig a grave, close a coffin lid, nail it shut, fill the grave |
 | R | go limp (ragdoll) / get up |
 
 On phones and tablets on-screen controls appear automatically: stick on the left, drag on the right to look, buttons for grab, dig, jump, throw and limp.

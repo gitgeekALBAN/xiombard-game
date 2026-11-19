@@ -58,14 +58,28 @@ function eyes(head, R, corpse, z) {
 }
 
 // Characters: one THREE.Group per skeleton part, each centered on the part (see shared/skeleton.js).
-export function buildCharacter(kind, seed, color) {
+// What a corpse wears: materials for torso, legs and sleeves plus a few trims. Bodies arrive in a plain shroud.
+function outfitStyle(outfit, R) {
+  const plain = (c) => toon(c);
+  switch (outfit) {
+    case 'tux': return { top: plain('#1e1a26'), legs: plain('#1e1a26'), sleeve: plain('#1e1a26'), trim: 'tux' };
+    case 'sailor': { const st = toon('#f2eee2', { color2: '#2c3e70', stripes: 11 }); return { top: st, legs: plain('#2c3e70'), sleeve: st, trim: 'sailor' }; }
+    case 'clown': { const st = toon('#f0c23a', { color2: '#d8433a', stripes: 7, axis: 1 }); return { top: st, legs: toon('#d8433a', { color2: '#f0c23a', stripes: 6 }), sleeve: st, trim: 'clown' }; }
+    case 'gown': return { top: plain('#6b3a7a'), legs: plain('#6b3a7a'), sleeve: plain('#7d4a8c'), trim: 'gown' };
+    case 'pajamas': { const st = toon(R.pick(['#5d6f8c', '#7b5d8c', '#5d8c7b']), { color2: '#e8e2d4', stripes: 9 }); return { top: st, legs: st, sleeve: st, trim: 'pajamas' }; }
+    default: { const sh = toon('#d6d0c2', { color2: '#c9c2b2', stripes: 4 }); return { top: sh, legs: sh, sleeve: sh, trim: 'shroud' }; }
+  }
+}
+
+export function buildCharacter(kind, seed, color, opts = {}) {
   const R = rng(seed * 31 + 7);
   const corpse = kind === 'corpse';
   const g = Array.from({ length: NPARTS }, () => new THREE.Group());
   const skin = corpse ? R.pick(['#b7c9ad', '#a9bcc6', '#c6bfd8', '#c2d1b2', '#d0c6b0']) : '#f1ebe0';
-  const cloth = corpse ? R.pick(['#5d6f8c', '#7b5d8c', '#8c6a5d', '#5d8c7b', '#8c8a5d']) : '#262033';
-  const clothMat = corpse ? toon(cloth, { color2: '#e8e2d4', stripes: 9 }) : toon(cloth);
-  const pants = corpse ? clothMat : toon('#1d1824', { color2: '#8d8798', stripes: 16 });
+  const cloth = '#262033';
+  const style = corpse ? outfitStyle(opts.outfit, rng(seed * 3 + 1)) : null;
+  const clothMat = corpse ? style.top : toon(cloth);
+  const pants = corpse ? style.legs : toon('#1d1824', { color2: '#8d8798', stripes: 16 });
   const skinMat = toon(skin);
   const fat = corpse ? R.range(0.9, 1.3) : 1;
 
@@ -78,7 +92,30 @@ export function buildCharacter(kind, seed, color) {
     g[P.chest].add(part(BOX, toon(color, { color2: '#f3eadb', stripes: 14 }), { pos: [0.08, 0.02, 0.17], rot: [0.1, 0, 0.15], scale: [0.07, 0.3, 0.03] }));
     g[P.pelvis].add(part(SPH, toon(cloth), { pos: [0, -0.08, -0.06], scale: [0.21, 0.2, 0.12] }));
   } else {
-    for (let i = 0; i < 3; i++) g[P.chest].add(part(SPH_LO, toon('#e8e2d4'), { pos: [0, 0.12 - i * 0.1, 0.165 * fat], scale: 0.022, outline: 0 }));
+    const front = 0.165 * fat, t = style.trim;
+    if (t === 'tux') {
+      g[P.chest].add(part(BOX, toon('#f2eee6'), { pos: [0, 0.03, front - 0.01], scale: [0.11, 0.3, 0.02], outline: 0 }));
+      for (const sx of [-1, 1]) g[P.chest].add(part(new THREE.ConeGeometry(0.045, 0.09, 4), toon('#9a1d34'), { pos: [sx * 0.045, 0.17, front + 0.01], rot: [0, 0, sx * Math.PI / 2], outline: 0.006 }));
+    } else if (t === 'sailor') {
+      g[P.chest].add(part(BOX, toon('#2c3e70', { color2: '#f2eee2', stripes: 30 }), { pos: [0, 0.16, -0.08], rot: [0.5, 0, 0], scale: [0.36, 0.03, 0.2], outline: 0.01 }));
+      g[P.chest].add(part(new THREE.ConeGeometry(0.05, 0.12, 4), toon('#c8343a'), { pos: [0, 0.1, front + 0.02], rot: [Math.PI, 0, 0], outline: 0.006 }));
+    } else if (t === 'clown') {
+      g[P.chest].add(part(new THREE.TorusGeometry(0.16, 0.05, 6, 16), toon('#f4efe4', { color2: '#d8d0c0', stripes: 40, axis: 1 }), { pos: [0, 0.2, 0], rot: [Math.PI / 2, 0, 0] }));
+      for (let i = 0; i < 3; i++) g[P.chest].add(part(SPH_LO, toon(['#3a7fd8', '#4fc06a', '#d8433a'][i]), { pos: [0, 0.1 - i * 0.1, front], scale: 0.035, outline: 0.006 }));
+    } else if (t === 'gown') {
+      g[P.pelvis].add(part(new THREE.ConeGeometry(0.34, 0.6, 14, 1, true), toon('#6b3a7a', { color2: '#5a2f68', stripes: 10, axis: 1, side: THREE.DoubleSide }), { pos: [0, -0.18, 0], outline: 0.012 }));
+      g[P.chest].add(part(SPH_LO, toon('#e9d9f0'), { pos: [0, 0.14, front], scale: [0.05, 0.035, 0.02], outline: 0 }));
+    } else if (t === 'pajamas') {
+      for (let i = 0; i < 3; i++) g[P.chest].add(part(SPH_LO, toon('#e8e2d4'), { pos: [0, 0.12 - i * 0.1, front], scale: 0.022, outline: 0 }));
+    } else {
+      // shroud: a rough stitched seam down the front
+      g[P.chest].add(part(BOX, toon('#a8a090'), { pos: [0, 0, front], scale: [0.012, 0.36, 0.01], outline: 0 }));
+    }
+    if (opts.tag) {
+      // the name plate you hung on them: a little wooden board on a string
+      g[P.chest].add(part(BOX, toon('#8a6a48', { color2: '#76583a', stripes: 40, axis: 1 }), { pos: [0, -0.05, front + 0.03], scale: [0.2, 0.1, 0.02], outline: 0.008 }));
+      g[P.chest].add(part(new THREE.TorusGeometry(0.1, 0.006, 4, 12, Math.PI), toon('#2a2230'), { pos: [0, 0.0, front + 0.02], outline: 0 }));
+    }
   }
 
   // head
@@ -109,16 +146,21 @@ export function buildCharacter(kind, seed, color) {
   }
 
   // arms
+  const sleeveMat = corpse ? style.sleeve : clothMat;
   for (const [u, f] of [[P.uarmL, P.farmL], [P.uarmR, P.farmR]]) {
-    g[u].add(part(capsule(0.065, 0.24), clothMat));
-    g[f].add(part(capsule(0.058, 0.2), corpse ? skinMat : clothMat, { pos: [0, 0.02, 0] }));
+    g[u].add(part(capsule(0.065, 0.24), sleeveMat));
+    g[f].add(part(capsule(0.058, 0.2), corpse && style.trim === 'shroud' ? skinMat : sleeveMat, { pos: [0, 0.02, 0] }));
     g[f].add(part(SPH, skinMat, { pos: [0, -0.19, 0.01], scale: [0.07, 0.08, 0.06] }));
   }
   // legs
   for (const [t, s] of [[P.thighL, P.shinL], [P.thighR, P.shinR]]) {
     g[t].add(part(capsule(0.075, 0.26), pants));
     g[s].add(part(capsule(0.065, 0.26), corpse ? skinMat : pants, { pos: [0, 0.02, 0] }));
-    g[s].add(part(SPH, toon(corpse ? skin : '#120e18'), { pos: [0, -0.19, 0.06], rot: [0.15, 0, 0], scale: [0.075, 0.06, corpse ? 0.12 : 0.17] }));
+    g[s].add(part(SPH, toon(corpse ? (style.trim === 'tux' ? '#120e18' : skin) : '#120e18'), { pos: [0, -0.19, 0.06], rot: [0.15, 0, 0], scale: [0.075, 0.06, corpse ? 0.12 : 0.17] }));
+  }
+  if (corpse) {
+    // the delivery note, tied to the big toe
+    g[P.shinR].add(part(BOX, toon('#f4eedc'), { pos: [0.02, -0.2, 0.2], rot: [0.3, 0.2, 0.1], scale: [0.09, 0.05, 0.012], outline: 0.006 }));
   }
 
   if (!corpse) {
@@ -135,8 +177,8 @@ export function buildCharacter(kind, seed, color) {
   return g;
 }
 
-// Classic tapered six-sided coffin, open on top so you can see who is inside.
-export function buildCoffin(seed) {
+// Classic tapered six-sided coffin, open on top so you can see who is inside. lid: 0 open, 1 closed, 2 nailed.
+export function buildCoffin(seed, lid = 0) {
   const R = rng(seed);
   const { hx, hy, hz, wall } = COFFIN;
   const outline = [[-0.6 * hx, -hz], [0.6 * hx, -hz], [hx, 0.45 * hz], [0.7 * hx, hz], [-0.7 * hx, hz], [-hx, 0.45 * hz]];
@@ -156,6 +198,19 @@ export function buildCoffin(seed) {
   g.add(part(floorGeo, toon(wood), { outline: 0.02 }));
   g.add(part(BOX, toon('#8b1d3a', { color2: '#6e1530', stripes: 18, axis: 2 }), { pos: [0, -hy + 0.08, 0], scale: [hx * 1.5, 0.02, hz * 1.8], outline: 0 }));
   g.add(part(SPH, toon('#efe6f0'), { pos: [0, -hy + 0.13, hz * 0.72], scale: [0.2, 0.06, 0.12], outline: 0.01 }));
+  if (lid) {
+    const lidGeo = new THREE.ExtrudeGeometry(new THREE.Shape(outline.map(([x, z]) => new THREE.Vector2(x * 1.04, -z * 1.02))), { depth: 0.06, bevelEnabled: false });
+    lidGeo.rotateX(-Math.PI / 2);
+    lidGeo.translate(0, hy - 0.01, 0);
+    g.add(part(lidGeo, toon(wood, { color2: '#2a1d2a', stripes: 8, axis: 0 }), { outline: 0.02 }));
+    g.add(part(BOX, toon('#c9b98f'), { pos: [0, hy + 0.06, -0.1], scale: [0.06, 0.012, 0.5], outline: 0 }));
+    g.add(part(BOX, toon('#c9b98f'), { pos: [0, hy + 0.06, 0.05], scale: [0.3, 0.012, 0.06], outline: 0 }));
+    if (lid === 2) {
+      for (const [x, z] of [[-0.55, -0.95], [0.55, -0.95], [-0.9, 0.45], [0.9, 0.45], [-0.62, 0.95], [0.62, 0.95], [-0.8, -0.2], [0.8, -0.2]]) {
+        g.add(part(CYL, toon('#9aa0ad'), { pos: [x * hx, hy + 0.06, -z * hz], scale: [0.025, 0.012, 0.025], outline: 0 }));
+      }
+    }
+  }
   // a little cross on the side
   for (const sx of [-1, 1]) {
     g.add(part(BOX, toon('#c9b98f'), { pos: [sx * (hx + 0.005), 0, -0.1], scale: [0.02, 0.22, 0.05], outline: 0 }));

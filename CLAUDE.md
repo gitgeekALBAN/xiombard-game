@@ -6,6 +6,13 @@ Read this before changing anything. It records the decisions the team has alread
 **XIOMBARD: Night Shift** — a co-op ragdoll gravedigging game ("friendslop"). A truck delivers floppy corpses;
 players unload them, put each one in a coffin, dig a grave, drop the coffin in and fill it. Corpses slip out of
 your hands, coffins tip over, players can go limp and carry each other.
+The laying-to-rest chain: the hearse parks at the morgue's hatch → someone inside takes the body in onto the
+intake table → read the delivery note (name + outfit) → hang the right name tag from the board → dress them from the
+rack → lay them in a coffin → close the lid (F) → optionally nail it shut (F, costs nails) → drag it to a dug grave →
+fill it. Each missed item (wrong/no tag, wrong outfit, not nailed) adds 1 `unrest` to the grave and scores fewer peace points.
+Nails are scarce (+6 per delivery). Boards exist for repairs.
+Planned next (not built yet): a night phase where restless graves cause trouble (traps and the fence wear down);
+by day players repair with boards + nails, so every nail is a choice between nailing coffins (less unrest) and repairs.
 Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, crooked shapes, big heads, purple night,
 huge moon, curly trees. Inspired by the mood only — never copy characters or designs from existing films/games.
 
@@ -29,6 +36,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/shared/` — data both sides need: `skeleton.js` (part list + FK + animation), `layout.js` (level, colliders, decor), `rng.js`.
 - `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `sky.js`, `ground.js`, `noise.glsl.js`.
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
+- Morgue layout (walls, hatch, table, tag board, outfit rack, crate, coffin spots) is `MORGUE` in `src/shared/layout.js`; outfits are `OUTFITS`.
 - `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard.
 - Custom shaders use `ShaderMaterial`; they write linear color and include `colorspace_fragment` + fog chunks.
 

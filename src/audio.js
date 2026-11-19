@@ -42,6 +42,7 @@ const SOUNDS = {
   flop: (v) => { noise(0.12, 400, 0.4 * v); tone('sine', 200, 60, 0.2, 0.3 * v); },
   thud: (v) => { noise(0.15, 300, 0.5 * v); tone('sine', 90, 40, 0.2, 0.4 * v); },
   honk: (v) => { tone('square', 330, 320, 0.22, 0.12 * v); tone('square', 262, 255, 0.3, 0.12 * v, 0.25); },
+  hammer: (v) => { tone('square', 1200, 600, 0.05, 0.12 * v); noise(0.05, 3000, 0.3 * v); },
   bury: (v) => { [523, 466, 392, 311].forEach((f, i) => tone('triangle', f, f, 0.5, 0.18 * v, i * 0.16)); },
 };
 

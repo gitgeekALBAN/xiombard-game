@@ -3,6 +3,7 @@ import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom } from './net.js';
 import { unlockAudio } from './audio.js';
 import { touch, initTouch, isTouchDevice } from './touch.js';
+import { outfitLabel } from './shared/layout.js';
 
 const $ = (id) => document.getElementById(id);
 const view = new View(document.body);
@@ -154,17 +155,47 @@ function showRoom(code, note) {
 function applyState(st) {
   view.setState(st);
   $('score').textContent = st.score;
+  $('buried').textContent = st.buried;
+  $('nails').textContent = st.nails;
+  $('boards').textContent = st.boards;
   const me = st.players.find((p) => p.id === myId);
   $('hint').textContent = me ? hintText(me.hint) : '';
+  renderCard(me);
   const grip = me ? me.grip : -1;
   $('grip').classList.toggle('show', grip >= 0);
   $('gripfill').style.width = `${Math.max(0, grip) * 100}%`;
   $('gripfill').style.background = grip < 0.3 ? '#e2584a' : '#cfe8a0';
   $('players').innerHTML = st.players.map((p) => `<li style="--c:${p.color}">${escapeHtml(p.name)}${p.id === myId ? ' (you)' : ''}</li>`).join('');
 }
+// The delivery note card: who this is, what they should wear, and the laying-to-rest checklist.
+let lastCard = '';
+function renderCard(me) {
+  const c = me && me.card, it = me && me.item;
+  const key = JSON.stringify([c, it]);
+  if (key === lastCard) return;
+  lastCard = key;
+  const el = $('card');
+  el.classList.toggle('show', !!(c || it));
+  if (!c && !it) return;
+  const li = (ok, text, bad) => `<li class="${ok ? 'ok' : bad ? 'bad' : ''}">${text}</li>`;
+  let html = '';
+  if (c) {
+    const closed = c.stage === 'closed' || c.stage === 'nailed';
+    html += `<h3>DELIVERY NOTE</h3><div class="who">${escapeHtml(c.name)}</div><div>wants: ${escapeHtml(c.suit.toLowerCase())}</div><ul>`;
+    html += li(c.tagOk, c.tag ? `name tag: ${escapeHtml(c.tag)}` : 'hang the name tag', c.tag && !c.tagOk);
+    html += li(c.suitOk, c.outfit !== 'Plain shroud' ? `wearing: ${escapeHtml(c.outfit.toLowerCase())}` : 'dress them', c.outfit !== 'Plain shroud' && !c.suitOk);
+    html += li(c.stage === 'coffin' || closed, 'in a coffin');
+    html += li(closed, 'lid closed');
+    html += li(c.stage === 'nailed', 'nailed shut (optional)');
+    html += li(false, 'buried');
+    html += '</ul>';
+  }
+  if (it) html += `<div class="held">In hand: ${it.type === 'tag' ? `name tag "${escapeHtml(it.name)}"` : escapeHtml(outfitLabel(it.suit).toLowerCase())}</div>`;
+  el.innerHTML = html;
+}
 // Hints are written by the host in keyboard terms; on a touch screen show the button names instead.
-const TOUCH_WORDS = [[/Hold F/g, 'Hold DIG'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'],
-  [/Click to drop/g, 'GRAB to drop'], [/Press R/g, 'Tap LIMP']];
+const TOUCH_WORDS = [[/Hold F/g, 'Hold WORK'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'],
+  [/Click to drop/g, 'GRAB to drop'], [/Press R/g, 'Tap LIMP'], [/\bE:/g, 'GRAB:'], [/Q to put it back/g, 'THROW to put it back']];
 const hintText = (h) => (touch.active ? TOUCH_WORDS.reduce((t, [re, w]) => t.replace(re, w), h) : h);
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LANTERNS } from '../shared/layout.js';
+import { LIGHTS } from '../shared/layout.js';
 
 // Shared cartoon lighting: a cold moon key light, three flat bands, a blue rim and warm lantern pools.
 export const MOON_DIR = new THREE.Vector3(-0.35, 0.55, -0.75).normalize();
@@ -7,8 +7,8 @@ const L = (v) => `vec3(${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`
 
 export const lightingGLSL = /* glsl */ `
 const vec3 MOON = ${L(MOON_DIR)};
-const int NL = ${LANTERNS.length};
-const vec2 LANTERN[NL] = vec2[](${LANTERNS.map(([x, z]) => `vec2(${x.toFixed(2)}, ${z.toFixed(2)})`).join(', ')});
+const int NL = ${LIGHTS.length};
+const vec2 LANTERN[NL] = vec2[](${LIGHTS.map(([x, z]) => `vec2(${x.toFixed(2)}, ${z.toFixed(2)})`).join(', ')});
 vec3 lanternGlow(vec3 w) {
   float g = 0.0;
   for (int i = 0; i < NL; i++) { vec2 d = w.xz - LANTERN[i]; g += exp(-dot(d, d) / 9.0) * smoothstep(3.5, 0.0, abs(w.y - 1.0)); }

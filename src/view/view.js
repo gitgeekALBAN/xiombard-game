@@ -4,7 +4,8 @@ import { groundMaterial } from '../shaders/ground.js';
 import { toon, glowMat } from '../shaders/toon.js';
 import { buildCharacter, buildCoffin, buildTruck, buildHeadstone, buildTree, part, geo } from './models.js';
 import {
-  groundBoxes, DECOR, PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, PILE,
+  groundBoxes, DECOR, PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, LANTERNS, FENCE, ROAD_Z, ROAD_HALF,
+  MORGUE, OUTFITS, morgueBoxes, insideMorgue,
 } from '../shared/layout.js';
 import { P } from '../shared/skeleton.js';
 import { sfx } from '../audio.js';
@@ -84,8 +85,7 @@ export class View {
     shed.add(part(geo.BOX, toon('#16121c'), { pos: [0.4, 0.9, -sh.hz - 0.01], scale: [0.9, 1.8, 0.04], outline: 0 }));
     shed.add(part(geo.BOX, toon('#f0c060', { emissive: 0.9 }), { pos: [-1.1, 1.9, -sh.hz - 0.02], scale: [0.45, 0.4, 0.03], outline: 0 }));
     s.add(shed);
-    // coffin pile marker (stacked planks)
-    for (let i = 0; i < 3; i++) s.add(part(geo.BOX, toon('#4a3a32'), { pos: [PILE.x + 2.2, 0.08 + i * 0.12, PILE.z - 1.6 + i * 0.05], rot: [0, 0.2 * i, 0], scale: [1.6, 0.1, 0.25] }));
+    this.buildMorgue();
 
     // wrought-iron fence
     const spikes = [], gate0 = ROAD_Z - ROAD_HALF - 0.3, gate1 = ROAD_Z + ROAD_HALF + 0.3;
@@ -126,14 +126,111 @@ export class View {
     this.shadowMat = new THREE.MeshBasicMaterial({ color: '#0b0812', transparent: true, opacity: 0.45, depthWrite: false, fog: true });
   }
 
+  // A crooked one-storey morgue. The roof hides while your digger is inside so the camera can see in.
+  buildMorgue() {
+    const s = this.scene, M = MORGUE;
+    const wall = toon('#4a4258', { color2: '#3f384c', stripes: 3.2, axis: 1 });
+    const boxes = morgueBoxes();
+    const furniture = 2; // the last two boxes are the table and the crate, drawn separately below
+    for (const b of boxes.slice(0, -furniture)) s.add(part(geo.BOX, wall, { pos: b.c, scale: [b.h[0] * 2, b.h[1] * 2, b.h[2] * 2], outline: 0.02 }));
+    // floor planks
+    const cx = (M.x0 + M.x1) / 2, cz = (M.z0 + M.z1) / 2, w = M.x1 - M.x0, d = M.z1 - M.z0;
+    s.add(part(geo.BOX, toon('#5a4636', { color2: '#4c3a2c', stripes: 3.3, axis: 1 }), { pos: [cx, 0.01, cz], scale: [w, 0.02, d], outline: 0 }));
+    // roof: two crooked slopes, hidden while you are inside
+    this.roof = new THREE.Group();
+    const roofMat = toon('#241d2e', { color2: '#1c1624', stripes: 6, axis: 1 });
+    for (const sz of [-1, 1]) this.roof.add(part(geo.BOX, roofMat, { pos: [cx, M.h + 0.55, cz + sz * d * 0.26], rot: [sz * 0.36, 0, 0.02], scale: [w + 0.8, 0.12, d * 0.6], outline: 0.03 }));
+    this.roof.add(part(geo.BOX, toon('#3a3046'), { pos: [M.x1 - 1.6, M.h + 1.1, cz + 0.4], rot: [0, 0, 0.08], scale: [0.4, 1.1, 0.4], outline: 0.02 })); // chimney
+    s.add(this.roof);
+    // signs, painted in code
+    const sign = (text, x, y, z, ry, wpx = 512) => {
+      const c = document.createElement('canvas'); c.width = wpx; c.height = 128;
+      const g2 = c.getContext('2d');
+      g2.fillStyle = '#2a2236'; g2.fillRect(0, 0, wpx, 128);
+      g2.fillStyle = '#f0c060'; g2.font = 'bold 64px Georgia, serif'; g2.textAlign = 'center'; g2.fillText(text, wpx / 2, 86);
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(wpx / 128 * 0.42, 0.42), new THREE.MeshBasicMaterial({ map: tex, fog: true }));
+      m.position.set(x, y, z); m.rotation.y = ry; m.rotation.z = 0.04; s.add(m);
+    };
+    sign('MORGUE', (M.door[0] + M.door[1]) / 2, 2.45, M.z0 - M.t - 0.01, Math.PI);
+    sign('DELIVERIES', (M.hatch[0] + M.hatch[1]) / 2, 2.35, M.z1 + M.t + 0.01, 0, 640);
+    // intake table
+    const tb = M.table;
+    s.add(part(geo.BOX, toon('#8c8a9a', { color2: '#7a788a', stripes: 12, axis: 1 }), { pos: [tb.x, tb.top - 0.04, tb.z], scale: [tb.hx * 2, 0.08, tb.hz * 2], outline: 0.02 }));
+    for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) s.add(part(geo.BOX, toon('#2a2230'), { pos: [tb.x + sx * (tb.hx - 0.08), tb.top / 2 - 0.04, tb.z + sz * (tb.hz - 0.08)], scale: [0.06, tb.top - 0.08, 0.06], outline: 0 }));
+    // supply crate with nails and planks
+    const cr = M.crate;
+    s.add(part(geo.BOX, toon('#6a4c34', { color2: '#5a3f2a', stripes: 9 }), { pos: [cr.x, cr.hy, cr.z], scale: [cr.hx * 2, cr.hy * 2, cr.hz * 2], outline: 0.02 }));
+    for (let i = 0; i < 3; i++) s.add(part(geo.BOX, toon('#8a6a48'), { pos: [cr.x - 0.05 + i * 0.04, cr.hy * 2 + 0.04 + i * 0.05, cr.z], rot: [0, 0.3 - i * 0.25, 0], scale: [1.1, 0.04, 0.16] }));
+    for (let i = 0; i < 6; i++) s.add(part(geo.CYL, toon('#9aa0ad'), { pos: [cr.x + 0.25 - i * 0.07, cr.hy * 2 + 0.03, cr.z + 0.22], rot: [0, 0, 1.4], scale: [0.012, 0.12, 0.012], outline: 0 }));
+    // tag board on the west wall: tag texts come from the host state
+    const B = M.board;
+    s.add(part(geo.BOX, toon('#3a2e26'), { pos: [B.x + 0.04, B.y, B.z0 + (B.n - 1) * B.dz / 2], scale: [0.04, 0.6, B.n * B.dz + 0.2], outline: 0.015 }));
+    this.tagSlots = [];
+    for (let i = 0; i < B.n; i++) {
+      const c = document.createElement('canvas'); c.width = 256; c.height = 128;
+      const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.36, 0.18), new THREE.MeshBasicMaterial({ map: tex, fog: true }));
+      m.position.set(B.x + 0.07, B.y - (i % 2) * 0.12, B.z0 + i * B.dz);
+      m.rotation.set(0, Math.PI / 2, (i % 3 - 1) * 0.08);
+      s.add(m);
+      this.tagSlots.push({ canvas: c, tex, mesh: m, text: undefined });
+    }
+    // outfit rack on the east wall: a rail with a little dummy torso per outfit
+    const R = M.rack;
+    s.add(part(geo.CYL, toon('#2a2230'), { pos: [R.x - 0.18, R.y + 0.4, R.z0 + (OUTFITS.length - 1) * R.dz / 2], rot: [Math.PI / 2, 0, 0], scale: [0.025, OUTFITS.length * R.dz + 0.3, 0.025], outline: 0 }));
+    const look = {
+      tux: ['#1e1a26', '#f2eee6'], sailor: ['#f2eee2', '#2c3e70'], clown: ['#f0c23a', '#d8433a'], gown: ['#6b3a7a', '#e9d9f0'], pajamas: ['#5d6f8c', '#e8e2d4'],
+    };
+    OUTFITS.forEach((o, i) => {
+      const [a, b2] = look[o.id];
+      const z = R.z0 + i * R.dz;
+      s.add(part(geo.SPH, toon(a, { color2: b2, stripes: o.id === 'tux' || o.id === 'gown' ? 0 : 10, axis: o.id === 'clown' ? 1 : 0 }), { pos: [R.x - 0.2, R.y, z], scale: [0.12, 0.26, 0.2], outline: 0.012 }));
+      s.add(part(geo.BOX, toon('#2a2230'), { pos: [R.x - 0.2, R.y + 0.3, z], scale: [0.02, 0.2, 0.02], outline: 0 }));
+      if (o.id === 'gown') s.add(part(new THREE.ConeGeometry(0.22, 0.4, 10), toon(a), { pos: [R.x - 0.2, R.y - 0.36, z], outline: 0.012 }));
+    });
+    // hanging lamp
+    s.add(part(geo.CYL, toon('#15111c'), { pos: [M.lamp[0], M.h - 0.3, M.lamp[1]], scale: [0.01, 0.6, 0.01], outline: 0 }));
+    s.add(part(geo.SPH, toon('#ffd890', { emissive: 1 }), { pos: [M.lamp[0], M.h - 0.65, M.lamp[1]], scale: 0.1, outline: 0.01 }));
+    const glow = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8), glowMat('#ffc070', 0.6));
+    glow.position.set(M.lamp[0], M.h - 0.65, M.lamp[1]);
+    s.add(glow);
+    this.lampGlow = glow;
+  }
+
+  updateTags(tags) {
+    (tags || []).forEach((t, i) => {
+      const slot = this.tagSlots[i];
+      if (!slot || slot.text === t) return;
+      slot.text = t;
+      slot.mesh.visible = !!t;
+      if (!t) return;
+      const x = slot.canvas.getContext('2d');
+      x.fillStyle = '#e9dcc0'; x.fillRect(0, 0, 256, 128);
+      x.strokeStyle = '#6a5440'; x.lineWidth = 8; x.strokeRect(4, 4, 248, 120);
+      x.fillStyle = '#2a2236'; x.textAlign = 'center';
+      const [first, ...rest] = t.split(' ');
+      x.font = 'italic 34px Georgia, serif'; x.fillText(first, 128, 52, 236);
+      x.font = 'bold 40px Georgia, serif'; x.fillText(rest.join(' '), 128, 100, 236);
+      slot.tex.needsUpdate = true;
+    });
+  }
+
   // ---------- entities ----------
   setEntities(list, version) {
     const keep = new Set(list.map((d) => d.id));
     for (const [id, e] of this.ents) if (!keep.has(id)) { this.scene.remove(e.root); this.ents.delete(id); }
     this.order = list.map((d) => {
       let e = this.ents.get(d.id);
+      const look = `${d.outfit}|${d.tag}|${d.lid}`;
+      let keep = null;
+      if (e && e.look !== look) { // changed clothes, got a tag, lid closed: rebuild in place
+        keep = e.groups.map((g) => [g.position.clone(), g.quaternion.clone()]);
+        this.scene.remove(e.root);
+        e = null;
+      }
       if (!e) {
-        const groups = d.kind === 'coffin' ? buildCoffin(d.seed) : d.kind === 'truck' ? buildTruck() : buildCharacter(d.kind, d.seed, d.color);
+        const groups = d.kind === 'coffin' ? buildCoffin(d.seed, d.lid) : d.kind === 'truck' ? buildTruck() : buildCharacter(d.kind, d.seed, d.color, d);
         const root = new THREE.Group();
         for (const g of groups) root.add(g);
         let shadow = null;
@@ -143,7 +240,8 @@ export class View {
           root.add(shadow);
         }
         this.scene.add(root);
-        e = { ...d, root, groups, shadow, fresh: true, tpos: groups.map(() => new THREE.Vector3()), tq: groups.map(() => new THREE.Quaternion()) };
+        e = { ...d, look, root, groups, shadow, fresh: !keep, tpos: groups.map(() => new THREE.Vector3()), tq: groups.map(() => new THREE.Quaternion()) };
+        if (keep) keep.forEach(([p, q], i) => { if (groups[i]) { groups[i].position.copy(p); groups[i].quaternion.copy(q); e.tpos[i].copy(p); e.tq[i].copy(q); } });
         this.ents.set(d.id, e);
       }
       return e;
@@ -179,6 +277,7 @@ export class View {
       v.fill.visible = f > 0.01;
       v.fill.position.y = -d + (d + 0.02) * f;
       this.groundMat.uniforms.uPlotState.value[i] = b;
+      v.unrest = st.plots[i][5] || 0;
       if (b && v.seed !== seed) {
         if (v.stone) this.scene.remove(v.stone);
         v.stone = this.freshGrave(seed, name);
@@ -192,6 +291,7 @@ export class View {
         v.seed = -1;
       }
     });
+    this.updateTags(st.tags);
     const pl = new Map(st.players.map((p) => [p.id, p]));
     for (const e of this.order) {
       if (e.kind === 'digger') {
@@ -268,6 +368,8 @@ export class View {
       const cp = Math.cos(look.pitch), dir = new THREE.Vector3(Math.sin(look.yaw) * cp, -Math.sin(look.pitch), Math.cos(look.yaw) * cp);
       // pull the camera in if the truck is between it and the player
       const truck = this.order.find((e) => e.kind === 'truck');
+      const indoors = insideMorgue(chest.x, chest.z);
+      this.roof.visible = !indoors;
       let dist = 4.6;
       const pos = new THREE.Vector3();
       for (let d = 0.8; d <= 4.6; d += 0.2) {
@@ -276,6 +378,10 @@ export class View {
           const t = truck.groups[0].position;
           if (Math.abs(pos.x - t.x) < 3.3 && Math.abs(pos.z - t.z) < 1.35 && pos.y < 2.7) { dist = Math.max(0.8, d - 0.3); break; }
         }
+        // indoors the camera stays inside the walls (and under where the roof would be)
+        if (indoors && (!insideMorgue(pos.x, pos.z, 0.25) || pos.y > MORGUE.h + 1.2)) { dist = Math.max(0.8, d - 0.2); break; }
+        // outdoors it must not end up inside the building either
+        if (!indoors && insideMorgue(pos.x, pos.z, -0.2) && pos.y < MORGUE.h + 1) { dist = Math.max(0.8, d - 0.2); break; }
       }
       pos.copy(this.camTarget).addScaledVector(dir, -dist);
       pos.y = Math.max(pos.y, this.groundHeight(pos.x, pos.z) + 0.35);
@@ -287,6 +393,7 @@ export class View {
       this.camera.lookAt(0, 0.5, 4);
     }
     for (const b of this.billboards) b.quaternion.copy(this.camera.quaternion);
+    if (this.lampGlow) this.lampGlow.quaternion.copy(this.camera.quaternion);
     for (const e of this.order) if (e.kind === 'truck') e.root.traverse((o) => { if (o.userData.billboard) o.quaternion.copy(this.camera.quaternion); });
     this.sky.position.copy(this.camera.position);
     this.renderer.render(this.scene, this.camera);

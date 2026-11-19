@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { PARTS, NPARTS, P, fk, animRots, restRots, limpRots } from '../shared/skeleton.js';
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
-  ROAD_Z, PILE, SPAWN, staticBoxes, plotAt,
+  ROAD_Z, SPAWN, MORGUE, OUTFITS, NAIL_COST, outfitLabel, insideMorgue, staticBoxes,
 } from '../shared/layout.js';
 import { rng, corpseName } from '../shared/rng.js';
 
@@ -50,7 +50,11 @@ export class Sim {
     this.events = [];
     this.time = 0;
     this.acc = 0;
-    this.score = 0;
+    this.score = 0; // peace points
+    this.buried = 0;
+    this.nails = 12;
+    this.boards = 4; // for repairs (night phase, coming next)
+    this.tags = Array.from({ length: MORGUE.board.n }, () => null); // name tags hanging on the board
     this.seedCounter = 1;
     this.rand = rng(Date.now() & 0xffff);
     this._ray = new CANNON.RaycastResult();
@@ -70,11 +74,12 @@ export class Sim {
       floor.addShape(new CANNON.Box(new CANNON.Vec3(PLOT_HALF.x, 1, PLOT_HALF.z)));
       floor.position.set(p.x, -1, p.z);
       w.addBody(floor);
-      return { i, x: p.x, z: p.z, depth: 0, fill: 0, buried: false, buriedAt: 0, name: '', seed: 0, floor, digSfx: 0 };
+      return { i, x: p.x, z: p.z, depth: 0, fill: 0, buried: false, buriedAt: 0, name: '', seed: 0, floor, digSfx: 0, unrest: 0 };
     });
 
     this.truck = this.spawnTruck();
-    for (let i = 0; i < 3; i++) this.spawnCoffin(PILE.x, 0.1, PILE.z + (i - 1) * 1.35, Math.PI / 2); // side by side, not overlapping
+    for (const [x, z] of MORGUE.coffins) this.spawnCoffin(x, 0.05, z, 0);
+    for (let i = 0; i < this.tags.length; i++) this.tags[i] = corpseName(Math.floor(this.rand() * 1e6)); // decoys
     this.spawnLoad(3);
   }
 
@@ -106,7 +111,12 @@ export class Sim {
   }
   byId(id) { return this.ents.find((e) => e.id === id); }
   describe() {
-    return this.ents.map((e) => ({ id: e.id, kind: e.kind, seed: e.seed || 0, color: e.color || '', name: e.name || '' }));
+    return this.ents.map((e) => {
+      const d = { id: e.id, kind: e.kind, seed: e.seed || 0, color: e.color || '', name: e.name || '' };
+      if (e.kind === 'corpse') { d.outfit = e.outfit; d.tag = e.tag ? 1 : 0; }
+      if (e.kind === 'coffin') d.lid = e.lid;
+      return d;
+    });
   }
   emit(type, data) { this.events.push({ type, ...data }); }
 
@@ -144,7 +154,12 @@ export class Sim {
   spawnCorpse(root, rots, seed) {
     const xf = fk(root, rots, new Float32Array(NPARTS * 7));
     const { bodies, constraints } = this.makeRagdoll(xf, CORPSE_MASS);
-    const e = this.addEnt({ kind: 'corpse', seed, bodies, constraints, name: corpseName(seed), slip: 0.8 + rng(seed)() * 0.7 });
+    const r = rng(seed * 13 + 5);
+    const e = this.addEnt({
+      kind: 'corpse', seed, bodies, constraints, name: corpseName(seed), slip: 0.8 + r() * 0.7,
+      suit: r.pick(OUTFITS).id, // what the delivery note asks for
+      outfit: 'shroud', tag: null, // what they are actually wearing / labelled with
+    });
     for (const b of bodies) b.ent = e;
     return e;
   }
@@ -173,7 +188,7 @@ export class Sim {
     b.quaternion.setFromEuler(0, yaw, 0);
     b.sleepSpeedLimit = 0.2;
     this.world.addBody(b);
-    const e = this.addEnt({ kind: 'coffin', body: b, seed: this.seedCounter++ });
+    const e = this.addEnt({ kind: 'coffin', body: b, seed: this.seedCounter++, lid: 0, passenger: null });
     b.ent = e;
     return e;
   }
@@ -217,7 +232,7 @@ export class Sim {
     });
     return p;
   }
-  removePlayer(id) { const p = this.byId(id); if (p) { this.drop(p); this.removeEnt(p); } }
+  removePlayer(id) { const p = this.byId(id); if (p) { this.drop(p); this.returnItem(p); this.removeEnt(p); } }
   setInput(id, inp) {
     const p = this.byId(id);
     if (!p) return;
@@ -235,6 +250,7 @@ export class Sim {
   toRagdoll(p, extra) {
     if (p.rag) return;
     this.drop(p);
+    this.returnItem(p);
     const xf = this.diggerPose(p, new Float32Array(NPARTS * 7));
     p.rag = this.makeRagdoll(xf, DIGGER_RAG_MASS);
     for (const b of p.rag.bodies) {
@@ -271,8 +287,9 @@ export class Sim {
     const tmp = new CANNON.Vec3(), loc = new CANNON.Vec3();
     // a body resting in an upright coffin is left alone: you grab the coffin (tip it over to get them out)
     const boxed = new Set(this.ents.filter((e) => e.kind === 'coffin' && this.coffinUp(e) > 0.5).map((e) => this.coffinContents(e)));
+    const onTruck = new Set(this.corpsesInBed()); // those come in through the hatch
     for (const e of this.ents) {
-      if (e === p) continue;
+      if (e === p || onTruck.has(e)) continue;
       if (e.kind === 'corpse' || (e.kind === 'digger' && e.rag)) {
         for (const b of this.bodiesOf(e)) {
           const d = b.position.distanceTo(hand) - (PARTS[b.partIndex].r ? 0.25 : 0.12) + (boxed.has(e) ? 0.8 : 0);
@@ -348,7 +365,7 @@ export class Sim {
   coffinAssist(corpse, hand) {
     const loc = new CANNON.Vec3();
     for (const e of this.ents) {
-      if (e.kind !== 'coffin' || this.coffinUp(e) < 0.7 || this.coffinContents(e)) continue;
+      if (e.kind !== 'coffin' || e.lid || this.coffinUp(e) < 0.7 || this.coffinContents(e)) continue;
       e.body.pointToLocalFrame(hand, loc);
       if (Math.abs(loc.x) > COFFIN.hx + 0.6 || Math.abs(loc.z) > COFFIN.hz + 0.6 || loc.y > 2 || loc.y < -0.5) continue;
       const c = e.body.position, q = e.body.quaternion;
@@ -391,6 +408,7 @@ export class Sim {
 
   // ---------- coffins & graves ----------
   coffinContents(coffin) {
+    if (coffin.lid) return null; // a closed coffin keeps its passenger as data, see closeLid()
     const b = coffin.body, loc = new CANNON.Vec3();
     for (const e of this.ents) {
       if (e.kind !== 'corpse') continue;
@@ -427,10 +445,9 @@ export class Sim {
     const c = this.coffinInPlot(plot);
     if (c) {
       if (this.coffinUp(c) < 0.5) return { act: null, hint: 'The coffin is upside down! Flip it.' };
-      const body = this.coffinContents(c);
-      if (!body) return { act: null, hint: 'This coffin is empty. Put a body in it.' };
+      if (!c.lid) return this.coffinStatus(c);
       if (plot.depth < PLOT_MIN_DEPTH) return { act: null, hint: 'Too shallow. Pull the coffin out and dig deeper.' };
-      return { act: 'fill', coffin: c, body, hint: 'Hold F to fill the grave' };
+      return { act: 'fill', coffin: c, hint: 'Hold F to fill the grave' };
     }
     if (plot.depth < PLOT_MAX_DEPTH) return { act: 'dig', hint: plot.depth > 0 ? 'Hold F to keep digging' : 'Hold F to dig a grave' };
     return { act: null, hint: 'Grave ready. Drop a coffin in it.' };
@@ -451,26 +468,230 @@ export class Sim {
     } else if (st.act === 'fill') {
       plot.fill += h / 2.5;
       if (this.time - plot.digSfx > 0.45) { plot.digSfx = this.time; this.emit('sfx', { name: 'dig', pos: [plot.x, 0, plot.z] }); }
-      if (plot.fill >= 1) this.bury(plot, st.coffin, st.body);
+      if (plot.fill >= 1) this.bury(plot, st.coffin);
     }
   }
-  bury(plot, coffin, body) {
-    plot.name = body.name;
-    plot.seed = body.seed;
-    this.removeEnt(body);
+  // The laying-to-rest checklist. Each missed item makes the grave restless (feeds the coming night phase).
+  bury(plot, coffin) {
+    const who = coffin.passenger;
+    const named = who.tag === who.name, dressed = who.outfit === who.suit, nailed = coffin.lid === 2;
+    plot.name = who.tag || 'Nobody Knows';
+    plot.seed = who.seed;
+    plot.unrest = (named ? 0 : 1) + (dressed ? 0 : 1) + (nailed ? 0 : 1);
     this.removeEnt(coffin);
     plot.buried = true;
     plot.buriedAt = this.time;
     plot.fill = 0;
     this.setDepth(plot, 0);
-    this.score++;
+    this.buried++;
+    this.score += 1 + (named ? 1 : 0) + (dressed ? 1 : 0) + (nailed ? 1 : 0);
+    const mark = (ok) => (ok ? '✓' : '✗');
     this.emit('sfx', { name: 'bury', pos: [plot.x, 0, plot.z] });
-    this.emit('toast', { text: `R.I.P. ${plot.name}`, pos: [plot.x, 2, plot.z], big: true });
+    this.emit('toast', { text: `R.I.P. ${plot.name}`, pos: [plot.x, 2.3, plot.z], big: true });
+    this.emit('toast', { text: `${mark(named)} name  ${mark(dressed)} outfit  ${mark(nailed)} nailed`, pos: [plot.x, 1.7, plot.z] });
+    if (plot.unrest >= 2) this.emit('toast', { text: 'The ground grumbles...', pos: [plot.x, 1.1, plot.z] });
     if (this.plots.every((pl) => pl.buried)) {
       const old = this.plots.reduce((a, b) => (a.buriedAt < b.buriedAt ? a : b));
       old.buried = false;
       this.emit('toast', { text: 'Graveyard full! An old plot was cleared.', pos: [old.x, 2, old.z] });
     }
+  }
+
+  // ---------- the morgue: hatch, tags, outfits, lids, nails ----------
+  coffinDist(p, c) {
+    const loc = c.body.pointToLocalFrame(p.body.position);
+    if (Math.abs(loc.y) > 1.5) return Infinity;
+    return Math.hypot(Math.max(0, Math.abs(loc.x) - COFFIN.hx), Math.max(0, Math.abs(loc.z) - COFFIN.hz));
+  }
+  nearestCoffin(p, maxD = 0.9) {
+    const f = p.body.position, loc = new CANNON.Vec3();
+    let best = null, bd = maxD;
+    for (const e of this.ents) {
+      if (e.kind !== 'coffin') continue;
+      e.body.pointToLocalFrame(f, loc);
+      const d = Math.hypot(Math.max(0, Math.abs(loc.x) - COFFIN.hx), Math.max(0, Math.abs(loc.z) - COFFIN.hz));
+      if (d < bd && Math.abs(loc.y) < 1.5) { bd = d; best = e; }
+    }
+    return best;
+  }
+  coffinStatus(c) {
+    if (this.coffinUp(c) < 0.5) return { act: null, hint: 'The coffin is upside down! Flip it.' };
+    if (!c.lid) {
+      const body = this.coffinContents(c);
+      if (!body) return { act: null, hint: 'Empty coffin. Lay a body in it.' };
+      return { act: 'lid', coffin: c, body, hint: 'Hold F to close the lid' };
+    }
+    if (c.lid === 1) {
+      if (this.nails >= NAIL_COST) return { act: 'nail', coffin: c, hint: `Hold F to nail it shut (${NAIL_COST} of ${this.nails} nails)` };
+      return { act: null, hint: 'Out of nails. Drag it to a dug grave as it is.' };
+    }
+    return { act: null, hint: 'Nailed shut. Drag it to a dug grave.' };
+  }
+  // What F does right now: fill a grave, close or nail a coffin, or dig.
+  workTarget(p) {
+    const plot = this.nearestPlot(p);
+    const ps = plot && this.plotStatus(plot);
+    if (ps && ps.act === 'fill') return { ...ps, plot };
+    // among nearby coffins prefer one that has work to do (the full one next to an empty one)
+    const near = this.ents.filter((e) => e.kind === 'coffin' && this.coffinDist(p, e) < 1.15).sort((a, b) => this.coffinDist(p, a) - this.coffinDist(p, b));
+    const busy = near.map((c) => this.coffinStatus(c)).find((st) => st.act);
+    if (busy) return busy;
+    const cs = near.length ? this.coffinStatus(near[0]) : null;
+    if (ps) return { ...ps, plot };
+    return cs;
+  }
+  doWork(p, h) {
+    const w = this.workTarget(p);
+    p.tool = w && w.act;
+    if (!w || !w.act) { p.work = 0; return; }
+    const key = w.act + (w.coffin ? w.coffin.id : w.plot ? w.plot.i : '');
+    if (p.workKey !== key) { p.workKey = key; p.work = 0; }
+    if (w.act === 'dig' || w.act === 'fill') { this.workPlot(p, w.plot, h); return; }
+    p.work += h;
+    const need = w.act === 'lid' ? 1.0 : 1.6;
+    if (w.act === 'nail' && Math.floor(p.work / 0.27) !== Math.floor((p.work - h) / 0.27)) {
+      const q = w.coffin.body.position;
+      this.emit('sfx', { name: 'hammer', pos: [q.x, q.y, q.z] });
+    }
+    if (p.work < need) return;
+    p.work = 0;
+    if (w.act === 'lid') this.closeLid(w.coffin, w.body);
+    else this.nailLid(w.coffin);
+  }
+  closeLid(c, body) {
+    c.passenger = { name: body.name, seed: body.seed, suit: body.suit, outfit: body.outfit, tag: body.tag };
+    this.removeEnt(body);
+    c.lid = 1;
+    const b = c.body;
+    b.addShape(new CANNON.Box(new CANNON.Vec3(COFFIN.hx, 0.03, COFFIN.hz)), new CANNON.Vec3(0, COFFIN.hy, 0));
+    b.mass = 25 + CORPSE_MASS;
+    b.updateMassProperties();
+    b.aabbNeedsUpdate = true;
+    b.wakeUp();
+    this.version++; // the coffin's look changed
+    this.emit('sfx', { name: 'thud', pos: [b.position.x, b.position.y, b.position.z] });
+    this.emit('toast', { text: `Goodnight, ${body.tag || 'whoever you are'}`, pos: [b.position.x, b.position.y + 1, b.position.z] });
+  }
+  nailLid(c) {
+    if (this.nails < NAIL_COST || c.lid !== 1) return;
+    this.nails -= NAIL_COST;
+    c.lid = 2;
+    this.version++;
+    const q = c.body.position;
+    this.emit('toast', { text: `Nailed shut! ${this.nails} nails left`, pos: [q.x, q.y + 1, q.z] });
+  }
+
+  atHatch(p) {
+    const q = p.body.position, tb = MORGUE.table;
+    return Math.abs(q.x - tb.x) < tb.hx + 0.6 && q.z > tb.z - 1.6 && q.z < MORGUE.z1 && insideMorgue(q.x, q.z);
+  }
+  boardSlot(p) {
+    const B = MORGUE.board, q = p.body.position;
+    if (!insideMorgue(q.x, q.z) || q.x > B.x + 1.5) return -1;
+    const hz = this.handPoint(p, 1).z;
+    let best = -1, bd = 0.45;
+    for (let i = 0; i < B.n; i++) { const d = Math.abs(B.z0 + i * B.dz - hz); if (d < bd) { bd = d; best = i; } }
+    return best;
+  }
+  rackSlot(p) {
+    const R = MORGUE.rack, q = p.body.position;
+    if (!insideMorgue(q.x, q.z) || q.x < R.x - 1.5) return -1;
+    const hz = this.handPoint(p, 1).z;
+    let best = -1, bd = 0.5;
+    for (let i = 0; i < OUTFITS.length; i++) { const d = Math.abs(R.z0 + i * R.dz - hz); if (d < bd) { bd = d; best = i; } }
+    return best;
+  }
+  itemTarget(p) {
+    const hand = this.handPoint(p, 0.9);
+    let best = null, bd = 1.3;
+    for (const e of this.ents) {
+      if (e.kind !== 'corpse') continue;
+      for (const i of [P.chest, P.pelvis, P.head]) {
+        const d = e.bodies[i].position.distanceTo(hand);
+        if (d < bd) { bd = d; best = e; }
+      }
+    }
+    return best;
+  }
+  // Pull the next body off the hearse through the hatch onto the intake table.
+  acceptBody(p) {
+    const body = this.corpsesInBed()[0];
+    if (!body) return false;
+    const tb = MORGUE.table;
+    const busy = this.ents.filter((e) => e.kind === 'corpse' && e !== body && Math.abs(e.bodies[P.pelvis].position.x - tb.x) < tb.hx + 0.2 && Math.abs(e.bodies[P.pelvis].position.z - tb.z) < 0.8).length;
+    const m = new THREE.Matrix4().makeTranslation(tb.x + 0.95, tb.top + 0.3 + busy * 0.45, tb.z)
+      .multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))
+      .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+    const xf = fk(m, limpRots(rng(body.seed)), new Float32Array(NPARTS * 7));
+    body.bodies.forEach((b, i) => {
+      const o = i * 7;
+      b.position.set(xf[o], xf[o + 1], xf[o + 2]);
+      b.quaternion.set(xf[o + 3], xf[o + 4], xf[o + 5], xf[o + 6]);
+      b.velocity.setZero(); b.angularVelocity.setZero(); b.wakeUp();
+    });
+    // make sure the right name tag is on the board, replacing a decoy nobody needs
+    if (!this.tags.includes(body.name)) {
+      const needed = new Set(this.ents.filter((e) => e.kind === 'corpse' && e.tag !== e.name).map((e) => e.name));
+      let slot = this.tags.findIndex((t) => t === null);
+      if (slot < 0) slot = this.tags.findIndex((t) => !needed.has(t));
+      if (slot < 0) slot = Math.floor(this.rand() * this.tags.length);
+      this.tags[slot] = body.name;
+    }
+    this.emit('sfx', { name: 'thud', pos: [tb.x, tb.top, tb.z] });
+    this.emit('toast', { text: `Note: ${body.name}, ${outfitLabel(body.suit).toLowerCase()}`, pos: [tb.x, tb.top + 1.1, tb.z] });
+    return true;
+  }
+  returnItem(p) {
+    const it = p.item;
+    p.item = null;
+    if (it && it.type === 'tag') {
+      const slot = this.tags.indexOf(null);
+      if (slot >= 0) this.tags[slot] = it.name;
+    }
+  }
+  useItem(p) {
+    const it = p.item, target = this.itemTarget(p);
+    if (!target) { this.returnItem(p); this.emit('sfx', { name: 'grab', pos: [p.body.position.x, 1, p.body.position.z] }); return; }
+    const q = target.bodies[P.chest].position, at = [q.x, q.y + 0.8, q.z];
+    if (it.type === 'tag') {
+      if (target.tag) { const slot = this.tags.indexOf(null); if (slot >= 0) this.tags[slot] = target.tag; }
+      target.tag = it.name;
+      this.emit('toast', { text: `Tagged "${it.name}"`, pos: at });
+    } else {
+      target.outfit = it.suit;
+      this.emit('toast', { text: `Dressed in the ${outfitLabel(it.suit).toLowerCase()}`, pos: at });
+    }
+    p.item = null;
+    this.version++; // their look changed
+    this.emit('sfx', { name: 'grab', pos: at });
+  }
+  // E / Click / GRAB: drop, use the item in hand, take from the hatch, the board or the rack, or grab.
+  useKey(p) {
+    if (p.grab) { this.drop(p, true); return; }
+    if (p.item) { this.useItem(p); return; }
+    if (this.truck.state === 'wait' && this.atHatch(p) && this.acceptBody(p)) return;
+    const slot = this.boardSlot(p);
+    if (slot >= 0 && this.tags[slot]) { p.item = { type: 'tag', name: this.tags[slot] }; this.tags[slot] = null; this.emit('sfx', { name: 'grab', pos: [MORGUE.board.x, 1.4, MORGUE.board.z0] }); return; }
+    const r = this.rackSlot(p);
+    if (r >= 0) { p.item = { type: 'suit', suit: OUTFITS[r].id }; this.emit('sfx', { name: 'grab', pos: [MORGUE.rack.x, 1.4, MORGUE.rack.z0] }); return; }
+    this.grab(p);
+  }
+  // The delivery note of the body this player is dealing with, for the HUD card.
+  cardFor(p) {
+    const info = (who, extra) => ({ name: who.name, suit: outfitLabel(who.suit), tag: who.tag, outfit: outfitLabel(who.outfit), tagOk: who.tag === who.name, suitOk: who.outfit === who.suit, ...extra });
+    if (p.grab && p.grab.ent.kind === 'corpse') return info(p.grab.ent, { stage: 'held' });
+    const q = this.feet(p);
+    let best = null, bd = 2.2;
+    for (const e of this.ents) {
+      if (e.kind === 'corpse') {
+        const d = e.bodies[P.chest].position.distanceTo(q);
+        if (d < bd) { bd = d; const c = this.ents.find((k) => k.kind === 'coffin' && this.coffinContents(k) === e); best = info(e, { stage: c ? 'coffin' : 'loose' }); }
+      } else if (e.kind === 'coffin' && e.passenger) {
+        const d = e.body.position.distanceTo(q);
+        if (d < bd) { bd = d; best = info(e.passenger, { stage: e.lid === 2 ? 'nailed' : 'closed' }); }
+      }
+    }
+    return best;
   }
 
   // ---------- main loop ----------
@@ -502,6 +723,7 @@ export class Sim {
       if (this.time - p.ragT > 7 && !this.holders(p)) this.getUp(p);
       return;
     }
+    if (p.item && inp.th !== last.th) { last.th = inp.th; this.returnItem(p); }
     const prevYaw = p.yaw;
     p.yaw = inp.yaw;
     let dy = p.yaw - prevYaw;
@@ -528,6 +750,7 @@ export class Sim {
     }
     p.digging = !!(inp.dig && !p.grab && p.grounded);
     if (p.digging) speed = 0;
+    else { p.tool = null; p.work = 0; }
     const tx = (f.x * mz + r.x * mx) * speed, tz = (f.z * mz + r.z * mx) * speed;
     const k = Math.min(1, h * (!p.grounded ? 3 : p.grab && p.grab.coffin ? 5 : 14));
     b.velocity.x += (tx - b.velocity.x) * k;
@@ -536,13 +759,10 @@ export class Sim {
     p.speed = Math.hypot(b.velocity.x, b.velocity.z);
     p.phase += p.speed * h * 2.6;
 
-    if (inp.g !== last.g) { last.g = inp.g; if (p.grab) this.drop(p, true); else this.grab(p); }
+    if (inp.g !== last.g) { last.g = inp.g; this.useKey(p); }
     if (inp.th !== last.th) { last.th = inp.th; this.throwHeld(p); }
 
-    if (p.digging) {
-      const plot = this.nearestPlot(p);
-      if (plot) this.workPlot(p, plot, h);
-    }
+    if (p.digging) this.doWork(p, h);
   }
 
   updateHand(p, h) {
@@ -635,23 +855,21 @@ export class Sim {
       if (!(r.p.grab && (r.p.grab.ent === r.ent || r.p.grab.contents === r.ent))) for (const b of this.bodiesOf(r.ent)) b.collisionFilterMask |= r.p.bit;
       return false;
     });
-    // keep a couple of empty coffins at the pile
+    // keep a couple of empty coffins ready inside the morgue
     if (Math.floor(this.time / 2) !== Math.floor((this.time - h) / 2)) {
       const coffins = this.ents.filter((e) => e.kind === 'coffin');
-      const free = coffins.filter((c) => !this.coffinContents(c) && !PLOTS.some((_, i) => this.coffinInPlot(this.plots[i]) === c));
+      const free = coffins.filter((c) => !c.lid && !this.coffinContents(c) && !this.plots.some((pl) => this.coffinInPlot(pl) === c));
       if (free.length < 2 && coffins.length < 8) {
-        // pick a free spot at the pile so the new coffin never spawns inside another one
-        let spot = null;
-        for (let i = 0; i < 5 && !spot; i++) {
-          const z = PILE.z + [0, 1.35, -1.35, 2.7, -2.7][i];
-          if (!coffins.some((c) => Math.hypot(c.body.position.x - PILE.x, c.body.position.z - z) < 1.6)) spot = z;
+        const spot = MORGUE.coffins.find(([x, z]) => !this.ents.some((e) => (e.kind === 'coffin' || e.kind === 'digger') &&
+          Math.abs(this.feet(e).x - x) < 1.0 && Math.abs(this.feet(e).z - z) < 1.6));
+        if (spot) {
+          this.spawnCoffin(spot[0], 0.05, spot[1], 0);
+          this.emit('sfx', { name: 'thud', pos: [spot[0], 0.5, spot[1]] });
         }
-        this.spawnCoffin(PILE.x, spot === null ? 2.5 : 0.6, spot === null ? PILE.z : spot, Math.PI / 2);
-        this.emit('sfx', { name: 'thud', pos: [PILE.x, 0.5, PILE.z] });
       }
     }
     if (Math.floor(this.time * 5) !== Math.floor((this.time - h) * 5)) {
-      for (const e of this.ents) if (e.kind === 'digger') e.hint = this.hintFor(e);
+      for (const e of this.ents) if (e.kind === 'digger') { e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
     }
   }
 
@@ -670,10 +888,16 @@ export class Sim {
     if (t.state === 'arrive') {
       const d = x - TRUCK_STOP_X;
       vx = -Math.min(7, d * 0.8 + 0.3);
-      if (d < 0.03) { vx = 0; b.position.x = TRUCK_STOP_X; t.state = 'wait'; t.t = this.time; this.emit('sfx', { name: 'honk', pos: [x, 1.5, ROAD_Z] }); this.emit('toast', { text: 'Delivery!', pos: [x, 3.2, ROAD_Z], big: true }); }
+      if (d < 0.03) {
+        vx = 0; b.position.x = TRUCK_STOP_X; t.state = 'wait'; t.t = this.time;
+        this.nails += 6;
+        this.emit('sfx', { name: 'honk', pos: [x, 1.5, ROAD_Z] });
+        this.emit('toast', { text: 'Hearse at the hatch!', pos: [x, 3.2, ROAD_Z], big: true });
+        this.emit('toast', { text: '+6 nails', pos: [MORGUE.crate.x, 1.6, MORGUE.crate.z] });
+      }
     } else if (t.state === 'wait') {
       const empty = this.corpsesInBed().length === 0;
-      if ((empty && this.time - t.t > 3) || this.time - t.t > 90) {
+      if ((empty && this.time - t.t > 3) || this.time - t.t > 150) {
         t.state = 'leave'; t.t = this.time;
         this.emit('sfx', { name: 'honk', pos: [x, 1.5, ROAD_Z] });
       }
@@ -691,7 +915,8 @@ export class Sim {
     b.velocity.set(vx, 0, 0);
     t.cage.position.copy(b.position);
     t.cage.velocity.set(vx, 0, 0);
-    t.cage.collisionFilterMask = t.state === 'arrive' ? G_PROP : 0;
+    // bodies stay on board until someone takes them in through the hatch (or they ride off with the truck)
+    t.cage.collisionFilterMask = t.state === 'away' ? 0 : G_PROP;
     t.cage.aabbNeedsUpdate = true;
     t.wheel += (vx * h) / 0.5;
   }
@@ -700,11 +925,22 @@ export class Sim {
     if (p.rag) return this.holders(p) ? 'A friend is carrying you. Enjoy the ride.' : 'Press R to get up';
     if (p.grab) {
       if (p.grab.coffin) return this.holders(p.grab.ent) > 1 ? 'Teamwork! Drop it into a dug grave.' : 'Heavy! Get a friend on the other end. Click to drop.';
-      return 'Put them in a coffin · Click to drop · Right-click to throw';
+      return 'Lay them in a coffin · Click to drop · Right-click to throw';
     }
-    const plot = this.nearestPlot(p);
-    if (plot) return this.plotStatus(plot).hint;
-    if (this.findGrab(p)) return 'Click to grab';
+    if (p.item) {
+      const t = this.itemTarget(p), what = p.item.type === 'tag' ? `tag "${p.item.name}"` : outfitLabel(p.item.suit).toLowerCase();
+      if (t) return p.item.type === 'tag' ? `E: hang the ${what} on ${t.tag === t.name ? 'this (already tagged) body' : 'this body'}` : `E: dress this body in the ${what}`;
+      return `Holding the ${what} · go to the body · Q to put it back`;
+    }
+    if (this.truck.state === 'wait' && this.atHatch(p) && this.corpsesInBed().length) return 'E: take the body in through the hatch';
+    const slot = this.boardSlot(p);
+    if (slot >= 0 && this.tags[slot]) return `E: take the name tag "${this.tags[slot]}"`;
+    const r = this.rackSlot(p);
+    if (r >= 0) return `E: take the ${OUTFITS[r].label.toLowerCase()}`;
+    const w = this.workTarget(p);
+    if (w && w.hint) return w.hint;
+    if (this.findGrab(p)) return 'E: grab';
+    if (this.truck.state === 'wait' && this.corpsesInBed().length && !insideMorgue(p.body.position.x, p.body.position.z)) return 'The hearse is here: take the bodies in through the hatch inside the morgue';
     return '';
   }
 
@@ -737,10 +973,15 @@ export class Sim {
     this.events = [];
     return {
       score: this.score,
-      plots: this.plots.map((p) => [+p.depth.toFixed(3), +p.fill.toFixed(3), p.buried ? 1 : 0, p.seed, p.name]),
+      buried: this.buried,
+      nails: this.nails,
+      boards: this.boards,
+      tags: this.tags,
+      plots: this.plots.map((p) => [+p.depth.toFixed(3), +p.fill.toFixed(3), p.buried ? 1 : 0, p.seed, p.name, p.unrest]),
       truck: [+this.truck.wheel.toFixed(3), this.truck.state === 'wait' ? 1 : 0],
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
-        id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging,
+        id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
+        hammer: e.digging && e.tool === 'nail', item: e.item, card: e.card || null,
         grip: e.grab && !e.grab.coffin ? +e.grab.grip.toFixed(2) : -1,
       })),
       ev,
