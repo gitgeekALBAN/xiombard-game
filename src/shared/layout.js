@@ -7,8 +7,9 @@ export const ROAD_Z = 15;
 export const ROAD_HALF = 2.2;
 export const TRUCK_STOP_X = 1;
 export const TRUCK_START_X = 60;
-export const PILE = { x: -12, z: 9 };
-export const SPAWN = { x: 0, z: 8.5 };
+export const PILE = { x: -2.9, z: 8.1 }; // fresh coffins: inside the morgue
+export const SPAWN = { x: 0.8, z: 9.4 }; // inside the morgue
+export const CARPENTER = { x: -15.4, z: 7.4 }; // the carpenter's corner by the shed (decor)
 
 export const PLOT_HALF = { x: 0.65, z: 1.3 };
 export const PLOT_MAX_DEPTH = 1.25;
@@ -17,7 +18,7 @@ export const PLOTS = [];
 for (const z of [3.2, -2.4]) for (const x of [-8, -4.5, -1, 2.5, 6]) PLOTS.push({ x, z });
 
 export const LANTERNS = [
-  [-10.5, 0.4], [9, 0.4], [4.5, 11.5], [-7, 11.5], [-14.5, 10.5], [0, -7],
+  [-10.5, 0.4], [9, 0.4], [7.6, 12.9], [-7, 11.5], [-14.5, 10.5], [0, -7],
 ];
 
 // Coffin and truck dimensions (shared by physics and visuals).
@@ -35,6 +36,73 @@ export const TRUCK = {
   bed: { x0: -0.6, x1: 3.0, top: 0.9 },
   half: [3.1, 1.2, 1.15],
 };
+
+// The one-storey morgue between the road and the graves: the hearse parks along its north wall and passes bodies
+// in through the loading hatch; the south door leads out to the graveyard.
+export const MORGUE = {
+  x0: -4, x1: 6, z0: 6.4, z1: 12.4, h: 2.7, t: 0.12,
+  door: [-0.9, 2.3], // south door (x range), wide enough to carry a coffin through
+  hatch: [1.0, 3.6], hatchSill: 0.9, hatchTop: 2.0, // loading hatch in the north wall
+  table: { x: 2.3, z: 11.35, hx: 1.1, hz: 0.42, top: 0.85 }, // intake table under the hatch
+  board: { x: -3.86, z0: 9.6, dz: 0.4, n: 6, y: 1.45 }, // name tags hang on the west wall
+  rack: { x: 5.86, z0: 8.0, dz: 0.75, y: 1.45 }, // outfits hang on the east wall
+  crate: { x: 4.9, z: 7.15, hx: 0.45, hy: 0.35, hz: 0.35 }, // nails and boards
+  coffins: [[-2.9, 8.1], [-1.6, 8.1]], // where fresh coffins appear, pointing at the door
+  lamp: [1, 9.4],
+};
+// Outfits written on the delivery notes. Bodies arrive in a plain shroud.
+export const OUTFITS = [
+  { id: 'tux', label: 'Black tuxedo' },
+  { id: 'sailor', label: 'Sailor suit' },
+  { id: 'clown', label: 'Clown outfit' },
+  { id: 'gown', label: 'Purple gown' },
+  { id: 'pajamas', label: 'Striped pajamas' },
+];
+export const outfitLabel = (id) => (OUTFITS.find((o) => o.id === id) || { label: 'Plain shroud' }).label;
+export const NAIL_COST = 4; // nails to hammer one coffin lid shut
+
+export const insideMorgue = (x, z, m = 0) => x > MORGUE.x0 + m && x < MORGUE.x1 - m && z > MORGUE.z0 + m && z < MORGUE.z1 - m;
+
+// Morgue colliders: walls with door, hatch and sill, plus the intake table and the supply crate.
+export function morgueBoxes(withFurniture = true) {
+  const M = MORGUE, t = M.t, out = [];
+  const wallX = (z, x0, x1, y0 = 0, y1 = M.h) => out.push({ c: [(x0 + x1) / 2, (y0 + y1) / 2, z], h: [(x1 - x0) / 2, (y1 - y0) / 2, t], wall: 1 });
+  const wallZ = (x, z0, z1) => out.push({ c: [x, M.h / 2, (z0 + z1) / 2], h: [t, M.h / 2, (z1 - z0) / 2], wall: 1 });
+  wallX(M.z1, M.x0, M.hatch[0]); wallX(M.z1, M.hatch[1], M.x1);
+  wallX(M.z1, M.hatch[0], M.hatch[1], 0, M.hatchSill); wallX(M.z1, M.hatch[0], M.hatch[1], M.hatchTop, M.h);
+  wallX(M.z0, M.x0, M.door[0]); wallX(M.z0, M.door[1], M.x1); wallX(M.z0, M.door[0], M.door[1], 2.2, M.h);
+  wallZ(M.x0, M.z0, M.z1); wallZ(M.x1, M.z0, M.z1);
+  if (withFurniture) {
+    const tb = M.table, c = M.crate;
+    out.push({ c: [tb.x, tb.top / 2, tb.z], h: [tb.hx, tb.top / 2, tb.hz] });
+    out.push({ c: [c.x, c.hy, c.z], h: [c.hx, c.hy, c.hz] });
+  }
+  return out;
+}
+
+// The fence is split into sections that zombies wear down at night and players repair by day.
+// Each side runs from -FENCE to FENCE in 7 m sections; the road gates on the east and west sides stay open.
+export const FENCE_LEN = 7;
+export const FENCE_HP = 100;
+export const FENCE_SECTIONS = (() => {
+  const out = [], g0 = ROAD_Z - ROAD_HALF - 0.3, g1 = ROAD_Z + ROAD_HALF + 0.3;
+  for (const [axis, at] of [['z', -FENCE], ['z', FENCE], ['x', -FENCE], ['x', FENCE]]) {
+    for (let a = -FENCE; a < FENCE - 0.01; a += FENCE_LEN) {
+      let pieces = [[a, a + FENCE_LEN]];
+      if (axis === 'x') pieces = pieces.flatMap(([p0, p1]) => (p1 <= g0 || p0 >= g1 ? [[p0, p1]] : [[p0, g0], [g1, p1]].filter(([u, v]) => v - u > 0.2)));
+      if (pieces.length) out.push({ axis, at, a0: a, a1: a + FENCE_LEN, pieces });
+    }
+  }
+  return out;
+})();
+// which section a point on the fence line belongs to
+export const fenceSectionAt = (x, z) => FENCE_SECTIONS.findIndex((f) => {
+  const [along, across] = f.axis === 'z' ? [x, z] : [z, x];
+  return Math.abs(across - f.at) < 0.6 && along >= f.a0 - 0.01 && along < f.a1 + 0.01;
+});
+// bear traps around the graves, where the restless dead are headed
+export const TRAPS = [[-10, -5.6], [-6.2, -5.6], [-2.6, -5.6], [0.9, -5.6], [4.3, -5.6], [8, -5.6], [-12, 0.4], [10.6, 0.4]];
+export const TRAP_DUR = 3; // snaps before a trap breaks
 
 // Static ground made of boxes, leaving rectangular holes where the grave plots are.
 export function groundBoxes() {
@@ -79,21 +147,16 @@ export const DECOR = (() => {
   return { stones, trees, shed };
 })();
 
-// Every static collider box: ground, fence walls, shed, tree trunks, old headstones.
+// Every static collider box that never changes: ground, shed, tree trunks, old headstones, lantern posts, the morgue.
+// The fence is not here: its sections come and go, see FENCE_SECTIONS and the sim's fence state.
 export function staticBoxes() {
   const out = groundBoxes();
-  const F = FENCE, t = 0.15, hy = 1.0;
-  const gate0 = ROAD_Z - ROAD_HALF - 0.3, gate1 = ROAD_Z + ROAD_HALF + 0.3;
-  out.push({ c: [0, hy, -F], h: [F, hy, t] }, { c: [0, hy, F], h: [F, hy, t] });
-  for (const x of [-F, F]) {
-    out.push({ c: [x, hy, (-F + gate0) / 2], h: [t, hy, (gate0 + F) / 2] });
-    out.push({ c: [x, hy, (gate1 + F) / 2], h: [t, hy, (F - gate1) / 2] });
-  }
   const s = DECOR.shed;
   out.push({ c: [s.x, s.hy, s.z], h: [s.hx, s.hy, s.hz] });
   for (const tr of DECOR.trees) out.push({ c: [tr.x, 2, tr.z], h: [0.35, 2, 0.35] });
   for (const st of DECOR.stones) out.push({ c: [st.x, st.h / 2, st.z], h: [st.w / 2, st.h / 2, 0.12], ry: st.ry });
   for (const [x, z] of LANTERNS) out.push({ c: [x, 1, z], h: [0.08, 1, 0.08] });
+  out.push(...morgueBoxes());
   return out;
 }
 
@@ -101,13 +164,13 @@ export function plotAt(x, z, margin = 0) {
   return PLOTS.findIndex((p) => Math.abs(x - p.x) < PLOT_HALF.x + margin && Math.abs(z - p.z) < PLOT_HALF.z + margin);
 }
 
-// Worn footpaths (segment endpoints [ax, az, bx, bz]) between where the work happens: truck bed, coffin pile, the
-// plot rows. The ground shader paints them and the plants keep off them.
-const BED_X = TRUCK_STOP_X + 3.2;
+// Worn footpaths (segment endpoints [ax, az, bx, bz]) between where the work happens: the morgue door, the plot
+// rows, the shed. The ground shader paints them and the plants keep off them.
+const DOOR_X = (MORGUE.door[0] + MORGUE.door[1]) / 2;
 export const PATHS = [
-  [BED_X, ROAD_Z - 2.4, PILE.x + 1.5, PILE.z + 0.6], // truck -> coffin pile
-  [PILE.x + 1, PILE.z - 0.8, -6.5, 5.2], // pile -> plots
-  [BED_X - 2, ROAD_Z - 2.5, 0.5, 5.4], // truck -> plots
+  [DOOR_X, MORGUE.z0, DOOR_X - 0.2, 4.9], // morgue door -> plots
+  [DOOR_X - 0.2, 5.2, -6.5, 5.2], // along the near row, west
+  [DOOR_X - 0.2, 5.2, 7.5, 5.2], // along the near row, east
   [-10.5, 0.4, 8.5, 0.4], // walkway between the two rows
   [0, 4.8, 0, -6.5], // to the back lantern and the old stones
 ];

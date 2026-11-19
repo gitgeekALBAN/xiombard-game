@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { plantMaterial, K } from '../shaders/paint-plants.js';
 import { rng } from '../shared/rng.js';
-import { DECOR, FENCE, ROAD_Z, ROAD_HALF, PILE, PLOTS, PLOT_HALF, PATHS, LANTERNS } from '../shared/layout.js';
+import { DECOR, FENCE, ROAD_Z, ROAD_HALF, CARPENTER, MORGUE, PLOTS, PLOT_HALF, PATHS, LANTERNS } from '../shared/layout.js';
 
 // Every plant in the yard: grass tufts, dry seed grass, cattails, toadstools and pale mushrooms, ferns, thistles,
 // dandelions, wildflowers, ivy on headstones and fence pillars, brambles, crooked bushes, leaf piles and pumpkins.
@@ -161,8 +161,9 @@ function ok(x, z, tall = false) {
   if (PLOTS.some((p) => Math.abs(x - p.x) < PLOT_HALF.x + pm && Math.abs(z - p.z) < PLOT_HALF.z + pm)) return false;
   const pathM = tall ? 1.5 : 0.75;
   if (PATHS.some((s) => segDist(x, z, s) < pathM)) return false;
-  if (Math.hypot(x - PILE.x, z - PILE.z) < (tall ? 2.6 : 1.7)) return false;
-  if (Math.hypot(x - (PILE.x - 3.4), z - (PILE.z - 1.6)) < 1.3) return false; // the carpenter's corner
+  const mm = tall ? 0.9 : 0.3; // nothing grows through the morgue's floor, nothing tall crowds its walls
+  if (x > MORGUE.x0 - mm && x < MORGUE.x1 + mm && z > MORGUE.z0 - mm - 0.6 && z < MORGUE.z1 + mm) return false;
+  if (Math.hypot(x - CARPENTER.x, z - CARPENTER.z) < 1.3) return false; // the carpenter's corner
   if (tall && x > -0.5 && x < 6 && z > 11.8 && z < 16) return false; // where the truck stops
   if (Math.abs(x - SH.x) < SH.hx + 0.05 && Math.abs(z - SH.z) < SH.hz + 0.05) return false;
   if (DECOR.trees.some((t) => Math.hypot(x - t.x, z - t.z) < 0.45)) return false;

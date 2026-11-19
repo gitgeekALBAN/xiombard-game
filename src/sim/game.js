@@ -5,7 +5,8 @@ import { corpseRig, limpRots, REST_ROTS, COFFIN_ROTS } from '../shared/corpses.j
 import { ZOMBIES, ZTYPE, Z_WALKERS, Z_DRAGGER, Z_DOGS, Z_ODD, zombieRig, zombiePose } from '../shared/zombies.js';
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
-  ROAD_Z, PILE, SPAWN, staticBoxes, plotAt,
+  ROAD_Z, FENCE, ROAD_HALF, SPAWN, staticBoxes,
+  MORGUE, OUTFITS, outfitLabel, NAIL_COST, insideMorgue, FENCE_SECTIONS, FENCE_HP, fenceSectionAt, TRAPS, TRAP_DUR,
 } from '../shared/layout.js';
 import { rng, corpseName } from '../shared/rng.js';
 
@@ -68,7 +69,11 @@ export class Sim {
     this.events = [];
     this.time = 0;
     this.acc = 0;
-    this.score = 0;
+    this.score = 0;   // peace points
+    this.buried = 0;  // bodies laid to rest
+    this.nails = 12;
+    this.boards = 4;
+    this.tags = Array.from({ length: MORGUE.board.n }, () => null); // name tags on the board
     this.seedCounter = 1;
     this.rand = rng(Date.now() & 0xffff);
     this._ray = new CANNON.RaycastResult();
@@ -90,11 +95,15 @@ export class Sim {
       floor.addShape(new CANNON.Box(new CANNON.Vec3(PLOT_HALF.x, 1, PLOT_HALF.z)));
       floor.position.set(p.x, -1, p.z);
       w.addBody(floor);
-      return { i, x: p.x, z: p.z, depth: 0, fill: 0, buried: false, buriedAt: 0, name: '', seed: 0, floor, digSfx: 0 };
+      return { i, x: p.x, z: p.z, depth: 0, fill: 0, buried: false, buriedAt: 0, name: '', seed: 0, floor, digSfx: 0, unrest: 0, nailed: false };
     });
 
     this.truck = this.spawnTruck();
-    for (let i = 0; i < 3; i++) this.spawnCoffin(PILE.x, 0.1, PILE.z + (i - 1) * 1.35, Math.PI / 2); // side by side, not overlapping
+    this.fence = FENCE_SECTIONS.map((f) => ({ ...f, hp: FENCE_HP, bodies: [], bashSfx: 0 }));
+    this.fence.forEach((f) => this.buildFence(f));
+    this.traps = TRAPS.map(([x, z]) => ({ x, z, dur: TRAP_DUR, armed: true, rearm: 0 }));
+    for (const [x, z] of MORGUE.coffins) this.spawnCoffin(x, 0.05, z, 0);
+    for (let i = 0; i < this.tags.length; i++) this.tags[i] = corpseName(Math.floor(this.rand() * 1e6)); // decoy tags
     this.spawnLoad(3);
   }
 
@@ -127,7 +136,11 @@ export class Sim {
   }
   byId(id) { return this.ents.find((e) => e.id === id); }
   describe() {
-    return this.ents.map((e) => ({ id: e.id, kind: e.kind, seed: e.seed || 0, color: e.color || '', name: e.name || '', look: e.look ?? -1 }));
+    return this.ents.map((e) => ({
+      id: e.id, kind: e.kind, seed: e.seed || 0, color: e.color || '', name: e.name || '', look: e.look ?? -1,
+      // what the view rebuilds a model for: a body's clothes and name tag, a coffin's lid (1 closed, 2 nailed)
+      outfit: e.kind === 'corpse' ? e.outfit || 'shroud' : undefined, tag: e.kind === 'corpse' && e.tag ? 1 : 0, lid: e.kind === 'coffin' ? e.lid || 0 : 0,
+    }));
   }
   emit(type, data) { this.events.push({ type, ...data }); }
 
@@ -178,7 +191,11 @@ export class Sim {
   spawnCorpse(root, rots, seed) {
     const rig = corpseRig(seed), xf = rigPose(rig, root, rots, new Float32Array(NCREW * 7));
     const { bodies, constraints } = this.makeCrewRagdoll(rig, xf, CORPSE_MASS);
-    const e = this.addEnt({ kind: 'corpse', seed, bodies, constraints, name: corpseName(seed), slip: 0.8 + rng(seed)() * 0.7 });
+    const e = this.addEnt({
+      kind: 'corpse', seed, bodies, constraints, name: corpseName(seed), slip: 0.8 + rng(seed)() * 0.7,
+      suit: rng(seed * 13 + 5).pick(OUTFITS).id, // what the delivery note asks for
+      outfit: 'shroud', tag: null,               // what they wear and the name tag hung on them so far
+    });
     for (const b of bodies) b.ent = e;
     return e;
   }
@@ -207,7 +224,7 @@ export class Sim {
     b.quaternion.setFromEuler(0, yaw, 0);
     b.sleepSpeedLimit = 0.2;
     this.world.addBody(b);
-    const e = this.addEnt({ kind: 'coffin', body: b, seed: this.seedCounter++ });
+    const e = this.addEnt({ kind: 'coffin', body: b, seed: this.seedCounter++, lid: 0, passenger: null });
     b.ent = e;
     return e;
   }
@@ -219,7 +236,7 @@ export class Sim {
     b.position.set(TRUCK_SPAWN_X, 0, ROAD_Z);
     this.world.addBody(b);
     const e = this.addEnt({ kind: 'truck', body: b });
-    // Invisible cage around the bed, solid only while the truck drives in, so the load arrives on board.
+    // Invisible cage around the bed: the load arrives on board and leaves only through the morgue's hatch.
     const cage = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: this.mGround, collisionFilterGroup: G_TRUCK, collisionFilterMask: G_PROP, allowSleep: false });
     cage.addShape(new CANNON.Box(new CANNON.Vec3(0.05, 1.0, 1.0)), new CANNON.Vec3(TRUCK.bed.x1 + 0.05, 1.9, 0));
     cage.addShape(new CANNON.Box(new CANNON.Vec3(1.8, 0.9, 0.05)), new CANNON.Vec3(1.2, 2.04, 0.95));
@@ -253,7 +270,7 @@ export class Sim {
     });
     return p;
   }
-  removePlayer(id) { const p = this.byId(id); if (p) { this.drop(p); this.removeEnt(p); } }
+  removePlayer(id) { const p = this.byId(id); if (p) { this.drop(p); this.returnItem(p); this.removeEnt(p); } }
   setInput(id, inp) {
     const p = this.byId(id);
     if (!p) return;
@@ -269,6 +286,7 @@ export class Sim {
   }
 
   toRagdoll(p, extra) {
+    this.returnItem(p);
     if (p.rag) return;
     this.drop(p);
     const xf = this.diggerPose(p, new Float32Array(NCREW * 7));
@@ -311,8 +329,9 @@ export class Sim {
     const tmp = new CANNON.Vec3(), loc = new CANNON.Vec3();
     // a body resting in an upright coffin is left alone: you grab the coffin (tip it over to get them out)
     const boxed = new Set(this.ents.filter((e) => e.kind === 'coffin' && this.coffinUp(e) > 0.5).map((e) => this.coffinContents(e)));
+    const onTruck = new Set(this.corpsesInBed()); // those come in through the hatch
     for (const e of this.ents) {
-      if (e === p) continue;
+      if (e === p || onTruck.has(e)) continue;
       if (e.z && e.z.mode !== 'down') continue; // on its feet: whack it first
       if (e.kind === 'corpse' || ((e.kind === 'digger' || e.kind === 'zombie') && e.rag)) {
         if (this.holders(e)) continue; // somebody has them already
@@ -489,7 +508,7 @@ export class Sim {
   coffinAssist(corpse, hand) {
     const loc = new CANNON.Vec3();
     for (const e of this.ents) {
-      if (e.kind !== 'coffin' || this.coffinUp(e) < 0.7 || this.coffinContents(e)) continue;
+      if (e.kind !== 'coffin' || e.lid || this.coffinUp(e) < 0.7 || this.coffinContents(e)) continue;
       e.body.pointToLocalFrame(hand, loc);
       if (Math.abs(loc.x) > COFFIN.hx + 0.6 || Math.abs(loc.z) > COFFIN.hz + 0.6 || loc.y > 2 || loc.y < -0.5) continue;
       const c = e.body.position, q = e.body.quaternion, rig = corpseRig(corpse.seed);
@@ -526,6 +545,7 @@ export class Sim {
 
   // ---------- coffins & graves ----------
   coffinContents(coffin) {
+    if (coffin.lid) return null; // a closed coffin keeps its passenger as data (see closeLid)
     const b = coffin.body, loc = new CANNON.Vec3();
     for (const e of this.ents) {
       if (e.kind !== 'corpse' || (e.z && e.z.mode !== 'down')) continue;
@@ -558,10 +578,9 @@ export class Sim {
     const c = this.coffinInPlot(plot);
     if (c) {
       if (this.coffinUp(c) < 0.5) return { act: null, hint: 'The coffin is upside down! Flip it.' };
-      const body = this.coffinContents(c);
-      if (!body) return { act: null, hint: 'This coffin is empty. Put a body in it.' };
+      if (!c.lid) return this.coffinStatus(c); // close (and maybe nail) it first
       if (plot.depth < PLOT_MIN_DEPTH) return { act: null, hint: 'Too shallow. Pull the coffin out and dig deeper.' };
-      return { act: 'fill', coffin: c, body, hint: 'Hold F to fill the grave' };
+      return { act: 'fill', coffin: c, hint: 'Hold F to fill the grave' };
     }
     if (plot.depth < PLOT_MAX_DEPTH) return { act: 'dig', hint: plot.depth > 0 ? 'Hold F to keep digging' : 'Hold F to dig a grave' };
     return { act: null, hint: 'Grave ready. Drop a coffin in it.' };
@@ -582,26 +601,321 @@ export class Sim {
     } else if (st.act === 'fill') {
       plot.fill += h / 2.5;
       if (this.time - plot.digSfx > 0.45) { plot.digSfx = this.time; this.emit('sfx', { name: 'dig', pos: [plot.x, 0, plot.z] }); }
-      if (plot.fill >= 1) this.bury(plot, st.coffin, st.body);
+      if (plot.fill >= 1) this.bury(plot, st.coffin);
     }
   }
-  bury(plot, coffin, body) {
-    plot.name = body.name;
-    plot.seed = body.seed;
-    this.removeEnt(body);
+  // The laying-to-rest checklist. Each missed item makes the grave restless: zombies go for restless graves first,
+  // and a coffin that is not nailed shut is dug up twice as fast.
+  bury(plot, coffin) {
+    const who = coffin.passenger, named = who.tag === who.name, dressed = who.outfit === who.suit, nailed = coffin.lid === 2;
+    const mark = (ok) => (ok ? '✓' : '✗');
+    plot.name = who.tag || 'Nobody Knows';
+    plot.seed = who.seed;
+    plot.unrest = (named ? 0 : 1) + (dressed ? 0 : 1) + (nailed ? 0 : 1);
+    plot.nailed = nailed;
+    plot.who = who;
     this.removeEnt(coffin);
     plot.buried = true;
     plot.buriedAt = this.time;
     plot.fill = 0;
     this.setDepth(plot, 0);
-    this.score++;
+    this.buried++;
+    this.score += 1 + (named ? 1 : 0) + (dressed ? 1 : 0) + (nailed ? 1 : 0);
     this.emit('sfx', { name: 'bury', pos: [plot.x, 0, plot.z] });
-    this.emit('toast', { text: `R.I.P. ${plot.name}`, pos: [plot.x, 2, plot.z], big: true });
+    this.emit('toast', { text: `R.I.P. ${plot.name}`, pos: [plot.x, 2.3, plot.z], big: true });
+    this.emit('toast', { text: `${mark(named)} name  ${mark(dressed)} outfit  ${mark(nailed)} nailed`, pos: [plot.x, 1.7, plot.z] });
+    if (plot.unrest >= 2) this.emit('toast', { text: 'The ground grumbles...', pos: [plot.x, 1.1, plot.z] });
     if (this.plots.every((pl) => pl.buried)) {
       const old = this.plots.reduce((a, b) => (a.buriedAt < b.buriedAt ? a : b));
       old.buried = false;
       this.emit('toast', { text: 'Graveyard full! An old plot was cleared.', pos: [old.x, 2, old.z] });
     }
+  }
+
+  // ---------- fence, traps and repairs ----------
+  buildFence(f) {
+    for (const [p0, p1] of f.pieces) {
+      const c = (p0 + p1) / 2, half = (p1 - p0) / 2;
+      const b = new CANNON.Body({ mass: 0, material: this.mGround, collisionFilterGroup: G_GROUND, collisionFilterMask: ALL });
+      b.addShape(new CANNON.Box(f.axis === 'z' ? new CANNON.Vec3(half, 1, 0.15) : new CANNON.Vec3(0.15, 1, half)));
+      if (f.axis === 'z') b.position.set(c, 1, f.at); else b.position.set(f.at, 1, c);
+      this.world.addBody(b);
+      f.bodies.push(b);
+    }
+  }
+  fenceMid(f) { return f.axis === 'z' ? [(f.a0 + f.a1) / 2, f.at] : [f.at, (f.a0 + f.a1) / 2]; }
+  // the fence section nearest to a point by the fence line (-1: none)
+  fenceNear(q) {
+    return Math.abs(Math.abs(q.x) - FENCE) < Math.abs(Math.abs(q.z) - FENCE) ? fenceSectionAt(Math.sign(q.x) * FENCE, q.z) : fenceSectionAt(q.x, Math.sign(q.z) * FENCE);
+  }
+  damageFence(i, dmg) {
+    const f = this.fence[i];
+    if (!f || f.hp <= 0) return;
+    f.hp = Math.max(0, f.hp - dmg);
+    const [x, z] = this.fenceMid(f);
+    if (this.time > f.bashSfx) { f.bashSfx = this.time + 0.7; this.emit('sfx', { name: 'thud', pos: [x, 1, z] }); }
+    if (f.hp <= 0) {
+      for (const b of f.bodies) this.world.removeBody(b);
+      f.bodies = [];
+      this.emit('toast', { text: 'The fence gave way!', pos: [x, 2.4, z], big: true });
+      this.emit('sfx', { name: 'bonk', pos: [x, 1, z] });
+    }
+  }
+  // A walker shoving the fence wears it down; an armed trap under it snaps shut. True when the trap got it.
+  walkerHazards(e, h) {
+    const z = e.z;
+    if (z.mode !== 'walk' && z.mode !== 'attack') return false;
+    const q = z.body.position;
+    if (Math.abs(q.x) > FENCE - 0.9 || Math.abs(q.z) > FENCE - 0.9) {
+      const i = this.fenceNear(q);
+      if (i >= 0 && this.fence[i].hp > 0 && z.speed < 0.6 && z.target) this.damageFence(i, h * (z.def.type === ZTYPE.dragger ? 26 : 13));
+    }
+    for (const t of this.traps) {
+      if (!t.armed || t.dur <= 0 || Math.hypot(q.x - t.x, q.z - t.z) >= 0.6) continue;
+      t.armed = false;
+      t.rearm = this.time + 4;
+      t.dur--;
+      const a = Math.atan2(q.x - t.x, q.z - t.z);
+      this.knock(e, Math.sin(a) * 1.5, 2.5, Math.cos(a) * 1.5);
+      this.emit('toast', { text: t.dur ? 'SNAP!' : 'SNAP! The trap broke.', pos: [t.x, 1.4, t.z] });
+      this.emit('sfx', { name: 'bonk', pos: [t.x, 0.3, t.z] });
+      return true;
+    }
+    return false;
+  }
+  // what needs fixing within reach: a used-up trap or a worn fence section
+  repairTarget(p) {
+    const q = p.body.position;
+    for (let i = 0; i < this.traps.length; i++) {
+      const t = this.traps[i];
+      if (t.dur < TRAP_DUR && Math.hypot(q.x - t.x, q.z - t.z) < 1.4) {
+        return this.nails >= 2 ? { act: 'repair', trap: i, hint: `Hold F to fix the trap (2 of ${this.nails} nails)` } : { act: null, hint: 'This trap needs 2 nails to fix.' };
+      }
+    }
+    if (Math.abs(q.x) < FENCE - 2.3 && Math.abs(q.z) < FENCE - 2.3) return null;
+    const i = this.fenceNear(q);
+    if (i < 0 || this.fence[i].hp >= FENCE_HP) return null;
+    return this.boards >= 1 && this.nails >= 2
+      ? { act: 'repair', fence: i, hint: this.fence[i].hp > 0 ? 'Hold F to patch the fence (1 board, 2 nails)' : 'Hold F to rebuild the fence (1 board, 2 nails)' }
+      : { act: null, hint: 'The fence needs 1 board and 2 nails.' };
+  }
+  repair(w) {
+    if (w.trap !== undefined) {
+      const t = this.traps[w.trap];
+      if (this.nails < 2) return;
+      this.nails -= 2;
+      t.dur = TRAP_DUR;
+      t.armed = true;
+      this.emit('toast', { text: 'Trap fixed and set', pos: [t.x, 1.2, t.z] });
+      return;
+    }
+    const f = this.fence[w.fence];
+    if (this.boards < 1 || this.nails < 2) return;
+    this.boards -= 1;
+    this.nails -= 2;
+    const down = f.hp <= 0;
+    f.hp = FENCE_HP;
+    if (down) this.buildFence(f);
+    const [x, z] = this.fenceMid(f);
+    this.emit('toast', { text: down ? 'Fence rebuilt' : 'Fence patched', pos: [x, 2, z] });
+  }
+  updateTraps() {
+    for (const t of this.traps) if (!t.armed && t.dur > 0 && this.time > t.rearm) t.armed = true;
+  }
+
+  // ---------- the morgue: hatch, tags, outfits, lids, nails ----------
+  coffinDist(p, c) {
+    const loc = c.body.pointToLocalFrame(p.body.position);
+    return Math.abs(loc.y) > 1.5 ? Infinity : Math.hypot(Math.max(0, Math.abs(loc.x) - COFFIN.hx), Math.max(0, Math.abs(loc.z) - COFFIN.hz));
+  }
+  coffinStatus(c) {
+    if (this.coffinUp(c) < 0.5) return { act: null, hint: 'The coffin is upside down! Flip it.' };
+    if (!c.lid) {
+      const body = this.coffinContents(c);
+      return body ? { act: 'lid', coffin: c, body, hint: 'Hold F to close the lid' } : { act: null, hint: 'Empty coffin. Lay a body in it.' };
+    }
+    if (c.lid === 2) return { act: null, hint: 'Nailed shut. Carry it to a dug grave.' };
+    return this.nails >= NAIL_COST
+      ? { act: 'nail', coffin: c, hint: `Hold F to nail it shut (${NAIL_COST} of ${this.nails} nails)` }
+      : { act: null, hint: 'Out of nails. Carry it to a dug grave as it is.' };
+  }
+  // What F does right now: fill a grave, repair, close or nail a coffin, or dig.
+  workTarget(p) {
+    const plot = this.nearestPlot(p), ps = plot && this.plotStatus(plot);
+    if (ps && ps.act === 'fill') return { ...ps, plot };
+    const rt = this.repairTarget(p);
+    if (rt && rt.act) return rt;
+    const near = this.ents.filter((e) => e.kind === 'coffin' && this.coffinDist(p, e) < 1.15).sort((a, b) => this.coffinDist(p, a) - this.coffinDist(p, b));
+    const cs = near.map((c) => this.coffinStatus(c)).find((st) => st.act);
+    return cs || (ps ? { ...ps, plot } : near.length ? this.coffinStatus(near[0]) : rt);
+  }
+  doWork(p, h) {
+    const w = this.workTarget(p);
+    p.tool = w && w.act;
+    if (!w || !w.act) { p.work = 0; return; }
+    const key = w.act + (w.coffin ? w.coffin.id : w.plot ? w.plot.i : w.trap !== undefined ? 't' + w.trap : w.fence !== undefined ? 'f' + w.fence : '');
+    if (p.workKey !== key) { p.workKey = key; p.work = 0; }
+    if (w.act === 'dig' || w.act === 'fill') { this.workPlot(p, w.plot, h); return; }
+    p.work += h;
+    if ((w.act === 'nail' || w.act === 'repair') && Math.floor(p.work / 0.27) !== Math.floor((p.work - h) / 0.27)) { // hammer blows
+      const q = w.coffin ? w.coffin.body.position : p.body.position;
+      this.emit('sfx', { name: 'bonk', pos: [q.x, q.y, q.z] });
+    }
+    if (p.work < (w.act === 'lid' ? 1 : w.act === 'repair' ? 2 : 1.6)) return;
+    p.work = 0;
+    if (w.act === 'lid') this.closeLid(w.coffin, w.body);
+    else if (w.act === 'repair') this.repair(w);
+    else this.nailLid(w.coffin);
+  }
+  // The lid goes on: from here the passenger is data on the coffin, not a ragdoll, and the coffin weighs for both.
+  closeLid(c, body) {
+    c.passenger = { name: body.name, seed: body.seed, suit: body.suit, outfit: body.outfit, tag: body.tag };
+    this.removeEnt(body);
+    c.lid = 1;
+    const b = c.body;
+    b.addShape(new CANNON.Box(new CANNON.Vec3(COFFIN.hx, 0.03, COFFIN.hz)), new CANNON.Vec3(0, COFFIN.hy, 0));
+    b.mass = 25 + CORPSE_MASS;
+    b.updateMassProperties();
+    b.aabbNeedsUpdate = true;
+    b.wakeUp();
+    this.version++;
+    this.emit('sfx', { name: 'thud', pos: [b.position.x, b.position.y, b.position.z] });
+    this.emit('toast', { text: `Goodnight, ${body.tag || 'whoever you are'}`, pos: [b.position.x, b.position.y + 1, b.position.z] });
+  }
+  nailLid(c) {
+    if (this.nails < NAIL_COST || c.lid !== 1) return;
+    this.nails -= NAIL_COST;
+    c.lid = 2;
+    this.version++;
+    const q = c.body.position;
+    this.emit('toast', { text: `Nailed shut! ${this.nails} nails left`, pos: [q.x, q.y + 1, q.z] });
+  }
+  atHatch(p) {
+    const q = p.body.position, tb = MORGUE.table;
+    return Math.abs(q.x - tb.x) < tb.hx + 0.6 && q.z > tb.z - 1.6 && q.z < MORGUE.z1 && insideMorgue(q.x, q.z);
+  }
+  // which name tag on the board (west wall) / outfit on the rack (east wall) the digger is reaching for, or -1
+  boardSlot(p) {
+    const B = MORGUE.board, q = p.body.position;
+    if (!insideMorgue(q.x, q.z) || q.x > B.x + 1.5) return -1;
+    const z = this.handPoint(p, 1).z;
+    let best = -1, bd = 0.45;
+    for (let i = 0; i < B.n; i++) { const d = Math.abs(B.z0 + i * B.dz - z); if (d < bd) { bd = d; best = i; } }
+    return best;
+  }
+  rackSlot(p) {
+    const R = MORGUE.rack, q = p.body.position;
+    if (!insideMorgue(q.x, q.z) || q.x < R.x - 1.5) return -1;
+    const z = this.handPoint(p, 1).z;
+    let best = -1, bd = 0.5;
+    for (let i = 0; i < OUTFITS.length; i++) { const d = Math.abs(R.z0 + i * R.dz - z); if (d < bd) { bd = d; best = i; } }
+    return best;
+  }
+  // the body a tag or an outfit in hand would go on
+  itemTarget(p) {
+    const hand = this.handPoint(p, 0.9);
+    let best = null, bd = 1.3;
+    for (const e of this.ents) {
+      if (e.kind !== 'corpse' || e.z) continue;
+      for (const b of e.bodies) { const d = b.position.distanceTo(hand); if (d < bd) { bd = d; best = e; } }
+    }
+    return best;
+  }
+  // Pull the next body off the hearse through the hatch onto the intake table.
+  acceptBody() {
+    const body = this.corpsesInBed()[0];
+    if (!body) return false;
+    const tb = MORGUE.table, rig = corpseRig(body.seed);
+    const stacked = this.ents.filter((e) => e.kind === 'corpse' && e !== body && Math.abs(e.bodies[0].position.x - tb.x) < tb.hx + 0.2 && Math.abs(e.bodies[0].position.z - tb.z) < 0.8).length;
+    const m = new THREE.Matrix4().makeTranslation(tb.x + rig.height / 2, tb.top + rig.back + 0.08 + stacked * 0.45, tb.z)
+      .multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))
+      .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+    const xf = rigPose(rig, m, limpRots(rng(body.seed)), new Float32Array(NCREW * 7));
+    body.bodies.forEach((b, i) => {
+      this.bodyFromXf(b, xf, i * 7);
+      b.velocity.setZero(); b.angularVelocity.setZero(); b.wakeUp();
+    });
+    body.greeted = true;
+    if (!this.tags.includes(body.name)) {
+      // make sure the right name tag hangs on the board, replacing a decoy nobody needs
+      const needed = new Set(this.ents.filter((e) => e.kind === 'corpse' && e.tag !== e.name).map((e) => e.name));
+      let i = this.tags.indexOf(null);
+      if (i < 0) i = this.tags.findIndex((t) => !needed.has(t));
+      if (i < 0) i = Math.floor(this.rand() * this.tags.length);
+      this.tags[i] = body.name;
+    }
+    this.emit('sfx', { name: 'thud', pos: [tb.x, tb.top, tb.z] });
+    this.emit('toast', { text: `Note: ${body.name}, ${outfitLabel(body.suit).toLowerCase()}`, pos: [tb.x, tb.top + 1.1, tb.z] });
+    return true;
+  }
+  // put the tag in hand back on the board (an outfit just goes back on the rack)
+  returnItem(p) {
+    const it = p.item;
+    p.item = null;
+    if (it && it.type === 'tag') { const i = this.tags.indexOf(null); if (i >= 0) this.tags[i] = it.name; }
+  }
+  useItem(p) {
+    const it = p.item, body = this.itemTarget(p);
+    if (!body) { this.returnItem(p); this.emit('sfx', { name: 'grab', pos: [p.body.position.x, 1, p.body.position.z] }); return; }
+    const q = body.bodies[0].position, pos = [q.x, q.y + 0.8, q.z];
+    if (it.type === 'tag') {
+      if (body.tag) { const i = this.tags.indexOf(null); if (i >= 0) this.tags[i] = body.tag; } // the old tag goes back on the board
+      body.tag = it.name;
+      this.emit('toast', { text: `Tagged "${it.name}"`, pos });
+    } else {
+      body.outfit = it.suit;
+      this.emit('toast', { text: `Dressed in the ${outfitLabel(it.suit).toLowerCase()}`, pos });
+    }
+    p.item = null;
+    this.version++;
+    this.emit('sfx', { name: 'grab', pos });
+  }
+  // The grab button in the morgue: use the item in hand, take a body in at the hatch, take a tag or an outfit.
+  // False when none of that applies, so the usual grab / shovel swing happens.
+  morgueKey(p) {
+    if (p.item) { this.useItem(p); return true; }
+    if (this.truck.state === 'wait' && this.atHatch(p) && this.acceptBody()) return true;
+    const t = this.boardSlot(p);
+    if (t >= 0 && this.tags[t]) {
+      p.item = { type: 'tag', name: this.tags[t] };
+      this.tags[t] = null;
+      this.emit('sfx', { name: 'grab', pos: [MORGUE.board.x, 1.4, MORGUE.board.z0] });
+      return true;
+    }
+    const r = this.rackSlot(p);
+    if (r < 0) return false;
+    p.item = { type: 'suit', suit: OUTFITS[r].id };
+    this.emit('sfx', { name: 'grab', pos: [MORGUE.rack.x, 1.4, MORGUE.rack.z0] });
+    return true;
+  }
+  morgueHint(p) {
+    if (p.item) {
+      const body = this.itemTarget(p), what = p.item.type === 'tag' ? `tag "${p.item.name}"` : outfitLabel(p.item.suit).toLowerCase();
+      if (!body) return `Holding the ${what} · go to the body · Q to put it back`;
+      return p.item.type === 'tag' ? `E: hang the ${what} on this body` : `E: dress this body in the ${what}`;
+    }
+    if (this.truck.state === 'wait' && this.atHatch(p) && this.corpsesInBed().length) return 'E: take the body in through the hatch';
+    const t = this.boardSlot(p);
+    if (t >= 0 && this.tags[t]) return `E: take the name tag "${this.tags[t]}"`;
+    const r = this.rackSlot(p);
+    return r >= 0 ? `E: take the ${OUTFITS[r].label.toLowerCase()}` : '';
+  }
+  // The delivery note of the body this player is dealing with, for the HUD card.
+  cardFor(p) {
+    const card = (o, more) => ({ name: o.name, suit: outfitLabel(o.suit), tag: o.tag, outfit: outfitLabel(o.outfit), tagOk: o.tag === o.name, suitOk: o.outfit === o.suit, ...more });
+    if (p.grab && p.grab.ent.kind === 'corpse' && !p.grab.ent.z) return card(p.grab.ent, { stage: 'held' });
+    const f = this.feet(p);
+    let best = null, bd = 2.2;
+    for (const e of this.ents) {
+      if (e.kind === 'corpse' && !e.z) {
+        const d = e.bodies[0].position.distanceTo(f);
+        if (d < bd) { bd = d; best = card(e, { stage: this.ents.some((c) => c.kind === 'coffin' && this.coffinContents(c) === e) ? 'coffin' : 'loose' }); }
+      } else if (e.kind === 'coffin' && e.passenger) {
+        const d = e.body.position.distanceTo(f);
+        if (d < bd) { bd = d; best = card(e.passenger, { stage: e.lid === 2 ? 'nailed' : 'closed' }); }
+      }
+    }
+    return best;
   }
 
   // ---------- day and night ----------
@@ -645,6 +959,12 @@ export class Sim {
     this.spawns = [];
     this.emit('toast', { text: `Morning! Day ${this.dayN}`, pos: [0, 3.5, 4], big: true });
     this.emit('sfx', { name: 'rooster' });
+    { // what the night broke
+      const down = this.fence.filter((f) => f.hp <= 0).length, worn = this.fence.filter((f) => f.hp > 0 && f.hp < FENCE_HP).length;
+      const traps = this.traps.filter((t) => t.dur <= 0).length;
+      const list = [down && `${down} fence section${down > 1 ? 's' : ''} down`, worn && `${worn} worn`, traps && `${traps} trap${traps > 1 ? 's' : ''} broken`].filter(Boolean);
+      if (list.length) this.emit('toast', { text: `Last night: ${list.join(', ')}. Time for repairs.`, pos: [0, 2.8, 4] });
+    }
     for (const e of [...this.ents]) {
       e.riseAt = 0;
       if (!e.z) continue;
@@ -652,9 +972,17 @@ export class Sim {
       else this.layDown(e);                  // risen bodies drop where they stand, still unburied
     }
   }
-  // a free spot in the old part of the yard, away from diggers, graves and anything solid
+  // Where the next visitor comes up: mostly outside the fence (away from the open road gates), so the fence has to
+  // hold them; the rest climb out in the old part of the yard, away from diggers, graves and anything solid.
   zombieSpot() {
     const diggers = this.ents.filter((e) => e.kind === 'digger');
+    if (this.rand() < 0.65) {
+      for (let i = 0; i < 20; i++) {
+        const side = Math.floor(this.rand() * 4), along = (this.rand() * 2 - 1) * 24, out = FENCE + 2.5 + this.rand() * 3;
+        const [x, z] = side === 0 ? [along, -out] : side === 1 ? [along, out] : side === 2 ? [-out, along] : [out, along];
+        if (!(side >= 2 && Math.abs(along - ROAD_Z) < ROAD_HALF + 2)) return [x, z];
+      }
+    }
     for (let i = 0; i < 40; i++) {
       const x = (this.rand() * 2 - 1) * 22, z = -22 + this.rand() * 27;
       if (diggers.some((d) => Math.hypot(this.feet(d).x - x, this.feet(d).z - z) < 7)) continue;
@@ -738,7 +1066,7 @@ export class Sim {
     let plot = null, pd = Infinity;
     for (const pl of this.plots) {
       if (!pl.buried) continue;
-      const dist = Math.hypot(pl.x - q.x, pl.z - q.z);
+      const dist = Math.hypot(pl.x - q.x, pl.z - q.z) - (pl.unrest || 0) * 8; // restless graves call louder
       if (dist < pd) { pd = dist; plot = pl; }
     }
     if (plot && !dog) return { plot }; // otherwise: dig up the crew's work
@@ -793,8 +1121,9 @@ export class Sim {
     if (tg && tg.plot && dist < stop + 0.2) { // scratching at a grave until its tenant comes back out
       z.digT += h;
       if (Math.floor(z.digT / 0.6) !== Math.floor((z.digT - h) / 0.6)) this.emit('sfx', { name: 'dig', pos: [tx, 0, tz] });
-      if (z.digT > 6) { z.digT = 0; this.unbury(tg.plot); z.target = null; z.think = 0; }
+      if (z.digT > (tg.plot.nailed ? 12 : 6)) { z.digT = 0; this.unbury(tg.plot); z.target = null; z.think = 0; } // nails hold twice as long
     } else z.digT = Math.max(0, z.digT - h);
+    if (this.walkerHazards(e, h)) return; // shoving the fence wears it down; a trap under its feet knocks it over
 
     let sp = dist > stop ? def.speed : 0;
     if (z.mode === 'attack') sp = dog ? def.speed * 0.7 : 0;
@@ -868,6 +1197,10 @@ export class Sim {
     this.score = Math.max(0, this.score - 1);
     const m = new THREE.Matrix4().makeTranslation(plot.x, 0.35, plot.z - 0.9).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
     const e = this.spawnCorpse(m, REST_ROTS, plot.seed);
+    if (plot.who) { e.outfit = plot.who.outfit; e.tag = plot.who.tag; plot.who = null; } // dug up as they were buried
+    this.buried = Math.max(0, this.buried - 1);
+    plot.unrest = 0;
+    plot.nailed = false;
     e.greeted = true;
     this.emit('toast', { text: `${plot.name} is back!`, pos: [plot.x, 2, plot.z], big: true });
     this.riseCorpse(e);
@@ -924,6 +1257,7 @@ export class Sim {
     this.time += h;
     this.updatePhase(h);
     this.updateTruck(h);
+    this.updateTraps();
     for (const e of [...this.ents]) if (e.z) this.updateWalker(e, h);
     for (const e of this.ents) if (e.kind === 'digger') this.updatePlayer(e, h);
     for (const e of this.ents) if (e.kind === 'digger' && e.grab) this.updateHand(e, h);
@@ -989,20 +1323,19 @@ export class Sim {
     p.speed = Math.hypot(b.velocity.x, b.velocity.z);
     p.phase += p.speed * h * 2.6;
 
-    // one button: let go of what you hold, whack a zombie in reach, grab what is there, or swing at the air
+    // one button: let go of what you hold, whack a zombie in reach, do the morgue thing in front of you (use the tag
+    // or outfit in hand, take a body in at the hatch, take a tag or an outfit), grab what is there, or swing at the air
     if (inp.g !== last.g) {
       last.g = inp.g;
       if (p.grab) this.drop(p, true);
-      else if (this.whackable(p).length || this.threatened(p) || !this.findGrab(p)) this.whack(p);
-      else this.grab(p);
+      else if (this.whackable(p).length || this.threatened(p)) this.whack(p);
+      else if (!this.morgueKey(p)) { if (this.findGrab(p)) this.grab(p); else this.whack(p); }
     }
     if (!p.swingHit && this.time - p.swingT >= SWING_TIME * 0.35) this.landWhack(p);
-    if (inp.th !== last.th) { last.th = inp.th; this.throwHeld(p); }
+    if (inp.th !== last.th) { last.th = inp.th; if (p.item) this.returnItem(p); else this.throwHeld(p); }
 
-    if (p.digging) {
-      const plot = this.nearestPlot(p);
-      if (plot) this.workPlot(p, plot, h);
-    }
+    if (p.digging) this.doWork(p, h); // dig, fill, close a lid, nail it, repair
+    else { p.tool = null; p.work = 0; }
   }
 
   updateHand(p, h) {
@@ -1037,7 +1370,7 @@ export class Sim {
       // Alone the arms give out: walking wears the grip down (a full coffin faster), turning and hopping more;
       // stand still to get it back.
       const moving = (p.speed || 0) > 0.5 || !p.grounded;
-      const drain = moving ? (inside ? 0.11 : 0.08) + Math.min(p.turn, 8) * 0.03 + (!p.grounded ? 0.6 : 0) : -0.3;
+      const drain = moving ? (inside || g.ent.passenger ? 0.11 : 0.08) + Math.min(p.turn, 8) * 0.03 + (!p.grounded ? 0.6 : 0) : -0.3;
       g.grip = Math.min(1, g.grip - drain * h);
       if (g.grip <= 0) {
         const b = g.body, ax = b.quaternion.vmult(new CANNON.Vec3(0, 0, 1));
@@ -1098,25 +1431,21 @@ export class Sim {
       if (!(r.p.grab && (r.p.grab.ent === r.ent || r.p.grab.contents === r.ent))) for (const b of this.bodiesOf(r.ent)) b.collisionFilterMask |= r.p.bit;
       return false;
     });
-    // keep a couple of empty coffins at the pile
+    // keep a couple of empty coffins in the morgue
     if (Math.floor(this.time / 2) !== Math.floor((this.time - h) / 2)) {
       const coffins = this.ents.filter((e) => e.kind === 'coffin');
-      // only coffins a player can actually use count: upright, empty, inside the fence and not already in a grave
+      // only coffins a player can actually use count: upright, open, empty, inside the fence and not already in a grave
       const free = coffins.filter((c) => this.coffinUp(c) > 0.5 && Math.abs(c.body.position.x) < 27 && Math.abs(c.body.position.z) < 27
-        && !this.coffinContents(c) && !PLOTS.some((_, i) => this.coffinInPlot(this.plots[i]) === c));
+        && !c.lid && !this.coffinContents(c) && !this.plots.some((pl) => this.coffinInPlot(pl) === c));
       if (free.length < 2 && coffins.length < 8) {
-        // pick a free spot at the pile so the new coffin never spawns inside another one
-        let spot = null;
-        for (let i = 0; i < 5 && !spot; i++) {
-          const z = PILE.z + [0, 1.35, -1.35, 2.7, -2.7][i];
-          if (!coffins.some((c) => Math.hypot(c.body.position.x - PILE.x, c.body.position.z - z) < 1.6)) spot = z;
-        }
-        this.spawnCoffin(PILE.x, spot === null ? 2.5 : 0.6, spot === null ? PILE.z : spot, Math.PI / 2);
-        this.emit('sfx', { name: 'thud', pos: [PILE.x, 0.5, PILE.z] });
+        // a free spot, pointing at the door, never inside another coffin or under somebody's feet
+        const spot = MORGUE.coffins.find(([x, z]) => !this.ents.some((e) => (e.kind === 'coffin' || e.kind === 'digger')
+          && Math.abs(this.feet(e).x - x) < 1 && Math.abs(this.feet(e).z - z) < 1.6));
+        if (spot) { this.spawnCoffin(spot[0], 0.05, spot[1], 0); this.emit('sfx', { name: 'thud', pos: [spot[0], 0.5, spot[1]] }); }
       }
     }
     if (Math.floor(this.time * 5) !== Math.floor((this.time - h) * 5)) {
-      for (const e of this.ents) if (e.kind === 'digger') e.hint = this.hintFor(e);
+      for (const e of this.ents) if (e.kind === 'digger') { e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
     }
   }
 
@@ -1135,10 +1464,15 @@ export class Sim {
     if (t.state === 'arrive') {
       const d = x - TRUCK_STOP_X;
       vx = -Math.min(7, d * 0.8 + 0.3);
-      if (d < 0.03) { vx = 0; b.position.x = TRUCK_STOP_X; t.state = 'wait'; t.t = this.time; this.emit('sfx', { name: 'honk', pos: [x, 1.5, ROAD_Z] }); this.emit('toast', { text: 'Delivery!', pos: [x, 3.2, ROAD_Z], big: true }); }
+      if (d < 0.03) { vx = 0; b.position.x = TRUCK_STOP_X; t.state = 'wait'; t.t = this.time; this.emit('sfx', { name: 'honk', pos: [x, 1.5, ROAD_Z] }); 
+        this.nails += 6; // each delivery brings a few nails and boards
+        this.boards += 2;
+        this.emit('toast', { text: 'Hearse at the hatch!', pos: [x, 3.2, ROAD_Z], big: true });
+        this.emit('toast', { text: '+6 nails, +2 boards', pos: [MORGUE.crate.x, 1.6, MORGUE.crate.z] });
+      }
     } else if (t.state === 'wait') {
       const empty = this.corpsesInBed().length === 0;
-      if ((empty && this.time - t.t > 3) || this.time - t.t > 90) {
+      if ((empty && this.time - t.t > 3) || this.time - t.t > 120) {
         t.state = 'leave'; t.t = this.time;
         this.emit('sfx', { name: 'honk', pos: [x, 1.5, ROAD_Z] });
       }
@@ -1156,7 +1490,7 @@ export class Sim {
     b.velocity.set(vx, 0, 0);
     t.cage.position.copy(b.position);
     t.cage.velocity.set(vx, 0, 0);
-    t.cage.collisionFilterMask = t.state === 'arrive' ? G_PROP : 0;
+    t.cage.collisionFilterMask = t.state === 'away' ? 0 : G_PROP; // bodies leave only through the hatch
     t.cage.aabbNeedsUpdate = true;
     t.wheel += (vx * h) / 0.5;
   }
@@ -1165,12 +1499,15 @@ export class Sim {
     if (p.rag) return this.holders(p) ? 'A friend is carrying you. Enjoy the ride.' : 'Press R to get up';
     if (p.grab) {
       if (p.grab.coffin) return this.holders(p.grab.ent) > 1 ? 'Teamwork! Walk in file and drop it into a dug grave.' : 'Heavy! Stand still to rest, or get a friend on the other end.';
-      return 'Put them in a coffin · Click to drop · Right-click to throw';
+      return 'Lay them in a coffin · Click to drop · Right-click to throw';
     }
     if (this.whackable(p).length) return 'Click to whack!';
-    const plot = this.nearestPlot(p);
-    if (plot) return this.plotStatus(plot).hint;
+    const m = this.morgueHint(p);
+    if (m) return m;
+    const w = this.workTarget(p);
+    if (w && w.hint) return w.hint;
     if (this.findGrab(p)) return 'Click to grab';
+    if (this.truck.state === 'wait' && this.corpsesInBed().length && !insideMorgue(p.body.position.x, p.body.position.z)) return 'The hearse is here: take the bodies in through the hatch inside the morgue';
     return '';
   }
 
@@ -1226,15 +1563,19 @@ export class Sim {
     const ev = this.events;
     this.events = [];
     return {
-      score: this.score,
-      plots: this.plots.map((p) => [+p.depth.toFixed(3), +p.fill.toFixed(3), p.buried ? 1 : 0, p.seed, p.name]),
+      score: this.score, buried: this.buried, nails: this.nails, boards: this.boards,
+      tags: this.tags,                                             // name tags on the morgue's board (null = taken)
+      fence: this.fence.map((f) => Math.round(f.hp)),              // per section, 0 = down
+      traps: this.traps.map((t) => t.dur * 2 + (t.armed ? 1 : 0)), // snaps left * 2 + armed
+      plots: this.plots.map((p) => [+p.depth.toFixed(3), +p.fill.toFixed(3), p.buried ? 1 : 0, p.seed, p.name, p.unrest || 0]),
       truck: [+this.truck.wheel.toFixed(3), this.truck.state === 'wait' ? 1 : 0],
       // night flag, seconds left in this half, day number, light (1 day .. 0 night), zombies on their feet
       phase: [this.phase === 'night' ? 1 : 0, Math.ceil((this.phase === 'day' ? this.dayLen : this.nightLen) - this.phaseT), this.dayN, +this.light().toFixed(3),
         this.ents.filter((e) => e.z).length],
       risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
-        id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging, sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
+        id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
+        item: e.item || null, card: e.card || null, sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
         grip: e.grab && !(e.grab.coffin && this.holders(e.grab.ent) > 1) ? +Math.max(0, e.grab.grip).toFixed(2) : -1, // two on a coffin: nothing to lose
       })),
       ev,

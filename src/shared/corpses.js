@@ -31,14 +31,53 @@ function corpseLook(seed) {
   return look;
 }
 
+// What a body wears. Bodies arrive in a plain shroud; the delivery note asks for one of OUTFITS (layout.js).
+// Clothes in this art style are the hat, scarf, mittens, legs and boots, so an outfit is a look override.
+function dressLook(base, outfit, tagged) {
+  const L = { ...base, colors: { ...base.colors } }, c = L.colors;
+  const [yH, rH] = L.head, [yB, , yN, rN] = L.bean;
+  const tall = [yH + rH * 0.4, 0, rH * 1.08 + 0.01, 0.17], cap = [yH + rH * 0.65, rH * 1.25, rH * 0.78, 0.15], scarf = [yN - 0.05, rN + 0.025, 0.045, 0.34];
+  switch (outfit) {
+    case 'tux':
+      Object.assign(L, { hat: tall, hat2: [1, 0.065, 0.016, 0.035], scarf: [yN - 0.05, rN + 0.02, 0.03, 0.2] });
+      Object.assign(c, { hat: '#1e1a26', band: '#9a1d34', scarf: '#1e1a26', mitten: '#f2eee6', leg: '#2a2633', boot: '#1e1a26' });
+      break;
+    case 'sailor':
+      Object.assign(L, { hat: cap, hat2: [0, 0.05, 0.006, 0], scarf });
+      Object.assign(c, { hat: '#f2eee2', band: '#2c3e70', scarf: '#2c3e70', mitten: '#f2eee2', leg: '#2c3e70', boot: '#f2eee2' });
+      break;
+    case 'clown':
+      Object.assign(L, { hat: [yH + rH * 0.65, rH * 1.25, rH * 0.6, 0.24], hat2: [0, 0.05, 0.006, 0], scarf: [yN - 0.05, rN + 0.05, 0.07, 0.42] });
+      Object.assign(c, { hat: '#f0c23a', band: '#d8433a', scarf: '#f4efe4', mitten: '#f4efe4', leg: '#d8433a', boot: '#d8433a', nose: '#d8433a' });
+      break;
+    case 'gown':
+      Object.assign(L, { hat: tall, hat2: [1, 0.09, 0.012, 0.03], scarf });
+      Object.assign(c, { hat: '#6b3a7a', band: '#e9d9f0', scarf: '#7d4a8c', mitten: '#e9d9f0', leg: '#6b3a7a', boot: '#3a2a40' });
+      break;
+    case 'pajamas':
+      Object.assign(L, { hat: [yH + rH * 0.65, rH * 1.25, rH * 0.7, 0.26], hat2: [0, 0.05, 0.006, 0], scarf: null });
+      Object.assign(c, { hat: '#5d6f8c', band: '#e8e2d4', mitten: c.skin, leg: '#5d6f8c', boot: '#e8e2d4' });
+      break;
+    default: // shroud
+      Object.assign(L, { hat: null, scarf: null });
+      Object.assign(c, { mitten: '#d6d0c2', leg: '#d6d0c2', boot: '#c9c2b2' });
+  }
+  // the name tag hung on them: a little pale patch on the chest
+  if (tagged) L.patches = [...(L.patches || []), [0, yB, 0.05, 0.035, '#e9dcc0']];
+  return L;
+}
+
+// The rig of a body. The simulation always asks for the plain one (the six parts do not depend on clothes); the
+// view passes what the body wears and whether a name tag hangs on it.
 const defs = new Map();
-export function corpseRig(seed) {
-  let rig = defs.get(seed);
+export function corpseRig(seed, outfit = 'shroud', tagged = 0) {
+  const key = `${seed}|${outfit}|${tagged ? 1 : 0}`;
+  let rig = defs.get(key);
   if (!rig) {
     if (defs.size > 200) defs.clear();
-    const look = corpseLook(seed);
+    const look = dressLook(corpseLook(seed), outfit, tagged);
     rig = humanRig({ look, rig: lookRig(look) }, CREW_SCALE);
-    defs.set(seed, rig);
+    defs.set(key, rig);
   }
   return rig;
 }

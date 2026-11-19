@@ -11,7 +11,7 @@ import {
 import { buildPlants } from './plants.js';
 import { buildBackdrop } from './backdrop.js';
 import { rng } from '../shared/rng.js';
-import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, PILE } from '../shared/layout.js';
+import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, CARPENTER } from '../shared/layout.js';
 
 // The static graveyard: ground, old headstones, trees, shed, fence, gates, lanterns, and the backdrop beyond the fence.
 // Positions and sizes come from shared/layout.js because the host's colliders use the same numbers.
@@ -77,8 +77,8 @@ export function buildWorld(scene) {
     tuft(x, z, 1.3);
   }
   for (let i = 0; i < 5; i++) shrooms.push([sh.x - sh.hx - 0.15 + R.range(-0.1, 0.1), sh.z - sh.hz + 0.3 + i * 0.12, R.range(0.6, 1.3)]);
-  carpenterParts(batch.sub(M([PILE.x - 3.4, 0, PILE.z - 1.6], [0, 0.08, 0])));
-  coffinLidParts(add, M([PILE.x - 3.35, 0.91, sh.z - sh.hz - 0.36], [0.3, 0.12, 0.04]));
+  carpenterParts(batch.sub(M([CARPENTER.x, 0, CARPENTER.z], [0, 0.08, 0])));
+  coffinLidParts(add, M([CARPENTER.x + 0.05, 0.91, sh.z - sh.hz - 0.36], [0.3, 0.12, 0.04]));
 
   // wrought-iron fence: spear bars swag between stone posts; gateways where the road crosses
   const gate0 = ROAD_Z - ROAD_HALF - 0.3, gate1 = ROAD_Z + ROAD_HALF + 0.3;
