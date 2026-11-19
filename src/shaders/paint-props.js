@@ -9,14 +9,14 @@ import { COFFIN } from '../shared/layout.js';
 // pleated lining, bevels, carved motifs, inscriptions, cracks, moss, windows, the grille, spokes, hubcaps,
 // curls) is painted here from a per-vertex paint space, so one object is one draw call plus its ink hull.
 // Per vertex: color (base color, linear), aK = (paint id, three params), aQ = four more params,
-// aP / aPN = position (meters) and normal in the paint space of the part, aRig = which moving part it rides on (truck only).
+// aP / aPN = position (meters) and normal in the paint space of the part, aRig = which moving part it rides on (truck only: 1-4 wheels, 5-6 rear doors).
 // Lighting is the shared toon lighting (lightingGLSL) with the shared day/night uniform, like toon().
 
 export const PAINT = {
   PLAIN: 1, // aK = (1, mottle, rim, emissive)
   COFFIN_WOOD: 10, COFFIN_LINING: 11, COFFIN_RAIL: 12, COFFIN_LID: 13, // lid: aK = (13, nailed, seed, 0)
   STONE: 20,
-  TRUCK_BODY: 30, TRUCK_FLOOR: 31, TRUCK_RAIL: 32, RADIATOR: 33, LAMP: 34, SKULL: 35, WHEEL: 36, GATE: 37,
+  TRUCK_BODY: 30, TRUCK_FLOOR: 31, TRUCK_RAIL: 32, RADIATOR: 33, LAMP: 34, SKULL: 35, WHEEL: 36, DOOR: 37, COACH: 38,
 };
 
 const V = (hex) => { const c = new THREE.Color(hex); return `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`; };
@@ -33,16 +33,17 @@ attribute vec3 color; attribute vec4 aK; attribute vec4 aQ; attribute vec3 aP; a
 varying vec3 vN; varying vec3 vW; varying vec3 vCol; varying vec4 vK; varying vec4 vQ; varying vec3 vP; varying vec3 vON;
 #ifdef RIG
 attribute float aRig;
-uniform vec3 uPivot[6]; uniform float uSpin; uniform float uGate;
+uniform vec3 uPivot[7]; uniform float uSpin; uniform float uGate;
 #endif
 #include <common>
 #include <fog_pars_vertex>
 mat3 rotZ(float a) { float c = cos(a), s = sin(a); return mat3(c, s, 0.0, -s, c, 0.0, 0.0, 0.0, 1.0); }
+mat3 rotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
 void main() {
   vec3 pos = position, nor = normal;
   #ifdef RIG
   int r = int(aRig + 0.5);
-  if (r > 0) { mat3 R = rotZ(r == 5 ? uGate : uSpin); pos = uPivot[r] + R * (pos - uPivot[r]); nor = R * nor; }
+  if (r > 0) { mat3 R = r >= 5 ? rotY((r == 5 ? 1.3 : -1.3) * uGate) : rotZ(uSpin); pos = uPivot[r] + R * (pos - uPivot[r]); nor = R * nor; }
   #endif
   vec4 w = modelMatrix * vec4(pos, 1.0); vW = w.xyz;
   vN = normalize(mat3(modelMatrix) * nor);
@@ -481,6 +482,94 @@ void wheel(inout vec3 col, inout float ink, vec3 p, vec3 on) {
   }
 }
 
+// ---------------- the hearse's coach ----------------
+// Drawn velvet curtains in a window. q: window coords, -1..1 across and up; w: the window's half width in meters
+// (for the folds). Each drape hangs from its top corner and is tied back lower down, so a dark gap opens downward;
+// a scalloped valance runs along the top.
+void curtains(inout vec3 col, inout float ink, vec2 q, float w) {
+  vec3 night = ${V('#15101f')}, velvet = ${V('#5b2c6e')}, light = ${V('#8a4f9c')};
+  vec3 c = night * (0.8 + 0.4 * smoothstep(-1.0, 1.0, q.y));
+  float gapW = 0.1 + 0.42 * (0.5 - 0.5 * q.y);            // the gap between the drapes, wider toward the sill
+  float drape = abs(q.x) - gapW;                             // > 0 on a drape
+  float folds = 0.5 + 0.5 * sin(q.x * w * 48.0 + q.y * 0.6);
+  vec3 v = mix(velvet, light, folds * 0.55) * (0.8 + 0.25 * smoothstep(1.0, 0.0, abs(q.x)));
+  float k = smoothstep(-0.03, 0.03, drape);
+  c = mix(c, v, k);
+  // valance: a scalloped band across the top
+  float sc = 0.78 - 0.07 * abs(sin(q.x * 3.14159 * 2.5));
+  float val = smoothstep(sc - 0.03, sc + 0.03, q.y);
+  c = mix(c, light * 0.9, val);
+  ink = max(ink, 0.55 * (1.0 - smoothstep(0.0, 0.05, abs(drape))) * (1.0 - val));
+  ink = max(ink, 0.5 * (1.0 - smoothstep(0.0, 0.04, abs(q.y - sc))));
+  col = c;
+}
+// A window with bone trim and the curtains drawn. d: signed distance to the opening (meters), q and w as curtains().
+void coachWindow(inout vec3 col, inout float ink, inout float em, inout float rim, float d, vec2 q, float w) {
+  float trim = d - 0.045;
+  col = mix(col, ${V(PAL.bone)} * 0.9, fill(trim));
+  ink = max(ink, 0.8 * line(trim, 0.004));
+  if (d < PX) {
+    vec3 c = col; float ik = ink;
+    curtains(c, ik, q, w);
+    float k = fill(d);
+    col = mix(col, c, k); ink = max(ink, ik * k);
+    rim = mix(rim, 0.5, k);
+    ink = max(ink, 0.9 * line(d, 0.006));
+  }
+}
+// The coach's long sides (truck space; the boxes span x -0.62..3.0, y 1.2..2.42): a frame of darker bands splits each
+// side into three carved panels, each with an oval window (a small one at either end, a wide one in the middle).
+void coach(inout vec3 col, inout float ink, inout float em, inout float rim, vec3 p, vec3 on) {
+  if (abs(on.z) < 0.6) { col *= 0.7; return; }
+  vec2 u = p.xy;
+  float band = min(min(abs(u.x - 0.45), abs(u.x - 1.95)) - 0.05, min(abs(u.y - 1.24), abs(u.y - 2.37)) - 0.04);
+  col = mix(col, col * 0.6, fill(band));
+  ink = max(ink, 0.5 * line(band, 0.004));
+  vec2 c = u.x < 0.45 ? vec2(-0.085, 1.82) : u.x < 1.95 ? vec2(1.2, 1.82) : vec2(2.475, 1.82);
+  vec2 r = u.x < 0.45 || u.x >= 1.95 ? vec2(0.22, 0.34) : vec2(0.56, 0.36);
+  // the carved inset around the window: a rounded panel a shade darker, with a cut line
+  float inset = sdRound(u - c, vec2(r.x + 0.16, 0.5), 0.08);
+  col = mix(col, col * 0.84, fill(inset));
+  ink = max(ink, 0.45 * line(inset, 0.004));
+  // little carved rosettes in the inset's corners
+  vec2 a = abs(u - c) - vec2(r.x + 0.07, 0.42);
+  float ros = length(a) - 0.025;
+  col = mix(col, col * 0.7, fill(ros));
+  ink = max(ink, 0.4 * line(ros, 0.003));
+  float e = (length((u - c) / r) - 1.0) * min(r.x, r.y);
+  coachWindow(col, ink, em, rim, e, (u - c) / r, r.x);
+}
+// The two rear doors (truck space, faces toward +x; the seam at z = 0, hinges at z = +-0.95, y 0.92..2.42): an
+// arched window with its curtain, a checker band, a carved panel with a little tombstone, and a bone handle by the seam.
+void hearseDoor(inout vec3 col, inout float ink, inout float em, inout float rim, vec3 p, vec3 on) {
+  col = mix(${V(PAL.plumDark)}, col, smoothstep(0.9, 1.4, p.y));
+  if (on.x < 0.6) { col *= 0.75; return; }
+  vec2 u = vec2(abs(p.z), p.y);
+  ink = max(ink, 0.9 * line(u.x - 0.004, 0.006));                  // the seam
+  float fr = sdBox(u - vec2(0.475, 1.67), vec2(0.42, 0.7));          // the door's frame line
+  ink = max(ink, 0.45 * line(fr, 0.004));
+  // arched window
+  float w = min(sdBox(u - vec2(0.475, 1.8), vec2(0.25, 0.24)), length(u - vec2(0.475, 2.04)) - 0.25);
+  vec2 q = vec2((u.x - 0.475) / 0.25, (u.y - 1.92) / 0.37);
+  coachWindow(col, ink, em, rim, w, q, 0.25);
+  // checker band
+  float cb = abs(u.y - 1.42) - 0.035;
+  if (cb < 0.0) col = mod(floor(u.x / 0.1), 2.0) < 1.0 ? ${V(PAL.stripeLight)} : ${V(PAL.stripeDark)};
+  ink = max(ink, 0.4 * line(cb, 0.003));
+  // carved panel with a tombstone plaque
+  float pan = sdRound(u - vec2(0.475, 1.12), vec2(0.3, 0.16), 0.05);
+  col = mix(col, col * 0.84, fill(pan));
+  ink = max(ink, 0.45 * line(pan, 0.004));
+  float st = min(sdBox(u - vec2(0.475, 1.07), vec2(0.075, 0.06)), length(u - vec2(0.475, 1.13)) - 0.075);
+  col = mix(col, ${V('#8e88a6')}, fill(st));
+  ink = max(ink, 0.7 * line(st, 0.003));
+  ink = max(ink, 0.5 * line(abs(u.y - 1.12) - 0.0, 0.002) * fill(st + 0.03));
+  // bone handle by the seam
+  float h = sdRound(u - vec2(0.07, 1.55), vec2(0.018, 0.09), 0.015);
+  col = mix(col, ${V(PAL.bone)}, fill(h));
+  ink = max(ink, 0.8 * line(h, 0.003));
+}
+
 void main() {
   vec3 N = normalize(vN);
   if (!gl_FrontFacing) N = -N;
@@ -506,19 +595,13 @@ void main() {
     col = mix(${V('#38463c')}, col, smoothstep(0.04, 0.4, p.y));
     mottle = 0.6; stonePaint(col, ink, p, on);
   }
-  else if (id == ${PAINT.TRUCK_BODY} || id == ${PAINT.GATE}) {
+  else if (id == ${PAINT.TRUCK_BODY}) {
     col = mix(${V(PAL.plumDark)}, col, smoothstep(0.35, 1.1, p.y));
     mottle = 0.45;
-    if (id == ${PAINT.TRUCK_BODY}) truckBody(col, ink, em, rim, p, on);
-    else if (on.x > 0.6) {
-      // the tailgate (local, hinge at the origin): two small curls and a bone knob
-      vec2 u = vec2(-p.z, p.y);
-      float c = min(curlSD(rot2(1.2) * (u - vec2(-0.4, 0.12)), 0.07, 1.4, 1.0, 0.016, 0.0), curlSD(rot2(-1.2) * (vec2(-u.x, u.y) - vec2(-0.4, 0.12)), 0.07, 1.4, 1.0, 0.016, 0.0));
-      col = mix(col, ${V('#b89ad0')}, fill(c) * 0.95);
-      float kn = length((u - vec2(0.0, 0.13)) / vec2(0.06, 0.07)) - 1.0;
-      col = mix(col, ${V(PAL.bone)}, fill(kn * 0.06)); ink = max(ink, 0.8 * line(kn * 0.06, 0.004));
-    }
+    truckBody(col, ink, em, rim, p, on);
   }
+  else if (id == ${PAINT.COACH}) { mottle = 0.4; coach(col, ink, em, rim, p, on); }
+  else if (id == ${PAINT.DOOR}) { mottle = 0.4; hearseDoor(col, ink, em, rim, p, on); }
   else if (id == ${PAINT.TRUCK_FLOOR}) { mottle = 0.5; truckFloor(col, ink, p); }
   else if (id == ${PAINT.TRUCK_RAIL}) {
     float c = (vK.y > 0.5 ? p.z : p.x) * 2.6, aa = PX * 2.6 * 1.4;
@@ -542,12 +625,12 @@ void main() {
 
 let shared = null;
 // propPaint() is shared by every coffin and headstone; propPaint({ rig: true }) makes a fresh one for a truck,
-// whose uniforms uSpin (wheels) and uGate (tailgate) and pivots uPivot[1..5] belong to that truck.
+// whose uniforms uSpin (wheels) and uGate (rear doors: 0 shut .. -1.45 open) and pivots uPivot[1..6] belong to that truck.
 export function propPaint({ rig = false } = {}) {
   if (!rig && shared) return shared;
   const m = new THREE.ShaderMaterial({
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, rig ? {
-      uPivot: { value: Array.from({ length: 6 }, () => new THREE.Vector3()) }, uSpin: { value: 0 }, uGate: { value: 0 },
+      uPivot: { value: Array.from({ length: 7 }, () => new THREE.Vector3()) }, uSpin: { value: 0 }, uGate: { value: 0 },
     } : {}]),
     vertexShader: vert, fragmentShader: frag, fog: true, defines: rig ? { RIG: 1 } : {},
   });
@@ -560,14 +643,15 @@ export function propPaint({ rig = false } = {}) {
 const hullVert = /* glsl */ `
 uniform float uThick;
 attribute float aRig;
-uniform vec3 uPivot[6]; uniform float uSpin; uniform float uGate;
+uniform vec3 uPivot[7]; uniform float uSpin; uniform float uGate;
 #include <common>
 #include <fog_pars_vertex>
 mat3 rotZ(float a) { float c = cos(a), s = sin(a); return mat3(c, s, 0.0, -s, c, 0.0, 0.0, 0.0, 1.0); }
+mat3 rotY(float a) { float c = cos(a), s = sin(a); return mat3(c, 0.0, -s, 0.0, 1.0, 0.0, s, 0.0, c); }
 void main() {
   vec3 pos = position, nor = normal;
   int r = int(aRig + 0.5);
-  if (r > 0) { mat3 R = rotZ(r == 5 ? uGate : uSpin); pos = uPivot[r] + R * (pos - uPivot[r]); nor = R * nor; }
+  if (r > 0) { mat3 R = r >= 5 ? rotY((r == 5 ? 1.3 : -1.3) * uGate) : rotZ(uSpin); pos = uPivot[r] + R * (pos - uPivot[r]); nor = R * nor; }
   mat4 mv = modelViewMatrix;
   vec3 s2 = vec3(dot(mv[0].xyz, mv[0].xyz), dot(mv[1].xyz, mv[1].xyz), dot(mv[2].xyz, mv[2].xyz));
   vec3 n = normalize(mat3(mv) * (nor / s2));

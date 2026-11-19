@@ -39,6 +39,12 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/sim/game.js` — **host-only** simulation: cannon-es world, ragdolls, grabbing/grip, digging, truck, scoring.
 - `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
 - `src/view/models.js` — every mesh model built from primitives in code (coffins, truck, headstones, trees, the shovel).
+  The truck is a covered hearse (`models/truck.js`): the old pickup's cab in front of a closed coach with curtained oval
+  windows, a railed roof and two rear doors (rig 5 and 6 in `paint-props.js`) that swing open while it waits at the hatch.
+  The coach's sides and roof are colliders in `TRUCK.boxes`; the load rides inside and leaves only through the hatch.
+- New models follow one routine: screenshot the current one from fixed cameras (`view.debugCam`), turn the shots into
+  concept art (front, side, rear, top and three-quarter views) with an image model, then build it in code from the sheet.
+  Concept art stays outside the repo.
 - `src/view/morgue.js` — the morgue (walls, stations, the stockroom door and the office furniture go into the yard's static batch, the roof is its own mesh so it can hide for a third-person camera indoors, all signs are one canvas; the layout itself is `MORGUE` in `shared/layout.js`) and what the night does to the yard: bear traps (three instanced meshes) and fence sections that lean and fall.
 - `src/view/plants.js` — vegetation: flat ribbons and cards placed by a seeded generator into one static mesh (one draw call). It keeps tall plants away from plots, footpaths, the morgue and the truck's stop. Concept art for sky, ground and plants is kept outside the repo; the palettes in the shaders follow it.
 - `src/chars/` + `src/view/crew.js` — **every character** (diggers, zombies, dogs, the dead). Each one is described by distance formulas in JavaScript (`human.js`, `creatures.js`), turned into a low-poly mesh once at load (`mesher.js`: surface nets, baked occlusion, two bone weights per vertex) and painted by one shader from the rest position (`material.js`: gouache, knitting, stitched patches, dirt, faces, ink hull). No model or texture files. `cast.html` shows the whole cast (`npm run build:cast`).

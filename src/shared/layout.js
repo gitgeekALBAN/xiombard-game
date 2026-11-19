@@ -25,15 +25,18 @@ export const LANTERNS = [
 // inner width must exceed the widest belly corpses.js generates (0.74 m) or bodies cannot lie inside
 export const COFFIN = { hx: 0.5, hy: 0.25, hz: 1.12, wall: 0.05 };
 export const TRUCK = {
-  // boxes in truck-local space (truck faces -X; the open bed is at +X)
+  // boxes in truck-local space (truck faces -X; the hearse's coach is at +X, open only at the back)
   boxes: [
     { c: [-2.5, 0.85, 0], h: [0.5, 0.55, 0.9] }, // hood
     { c: [-1.3, 1.45, 0], h: [0.7, 0.95, 1.0] }, // cab
     { c: [1.2, 0.7, 0], h: [1.8, 0.2, 1.0] }, // bed floor (top at 0.9)
-    { c: [1.2, 1.02, 0.95], h: [1.8, 0.12, 0.05] }, // low bed wall (bodies must slide over it)
+    { c: [1.2, 1.02, 0.95], h: [1.8, 0.12, 0.05] }, // low bed wall
     { c: [1.2, 1.02, -0.95], h: [1.8, 0.12, 0.05] }, // low bed wall
+    { c: [1.19, 1.81, 0.93], h: [1.81, 0.61, 0.04] }, // coach side
+    { c: [1.19, 1.81, -0.93], h: [1.81, 0.61, 0.04] }, // coach side
+    { c: [1.2, 2.49, 0], h: [1.93, 0.08, 1.03] }, // coach roof
   ],
-  bed: { x0: -0.6, x1: 3.0, top: 0.9 },
+  bed: { x0: -0.6, x1: 3.0, top: 0.9, roof: 2.41 },
   half: [3.1, 1.2, 1.15],
 };
 

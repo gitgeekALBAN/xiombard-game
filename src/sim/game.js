@@ -202,8 +202,8 @@ export class Sim {
     const t = this.truck.body.position;
     for (let i = 0; i < n; i++) {
       const seed = this.seedCounter++ * 977 + Math.floor(this.rand() * 1000);
-      const layer = Math.floor(i / 2), side = i % 2 ? 0.45 : -0.45;
-      const m = new THREE.Matrix4().makeTranslation(t.x + 2.75, TRUCK.bed.top + 0.3 + layer * 0.6, t.z + side)
+      const layer = Math.floor(i / 2), side = i % 2 ? 0.45 : -0.45; // stacked two by two under the coach's roof
+      const m = new THREE.Matrix4().makeTranslation(t.x + 2.75, TRUCK.bed.top + 0.3 + layer * 0.45, t.z + side)
         .multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))
         .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
       this.spawnCorpse(m, limpRots(rng(seed)), seed);
@@ -234,12 +234,11 @@ export class Sim {
     b.position.set(TRUCK_SPAWN_X, 0, ROAD_Z);
     this.world.addBody(b);
     const e = this.addEnt({ kind: 'truck', body: b });
-    // Invisible cage around the bed: the load arrives on board and leaves only through the morgue's hatch.
+    // The coach's sides and roof are in TRUCK.boxes; an invisible back wall closes it for the load only (players can
+    // still climb in through the open rear doors): the bodies arrive on board and leave only through the morgue's hatch.
     const cage = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: this.mGround, collisionFilterGroup: G_TRUCK, collisionFilterMask: G_PROP, allowSleep: false });
-    cage.addShape(new CANNON.Box(new CANNON.Vec3(0.05, 1.0, 1.0)), new CANNON.Vec3(TRUCK.bed.x1 + 0.05, 1.9, 0));
-    cage.addShape(new CANNON.Box(new CANNON.Vec3(1.8, 0.9, 0.05)), new CANNON.Vec3(1.2, 2.04, 0.95));
-    cage.addShape(new CANNON.Box(new CANNON.Vec3(1.8, 0.9, 0.05)), new CANNON.Vec3(1.2, 2.04, -0.95));
-    cage.addShape(new CANNON.Box(new CANNON.Vec3(1.8, 0.05, 1.0)), new CANNON.Vec3(1.2, 2.95, 0));
+    const bed = TRUCK.bed, backH = (bed.roof - bed.top) / 2;
+    cage.addShape(new CANNON.Box(new CANNON.Vec3(0.05, backH, 1.0)), new CANNON.Vec3(bed.x1 + 0.05, bed.top + backH, 0));
     cage.position.copy(b.position);
     this.world.addBody(cage);
     return { ent: e, body: b, cage, state: 'arrive', t: 0, wheel: 0, loads: 1 };

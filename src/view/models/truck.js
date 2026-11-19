@@ -11,9 +11,11 @@ const LAMP = new THREE.CylinderGeometry(1, 1, 1, 10);
 const SKULL = new THREE.SphereGeometry(1, 7, 5);
 const SPIKE = new THREE.ConeGeometry(0.035, 0.16, 5);
 
-// Wobbly little vintage hearse pickup. Faces -X, open bed at +X, wheels touch y = 0.
-// The bed floor, low bed walls, cab back and footprint follow TRUCK.boxes in shared/layout.js;
-// everything else (fenders, lamps, roof curve, ornament) is decoration close to that volume.
+// Wobbly little vintage hearse. Faces -X, the closed coach with the bodies at +X, wheels touch y = 0.
+// The bed floor, low bed walls, coach walls and roof, cab back and footprint follow TRUCK.boxes in shared/layout.js;
+// everything else (fenders, lamps, roof curve and railing, ornament) is decoration close to that volume.
+// Concept: a cab like the old pickup's in front of a coach-built compartment with three curtained oval windows a
+// side, a rounded roof with a little railing and finials, and two rear doors that swing open at the hatch.
 // Side profile (XY) extruded along Z with soft beveled edges.
 function profile(pts, depth, bevel = 0.05, seg = 4) {
   const s = new THREE.Shape();
@@ -59,9 +61,9 @@ function wheel(k, at, rig) {
   k.add(DISC, { id: PAINT.WHEEL, color: PAL.coal }, { matrix: place, pspace: new THREE.Matrix4(), rig, outline: false });
 }
 
-// The truck is one painted mesh plus one ink hull (and the two headlight glows). The wheels and the tailgate are
+// The truck is one painted mesh plus one ink hull (and the two headlight glows). The wheels and the rear doors are
 // in that mesh too: the vertex shader turns them (aRig), reading the angles that the view writes into
-// userData.wheels[i].rotation.z and userData.gate.rotation.z, so those stay plain Object3Ds.
+// userData.wheels[i].rotation.z and userData.gate.rotation.z (0 shut .. -1.45 open), so those stay plain Object3Ds.
 export function buildTruck() {
   const k = new PaintKit(), g = new THREE.Group();
   const S = [1, -1];
@@ -80,13 +82,30 @@ export function buildTruck() {
   for (const z of S) k.add(BOX, dark, { pos: [-3.04, 0.42, z * 0.55], scale: [0.14, 0.1, 0.08] });
   k.add(BOX, dark, { pos: [3.05, 0.45, 0], scale: [0.14, 0.12, 2.0] });
 
-  // bed: plank floor and the two low walls exactly on their colliders, striped rails on top; tail lamps painted
+  // bed: plank floor and the two low walls exactly on their colliders, a striped rail on top; tail lamps painted
   k.add(BOX, { id: PAINT.TRUCK_FLOOR, color: PAL.wood }, { pos: [1.2, 0.7, 0], scale: [3.6, 0.4, 1.8] });
   for (const z of S) {
     k.add(BOX, body, { pos: [1.2, 0.82, z * 0.95], scale: [3.6, 0.64, 0.1] });
     k.add(BOX, { id: PAINT.TRUCK_RAIL, color: PAL.stripeLight, k: [0, 0, 0] }, { pos: [1.2, 1.17, z * 0.95], scale: [3.64, 0.07, 0.15] });
   }
   k.add(BOX, body, { pos: [2.97, 0.7, 0], scale: [0.08, 0.4, 1.9] });
+
+  // the coach on the bed: two long sides (carved panels and curtained oval windows are paint), corner pillars,
+  // a rounded roof with bone trim, and a little railing with finials on top
+  const coachWood = { id: PAINT.COACH, color: '#5a3a64' }, pillar = plain('#2c1d33', 0.3);
+  for (const z of S) k.add(BOX, coachWood, { pos: [1.19, 1.81, z * 0.93], scale: [3.62, 1.22, 0.08] });
+  for (const x of [-0.64, 3.0]) for (const z of S) k.add(BOX, pillar, { pos: [x, 1.81, z * 0.95], scale: [0.1, 1.28, 0.1] });
+  const roofGeo = profile([[-1.04, 2.37], [1.04, 2.37], [1.04, 2.46], [0.78, 2.63, 0, 2.66], [-0.78, 2.63, -1.04, 2.46]], 3.86, 0.04, 6);
+  k.add(roofGeo, plain('#3a2444', 0.35), { pos: [1.2, 0, 0], rot: [0, Math.PI / 2, 0] });
+  for (const z of S) k.add(BOX, bone, { pos: [1.2, 2.37, z * 1.03], scale: [3.84, 0.06, 0.05], outline: false });
+  for (const x of [-0.72, 3.12]) k.add(BOX, bone, { pos: [x, 2.37, 0], scale: [0.05, 0.06, 2.06], outline: false });
+  const railY = 2.86;
+  for (const x of [-0.45, 1.2, 2.85]) for (const z of S) {
+    k.add(ROD6, pewter, { pos: [x, (2.6 + railY) / 2, z * 0.8], scale: [0.026, railY - 2.6, 0.026], outline: false });
+    k.add(SPIKE, bone, { pos: [x, railY + 0.08, z * 0.8], scale: [1.1, 1, 1.1] });
+  }
+  for (const z of S) k.add(ROD6, pewter, { pos: [1.2, railY - 0.04, z * 0.8], rot: [0, 0, Math.PI / 2], scale: [0.022, 3.3, 0.022], outline: false });
+  for (const x of [-0.45, 2.85]) k.add(ROD6, pewter, { pos: [x, railY - 0.04, 0], rot: [Math.PI / 2, 0, 0], scale: [0.022, 1.6, 0.022], outline: false });
 
   // radiator: tall pewter shell with the grille painted on; skull ornament on the cap
   const rad = new THREE.Shape();
@@ -131,15 +150,13 @@ export function buildTruck() {
     pivots.push(w.position.clone());
   });
 
-  // tailgate, hinged at the bottom of the bed's rear edge; its curls and knob are painted (gate-local paint space)
+  // two rear doors, hinged at the coach's back corners (rig 5 on the +z side, 6 on the -z side); their window,
+  // checker band, panel, tombstone and handle are paint in truck space. The view swings them through gate.rotation.z.
   const gate = new THREE.Object3D();
-  gate.position.set(3.0, 0.9, 0);
   g.add(gate);
-  pivots.push(gate.position.clone());
-  const toGate = new THREE.Matrix4().makeTranslation(3.0, 0.9, 0);
-  for (const [paint, pos, scale] of [[{ id: PAINT.GATE, color: PAL.plum }, [-0.04, 0.12, 0], [0.08, 0.24, 1.9]], [{ id: PAINT.TRUCK_RAIL, color: PAL.stripeLight, k: [1, 0, 0] }, [-0.04, 0.27, 0], [0.11, 0.06, 1.94]]]) {
-    const local = mat4(pos, [0, 0, 0], scale);
-    k.add(BOX, paint, { matrix: toGate.clone().multiply(local), pspace: local, rig: 5 });
+  for (const z of S) {
+    k.add(BOX, { id: PAINT.DOOR, color: '#5a3a64' }, { pos: [3.05, 1.67, z * 0.475], scale: [0.07, 1.5, 0.93], rig: z > 0 ? 5 : 6 });
+    pivots.push(new THREE.Vector3(3.05, 1.67, z * 0.95));
   }
 
   const paint = propPaint({ rig: true });
