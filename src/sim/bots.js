@@ -14,7 +14,6 @@
 //   dig     — keep one to three graves open ahead of the coffins and corpses on their way
 //   flip    — right a tipped coffin (also inside a grave, where it blocks the burial)
 //   receive — stand at the intake table and take the bodies off the hearse through the hatch
-//   prep    — fetch the right name tag (board) or outfit (rack) and put it on a body in the morgue or in its coffin
 //   seal    — close the lid on a prepared body, then nail it while nails can be spared (NAIL_COST * 2 stay for repairs);
 //             only closed coffins are carried out to the graves
 //   repair  — by day with no walkers about, mend broken fence sections and traps while boards and nails last
@@ -111,6 +110,8 @@ export function createBots(sim, opts = {}) {
   const claims = new Map(); // key -> bot id ('e<id>' entity, 'L<id>' coffin being loaded, 'p<i>' plot worked, 'd<i>' plot to deliver to)
   const STATIC = staticObstacles();
   const log = opts.log || null;
+  const WORK = !!opts.work; // off by default: bots just stand outside (doStand); ?botwork in main.js puts them to work
+  const STAND = { x: MORGUE.x1 + 2.2, z: MORGUE.z1 - 1.2 }; // where the off-duty crew lines up, east of the morgue
   // tests may ask for a read-only view of every bot's state
   if (opts.inspect) opts.inspect.list = () => [...bots.values()].map((b) => ({ id: b.id, name: b.name, role: b.role, task: b.task && b.task.kind,
     stage: b.task && b.task.stage, desc: b.task && b.task.kind !== 'idle' ? desc(b.task) : '', stats: b.stats, path: b.path, wpi: b.wpi, mode: b.mode }));
@@ -520,26 +521,17 @@ export function createBots(sim, opts = {}) {
     let best = null, bestS = -Infinity;
     const consider = (s, t) => { if (s > bestS) { bestS = s; best = t; } };
 
-    // the morgue: take bodies in at the hatch, tag and dress them, close and nail their coffins
+    // the morgue: take bodies in at the hatch, close and nail their coffins. The registry desk and the dressing
+    // table are not taught yet: bots box bodies as they come (TODO: teach them the stations).
     if (sim.truck.state === 'wait' && sim.corpsesInBed().length && isFree(b, 'hatch') && !banned(b, 'hatch')) {
       const tb = MORGUE.table;
       consider(BASE.load * rw.load + 20 - COST_PER_M * hyp(tb.x - me.x, tb.z - 1 - me.z), { kind: 'receive', keys: ['hatch'] });
     }
-    for (const k of w.corpses) {
-      if (corpseOnTruck(k) || heldByOthers(w, p, k) || !isFree(b, 'n' + k.id) || banned(b, 'n' + k.id)) continue;
-      const q = k.bodies[0].position;
-      if (!insideMorgue(q.x, q.z, -0.5) && !w.boxedIn.has(k)) continue;
-      // a tag or outfit goes on the body nearest the hand: one lying behind another (stacked on the intake table)
-      // cannot be reached, so it is prepared later, in its coffin
-      if (!w.boxedIn.has(k) && w.corpses.some((o) => o !== k && !w.boxedIn.has(o) && o.bodies[0].position.z < q.z - 0.2 && hyp(o.bodies[0].position.x - q.x, o.bodies[0].position.z - q.z) < 1.1)) continue;
-      const need = k.tag !== k.name && sim.tags.includes(k.name) ? 'tag' : k.outfit !== k.suit ? 'suit' : null;
-      if (need) consider(BASE.load * rw.load + 6 - COST_PER_M * dist(q), { kind: 'prep', corpse: k, need, keys: ['n' + k.id] });
-    }
     for (const c of w.coffins) {
       if (w.up.get(c) < 0.72 || c.lid === 2 || heldByOthers(w, p, c) || !isFree(b, 'e' + c.id) || banned(b, 'e' + c.id) || !inYard(c.body.position)) continue;
-      const k = sim.coffinContents(c), prepped = k && (k.tag === k.name || !sim.tags.includes(k.name)) && k.outfit === k.suit;
-      // close a prepared body's lid; nail it while there are nails to spare for repairs
-      if ((!c.lid && prepped) || (c.lid === 1 && sim.nails >= NAIL_COST * 2)) {
+      const k = sim.coffinContents(c);
+      // close a body's lid; nail it while there are nails to spare for repairs
+      if ((!c.lid && k) || (c.lid === 1 && sim.nails >= NAIL_COST * 2)) {
         consider(BASE.fill * rw.fill - 4 - COST_PER_M * dist(c.body.position), { kind: 'seal', coffin: c, keys: ['e' + c.id] });
       }
     }
@@ -749,13 +741,6 @@ export function createBots(sim, opts = {}) {
         if (age > 20) return endTask(b, 'too slow', false), false;
         return true;
       }
-      case 'prep': {
-        const k = t.corpse;
-        if (!alive(k) || k.z) return endTask(b, 'gone', false, 0), false;
-        if (t.need === 'tag' ? k.tag === k.name : k.outfit === k.suit) return endTask(b, 'prepped', true, 0), false;
-        if (age > 30) return endTask(b, 'too slow', false, 10), false;
-        return true;
-      }
       case 'seal': {
         const c = t.coffin;
         if (!alive(c)) return endTask(b, 'gone', false, 0), false;
@@ -860,6 +845,7 @@ export function createBots(sim, opts = {}) {
   }
 
   function plan(b, p) {
+    if (!WORK) { if (!b.task) startTask(b, { kind: 'stand' }); return; }
     const w = world();
     if (w.walkers.length) { // something is up and about: does it need a shovel more than the job needs me?
       const th = pickThreat(b, p, w), cur = b.task && b.task.kind === 'fight' ? b.task : null;
@@ -1134,41 +1120,6 @@ export function createBots(sim, opts = {}) {
       }
       return;
     }
-    if (t.kind === 'prep') {
-      const k = t.corpse, want = t.need === 'tag' ? { type: 'tag', name: k.name } : { type: 'suit', suit: k.suit };
-      const it = p.item;
-      // done since the last check (validate only runs between decisions): do not mistake it for a missing tag
-      if (!it && (t.need === 'tag' ? k.tag === k.name : k.outfit === k.suit)) return endTask(b, 'prepped', true, 0);
-      if (it && (it.type !== want.type || (want.type === 'tag' ? it.name !== want.name : it.suit !== want.suit))) { toggle(b, 'th'); return; } // wrong one: put it back
-      if (!it) { // fetch it: name tags hang on the west wall, outfits on the east wall
-        let x, z, yaw;
-        if (want.type === 'tag') {
-          const i = sim.tags.indexOf(want.name);
-          if (i < 0) return endTask(b, 'no tag for them', false, 20);
-          x = MORGUE.board.x + 0.95; z = MORGUE.board.z0 + i * MORGUE.board.dz; yaw = -Math.PI / 2;
-        } else {
-          const i = OUTFITS.findIndex((o) => o.id === want.suit);
-          x = MORGUE.rack.x - 0.95; z = MORGUE.rack.z0 + i * MORGUE.rack.dz; yaw = Math.PI / 2;
-        }
-        if (go(b, p, x, z, { arrive: 0.2, slow: 1 }, dt) < 0.25) {
-          b.wantMove = false; turn(b, yaw, 6, dt);
-          if (Math.abs(angDiff(yaw, b.yaw)) < 0.2) toggle(b, 'g');
-        }
-        return;
-      }
-      // walk up to them and use it as soon as they are in reach; a body on the intake table is reached from the
-      // room side (the planner would push the goal into the gap behind the table)
-      const q = k.bodies[0].position, tb = MORGUE.table;
-      const tgt = sim.itemTarget(p);
-      if (tgt === k) { b.wantMove = false; b.inp.mz = 0; toggle(b, 'g'); return; }
-      t.blockT = tgt ? (t.blockT || 0) + dt : 0; // somebody else lies nearer the hand
-      if (t.blockT > 6) return endTask(b, 'another body in the way', false, 15);
-      const onTable = Math.abs(q.x - tb.x) < tb.hx + 0.3 && Math.abs(q.z - tb.z) < tb.hz + 0.5;
-      const gx = onTable ? clamp(q.x, tb.x - tb.hx + 0.2, tb.x + tb.hx - 0.2) : q.x, gz = onTable ? tb.z - tb.hz - 0.55 : q.z;
-      const d = hyp(q.x - pos.x, q.z - pos.z), r = onTable || d > 1.3 ? go(b, p, gx, gz, { arrive: onTable ? 0.25 : 0.6, slow: 1 }, dt) : 0;
-      if (r < 0.7 && (onTable || d < 2.2)) { b.wantMove = false; face(b, p, q.x, q.z, dt); b.inp.mz = onTable ? 0.1 : 0.25; }
-      return;
-    }
     if (t.kind === 'repair') { // stand by it and hold dig
       let tx, tz;
       if (t.fence !== undefined) { const f = sim.fence[t.fence]; [tx, tz] = f.axis === 'z' ? [t.spot.x, f.at] : [f.at, t.spot.z]; }
@@ -1204,6 +1155,19 @@ export function createBots(sim, opts = {}) {
       if (t.n > 2 && b.r() < b.persona.flop * 0.25) flop(b, p, 1.2 + b.r() * 1.5, 'bored', true);
     }
     const r = go(b, p, t.spot.x, t.spot.z, { arrive: 0.4, slow: 1.2 }, dt);
+    if (r < 0.4) { turn(b, t.look, 1.2, dt); b.wantMove = false; }
+  }
+
+  // Off duty (the default, see WORK): walk out of the morgue to a spot of your own east of it and just stand there,
+  // looking out over the yard. No flops, no fights, no jobs.
+  function doStand(b, p, t, dt) {
+    if (p.grab) return dropSafely(b, p, dt);
+    if (!t.spot) {
+      const i = [...bots.keys()].indexOf(b.id);
+      t.spot = { x: STAND.x + (i % 2) * 1.4, z: STAND.z - i * 1.3 };
+      t.look = -Math.PI * 0.75 + (b.r() - 0.5) * 0.6; // toward the graves, give or take
+    }
+    const r = go(b, p, t.spot.x, t.spot.z, { arrive: 0.3, slow: 1.2 }, dt);
     if (r < 0.4) { turn(b, t.look, 1.2, dt); b.wantMove = false; }
   }
 
@@ -1297,7 +1261,6 @@ export function createBots(sim, opts = {}) {
       if (b.celebrate.kind === 'flop' || T > b.celebrate.at + 0.15) b.celebrate = null;
     }
     if (T >= b.nextPlan) { b.nextPlan = T + PLAN_DT * (0.8 + 0.4 * b.r()); plan(b, p); }
-    if (p.item && !(b.task && b.task.kind === 'prep')) toggle(b, 'th'); // put back a tag or outfit it no longer needs
     const pos = p.body.position;
     // wearing a coffin as a hat (it landed on my head): go limp so it slides off
     const hat = w.coffins.some((c) => { const q = c.body.position; return q.y > pos.y + 1.2 && q.y < pos.y + 2.6 && hyp(q.x - pos.x, q.z - pos.z) < 0.8 && !w.held.get(c); });
@@ -1334,7 +1297,8 @@ export function createBots(sim, opts = {}) {
         else if (t.kind === 'dig' || t.kind === 'fill') doWork(b, p, t, dt);
         else if (t.kind === 'flip') doFlip(b, p, t, dt);
         else if (t.kind === 'fight') doFight(b, p, t, dt);
-        else if (t.kind === 'receive' || t.kind === 'prep' || t.kind === 'seal' || t.kind === 'repair') doMorgue(b, p, t, dt);
+        else if (t.kind === 'receive' || t.kind === 'seal' || t.kind === 'repair') doMorgue(b, p, t, dt);
+        else if (t.kind === 'stand') doStand(b, p, t, dt);
         else doIdle(b, p, t, dt);
       }
     }
@@ -1380,7 +1344,7 @@ export function createBots(sim, opts = {}) {
     update(dt) {
       dt = Math.min(dt, 0.1);
       T += dt;
-      if (sim.score > lastScore) { lastScore = sim.score; celebrate(); }
+      if (sim.score > lastScore) { lastScore = sim.score; if (WORK) celebrate(); }
       for (const b of [...bots.values()]) tick(b, dt);
     },
   };

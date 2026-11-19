@@ -1,0 +1,11 @@
+{
+  "name": "XIOMBARD: Night Shift",
+  "short_name": "XIOMBARD",
+  "description": "A co-op ragdoll gravedigging game.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#120e1a",
+  "theme_color": "#120e1a"
+}

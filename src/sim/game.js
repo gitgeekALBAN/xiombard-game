@@ -6,7 +6,7 @@ import { ZOMBIES, ZTYPE, Z_WALKERS, Z_DRAGGER, Z_DOGS, Z_ODD, zombieRig, zombieP
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
   ROAD_Z, FENCE, ROAD_HALF, SPAWN, staticBoxes,
-  MORGUE, OUTFITS, outfitLabel, NAIL_COST, insideMorgue, FENCE_SECTIONS, FENCE_HP, fenceSectionAt, TRAPS, TRAP_DUR,
+  MORGUE, OUTFITS, outfitLabel, NAIL_COST, insideMorgue, atStation, FENCE_SECTIONS, FENCE_HP, fenceSectionAt, TRAPS, TRAP_DUR,
 } from '../shared/layout.js';
 import { rng, corpseName } from '../shared/rng.js';
 
@@ -73,7 +73,6 @@ export class Sim {
     this.buried = 0;  // bodies laid to rest
     this.nails = 12;
     this.boards = 4;
-    this.tags = Array.from({ length: MORGUE.board.n }, () => null); // name tags on the board
     this.seedCounter = 1;
     this.rand = rng(Date.now() & 0xffff);
     this._ray = new CANNON.RaycastResult();
@@ -102,8 +101,7 @@ export class Sim {
     this.fence = FENCE_SECTIONS.map((f) => ({ ...f, hp: FENCE_HP, bodies: [], bashSfx: 0 }));
     this.fence.forEach((f) => this.buildFence(f));
     this.traps = TRAPS.map(([x, z]) => ({ x, z, dur: TRAP_DUR, armed: true, rearm: 0 }));
-    for (const [x, z] of MORGUE.coffins) this.spawnCoffin(x, 0.05, z, 0);
-    for (let i = 0; i < this.tags.length; i++) this.tags[i] = corpseName(Math.floor(this.rand() * 1e6)); // decoy tags
+    this.restockCoffin(true);
     this.spawnLoad(3);
   }
 
@@ -270,11 +268,11 @@ export class Sim {
     });
     return p;
   }
-  removePlayer(id) { const p = this.byId(id); if (p) { this.drop(p); this.returnItem(p); this.removeEnt(p); } }
+  removePlayer(id) { const p = this.byId(id); if (p) { this.drop(p); this.removeEnt(p); } }
   setInput(id, inp) {
     const p = this.byId(id);
     if (!p) return;
-    if (!p.last) p.last = { g: inp.g, th: inp.th, fl: inp.fl };
+    if (!p.last) p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk };
     p.input = inp;
   }
 
@@ -286,7 +284,7 @@ export class Sim {
   }
 
   toRagdoll(p, extra) {
-    this.returnItem(p);
+    p.choose = null;
     if (p.rag) return;
     this.drop(p);
     const xf = this.diggerPose(p, new Float32Array(NCREW * 7));
@@ -394,7 +392,7 @@ export class Sim {
     let mate = g.coffin && this.holdersOf(g.ent)[0];
     if (mate && assist && this.gravePlot(g.ent)) { this.drop(mate); mate = null; } // let go over a dug grave: both hands off, in it goes
     if (mate) mate.grab.end = 0; // the one left holding it takes it across the chest again
-    if (assist && g.ent.kind === 'corpse') this.coffinAssist(g.ent, p.hand.position);
+    if (assist && g.ent.kind === 'corpse' && !this.coffinAssist(g.ent, p.hand.position)) this.tableAssist(g.ent, p.hand.position);
     if (assist && g.ent.kind === 'coffin' && !mate) this.graveAssist(g.ent);
   }
   // ---------- carrying ----------
@@ -523,8 +521,9 @@ export class Sim {
       });
       e.body.wakeUp();
       this.emit('sfx', { name: 'thud', pos: [c.x, c.y, c.z] });
-      return;
+      return true;
     }
+    return false;
   }
   throwHeld(p) {
     const g = p.grab;
@@ -745,6 +744,8 @@ export class Sim {
     if (ps && ps.act === 'fill') return { ...ps, plot };
     const rt = this.repairTarget(p);
     if (rt && rt.act) return rt;
+    const dr = this.stationBody(p, MORGUE.dress);
+    if (dr && dr.outfit !== 'shroud' && !p.choose) return { act: 'redress', body: dr, hint: 'Hold F to change their clothes' };
     const near = this.ents.filter((e) => e.kind === 'coffin' && this.coffinDist(p, e) < 1.15).sort((a, b) => this.coffinDist(p, a) - this.coffinDist(p, b));
     const cs = near.map((c) => this.coffinStatus(c)).find((st) => st.act);
     return cs || (ps ? { ...ps, plot } : near.length ? this.coffinStatus(near[0]) : rt);
@@ -753,7 +754,7 @@ export class Sim {
     const w = this.workTarget(p);
     p.tool = w && w.act;
     if (!w || !w.act) { p.work = 0; return; }
-    const key = w.act + (w.coffin ? w.coffin.id : w.plot ? w.plot.i : w.trap !== undefined ? 't' + w.trap : w.fence !== undefined ? 'f' + w.fence : '');
+    const key = w.act + (w.coffin ? w.coffin.id : w.plot ? w.plot.i : w.trap !== undefined ? 't' + w.trap : w.fence !== undefined ? 'f' + w.fence : w.body ? 'b' + w.body.id : '');
     if (p.workKey !== key) { p.workKey = key; p.work = 0; }
     if (w.act === 'dig' || w.act === 'fill') { this.workPlot(p, w.plot, h); return; }
     p.work += h;
@@ -761,9 +762,10 @@ export class Sim {
       const q = w.coffin ? w.coffin.body.position : p.body.position;
       this.emit('sfx', { name: 'bonk', pos: [q.x, q.y, q.z] });
     }
-    if (p.work < (w.act === 'lid' ? 1 : w.act === 'repair' ? 2 : 1.6)) return;
+    if (p.work < (w.act === 'redress' ? 0.5 : w.act === 'lid' ? 1 : w.act === 'repair' ? 2 : 1.6)) return;
     p.work = 0;
-    if (w.act === 'lid') this.closeLid(w.coffin, w.body);
+    if (w.act === 'redress') this.openWardrobe(p, w.body);
+    else if (w.act === 'lid') this.closeLid(w.coffin, w.body);
     else if (w.act === 'repair') this.repair(w);
     else this.nailLid(w.coffin);
   }
@@ -794,40 +796,27 @@ export class Sim {
     const q = p.body.position, tb = MORGUE.table;
     return Math.abs(q.x - tb.x) < tb.hx + 0.6 && q.z > tb.z - 1.6 && q.z < MORGUE.z1 && insideMorgue(q.x, q.z);
   }
-  // which name tag on the board (west wall) / outfit on the rack (east wall) the digger is reaching for, or -1
-  boardSlot(p) {
-    const B = MORGUE.board, q = p.body.position;
-    if (!insideMorgue(q.x, q.z) || q.x > B.x + 1.5) return -1;
-    const z = this.handPoint(p, 1).z;
-    let best = -1, bd = 0.45;
-    for (let i = 0; i < B.n; i++) { const d = Math.abs(B.z0 + i * B.dz - z); if (d < bd) { bd = d; best = i; } }
-    return best;
+
+  // ---------- the morgue's stations ----------
+  // Bodies lying on a station's table (nobody holding them).
+  bodiesOn(st) {
+    return this.ents.filter((e) => {
+      if (e.kind !== 'corpse' || e.z || this.holders(e)) return false;
+      const q = e.bodies[0].position;
+      return Math.abs(q.x - st.x) < st.hx + 0.25 && Math.abs(q.z - st.z) < st.hz + 0.4 && q.y > st.top - 0.15 && q.y < st.top + 1.2;
+    });
   }
-  rackSlot(p) {
-    const R = MORGUE.rack, q = p.body.position;
-    if (!insideMorgue(q.x, q.z) || q.x < R.x - 1.5) return -1;
-    const z = this.handPoint(p, 1).z;
-    let best = -1, bd = 0.5;
-    for (let i = 0; i < OUTFITS.length; i++) { const d = Math.abs(R.z0 + i * R.dz - z); if (d < bd) { bd = d; best = i; } }
-    return best;
+  // The body on a station the digger stands at, or null.
+  stationBody(p, st) {
+    const q = p.body.position;
+    if (p.rag || !insideMorgue(q.x, q.z) || !atStation(st, q.x, q.z)) return null;
+    return this.bodiesOn(st)[0] || null;
   }
-  // the body a tag or an outfit in hand would go on
-  itemTarget(p) {
-    const hand = this.handPoint(p, 0.9);
-    let best = null, bd = 1.3;
-    for (const e of this.ents) {
-      if (e.kind !== 'corpse' || e.z) continue;
-      for (const b of e.bodies) { const d = b.position.distanceTo(hand); if (d < bd) { bd = d; best = e; } }
-    }
-    return best;
-  }
-  // Pull the next body off the hearse through the hatch onto the intake table.
-  acceptBody() {
-    const body = this.corpsesInBed()[0];
-    if (!body) return false;
-    const tb = MORGUE.table, rig = corpseRig(body.seed);
-    const stacked = this.ents.filter((e) => e.kind === 'corpse' && e !== body && Math.abs(e.bodies[0].position.x - tb.x) < tb.hx + 0.2 && Math.abs(e.bodies[0].position.z - tb.z) < 0.8).length;
-    const m = new THREE.Matrix4().makeTranslation(tb.x + rig.height / 2, tb.top + rig.back + 0.08 + stacked * 0.45, tb.z)
+  nearStation(p, st) { const q = p.body.position; return !p.rag && insideMorgue(q.x, q.z) && atStation(st, q.x, q.z); }
+  // Lay a body on its back along a table (the intake table, the registry desk, the dressing table).
+  layOn(body, st, stacked = 0) {
+    const rig = corpseRig(body.seed);
+    const m = new THREE.Matrix4().makeTranslation(st.x + rig.height / 2, st.top + rig.back + 0.08 + stacked * 0.45, st.z)
       .multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))
       .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
     const xf = rigPose(rig, m, limpRots(rng(body.seed)), new Float32Array(NCREW * 7));
@@ -835,70 +824,103 @@ export class Sim {
       this.bodyFromXf(b, xf, i * 7);
       b.velocity.setZero(); b.angularVelocity.setZero(); b.wakeUp();
     });
-    body.greeted = true;
-    if (!this.tags.includes(body.name)) {
-      // make sure the right name tag hangs on the board, replacing a decoy nobody needs
-      const needed = new Set(this.ents.filter((e) => e.kind === 'corpse' && e.tag !== e.name).map((e) => e.name));
-      let i = this.tags.indexOf(null);
-      if (i < 0) i = this.tags.findIndex((t) => !needed.has(t));
-      if (i < 0) i = Math.floor(this.rand() * this.tags.length);
-      this.tags[i] = body.name;
+  }
+  // A body let go over a free station table is laid out straight on it (like coffinAssist for coffins).
+  tableAssist(body, hand) {
+    for (const st of [MORGUE.desk, MORGUE.dress, MORGUE.table]) {
+      if (Math.abs(hand.x - st.x) > st.hx + 0.6 || Math.abs(hand.z - st.z) > st.hz + 0.9 || hand.y > st.top + 1.8) continue;
+      if (this.bodiesOn(st).some((e) => e !== body)) continue;
+      this.layOn(body, st);
+      this.emit('sfx', { name: 'thud', pos: [st.x, st.top, st.z] });
+      return true;
     }
+    return false;
+  }
+  // Pull the next body off the hearse through the hatch onto the intake table.
+  acceptBody() {
+    const body = this.corpsesInBed()[0];
+    if (!body) return false;
+    const tb = MORGUE.table;
+    this.layOn(body, tb, this.bodiesOn(tb).filter((e) => e !== body).length);
+    body.greeted = true;
     this.emit('sfx', { name: 'thud', pos: [tb.x, tb.top, tb.z] });
     this.emit('toast', { text: `Note: ${body.name}, ${outfitLabel(body.suit).toLowerCase()}`, pos: [tb.x, tb.top + 1.1, tb.z] });
     return true;
   }
-  // put the tag in hand back on the board (an outfit just goes back on the rack)
-  returnItem(p) {
-    const it = p.item;
-    p.item = null;
-    if (it && it.type === 'tag') { const i = this.tags.indexOf(null); if (i >= 0) this.tags[i] = it.name; }
-  }
-  useItem(p) {
-    const it = p.item, body = this.itemTarget(p);
-    if (!body) { this.returnItem(p); this.emit('sfx', { name: 'grab', pos: [p.body.position.x, 1, p.body.position.z] }); return; }
-    const q = body.bodies[0].position, pos = [q.x, q.y + 0.8, q.z];
-    if (it.type === 'tag') {
-      if (body.tag) { const i = this.tags.indexOf(null); if (i >= 0) this.tags[i] = body.tag; } // the old tag goes back on the board
-      body.tag = it.name;
-      this.emit('toast', { text: `Tagged "${it.name}"`, pos });
-    } else {
-      body.outfit = it.suit;
-      this.emit('toast', { text: `Dressed in the ${outfitLabel(it.suit).toLowerCase()}`, pos });
-    }
-    p.item = null;
+  // The registry desk: write the name tag of the body lying on it.
+  register(body) {
+    body.tag = body.name;
     this.version++;
+    const q = body.bodies[0].position;
+    this.emit('sfx', { name: 'grab', pos: [q.x, q.y, q.z] });
+    this.emit('toast', { text: `Registered: ${body.name}`, pos: [q.x, q.y + 0.8, q.z] });
+  }
+  // The dressing table: E opens the outfit choice for the body on it; the pick comes in through the input (pk/pv).
+  openWardrobe(p, body) {
+    p.choose = body.id;
+    const q = body.bodies[0].position;
+    this.emit('sfx', { name: 'grab', pos: [q.x, q.y, q.z] });
+  }
+  pickOutfit(p, i) {
+    const body = p.choose && this.byId(p.choose);
+    p.choose = null;
+    if (!body || !OUTFITS[i]) return;
+    body.outfit = OUTFITS[i].id;
+    this.version++;
+    const q = body.bodies[0].position, pos = [q.x, q.y + 0.8, q.z];
+    this.emit('toast', { text: `Dressed in the ${outfitLabel(body.outfit).toLowerCase()}`, pos });
     this.emit('sfx', { name: 'grab', pos });
   }
-  // The grab button in the morgue: use the item in hand, take a body in at the hatch, take a tag or an outfit.
-  // False when none of that applies, so the usual grab / shovel swing happens.
+  // the outfit choice stays open only while you stand at the dressing table with that body on it
+  checkWardrobe(p) {
+    if (!p.choose) return;
+    const body = this.byId(p.choose);
+    if (!body || p.rag || p.grab || !this.nearStation(p, MORGUE.dress) || !this.bodiesOn(MORGUE.dress).includes(body)) p.choose = null;
+  }
+  // The coffin waiting on the stock table, if any.
+  stockCoffin() {
+    const S = MORGUE.stock;
+    return this.ents.find((e) => {
+      if (e.kind !== 'coffin') return false;
+      const q = e.body.position;
+      return Math.abs(q.x - S.x) < S.hx + 0.4 && Math.abs(q.z - S.z) < S.hz + 0.4 && q.y > S.top - 0.1 && q.y < S.top + 1.2;
+    });
+  }
+  // A fresh coffin comes in from the stockroom whenever the stock table is clear.
+  restockCoffin(quiet = false) {
+    const S = MORGUE.stock;
+    if (this.stockCoffin() || this.ents.filter((e) => e.kind === 'coffin').length >= 8) return;
+    const onTable = (q) => Math.abs(q.x - S.x) < S.hx + 0.3 && Math.abs(q.z - S.z) < S.hz + 0.3 && q.y > S.top - 0.3;
+    if (this.ents.some((e) => (e.kind === 'digger' && onTable(this.feet(e))) || (e.kind === 'corpse' && onTable(e.bodies[0].position)))) return;
+    this.spawnCoffin(S.x, S.top + 0.02, S.z, 0);
+    if (quiet) return;
+    this.emit('sfx', { name: 'thud', pos: [S.x, S.top + 0.3, S.z] });
+    this.emit('toast', { text: 'A coffin from the stockroom', pos: [S.x, S.top + 1.2, S.z] });
+  }
+  // E in the morgue: take a body in at the hatch, write the name tag at the registry desk, choose an outfit at the
+  // dressing table. False when none of that applies, so the usual grab / shovel swing happens.
   morgueKey(p) {
-    if (p.item) { this.useItem(p); return true; }
     if (this.truck.state === 'wait' && this.atHatch(p) && this.acceptBody()) return true;
-    const t = this.boardSlot(p);
-    if (t >= 0 && this.tags[t]) {
-      p.item = { type: 'tag', name: this.tags[t] };
-      this.tags[t] = null;
-      this.emit('sfx', { name: 'grab', pos: [MORGUE.board.x, 1.4, MORGUE.board.z0] });
-      return true;
-    }
-    const r = this.rackSlot(p);
-    if (r < 0) return false;
-    p.item = { type: 'suit', suit: OUTFITS[r].id };
-    this.emit('sfx', { name: 'grab', pos: [MORGUE.rack.x, 1.4, MORGUE.rack.z0] });
-    return true;
+    const reg = this.stationBody(p, MORGUE.desk);
+    if (reg && reg.tag !== reg.name) { this.register(reg); return true; }
+    const dr = this.stationBody(p, MORGUE.dress);
+    if (dr && dr.outfit === 'shroud') { this.openWardrobe(p, dr); return true; }
+    return false;
   }
   morgueHint(p) {
-    if (p.item) {
-      const body = this.itemTarget(p), what = p.item.type === 'tag' ? `tag "${p.item.name}"` : outfitLabel(p.item.suit).toLowerCase();
-      if (!body) return `Holding the ${what} · go to the body · Q to put it back`;
-      return p.item.type === 'tag' ? `E: hang the ${what} on this body` : `E: dress this body in the ${what}`;
-    }
+    if (p.choose) return 'Pick an outfit: keys 1-5 · Q to cancel';
     if (this.truck.state === 'wait' && this.atHatch(p) && this.corpsesInBed().length) return 'E: take the body in through the hatch';
-    const t = this.boardSlot(p);
-    if (t >= 0 && this.tags[t]) return `E: take the name tag "${this.tags[t]}"`;
-    const r = this.rackSlot(p);
-    return r >= 0 ? `E: take the ${OUTFITS[r].label.toLowerCase()}` : '';
+    if (this.nearStation(p, MORGUE.desk)) {
+      const reg = this.stationBody(p, MORGUE.desk);
+      if (!reg) return 'Registry desk: lay a body on it to write its name tag';
+      return reg.tag !== reg.name ? `E: write the name tag for ${reg.name}` : 'Registered! Carry them to the dressing table';
+    }
+    if (this.nearStation(p, MORGUE.dress)) {
+      const dr = this.stationBody(p, MORGUE.dress);
+      if (!dr) return 'Dressing table: lay a body on it to dress them';
+      return dr.outfit === 'shroud' ? `E: choose an outfit for ${dr.name}` : 'Dressed! Hold F to change · carry them to the coffin';
+    }
+    return '';
   }
   // The delivery note of the body this player is dealing with, for the HUD card.
   cardFor(p) {
@@ -1267,7 +1289,7 @@ export class Sim {
   }
 
   updatePlayer(p, h) {
-    const inp = p.input, last = p.last || (p.last = { g: inp.g, th: inp.th, fl: inp.fl });
+    const inp = p.input, last = p.last || (p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk });
     if (inp.fl !== last.fl) {
       last.fl = inp.fl;
       if (!p.rag) { this.toRagdoll(p); this.emit('sfx', { name: 'flop', pos: [p.body.position.x, 1, p.body.position.z] }); }
@@ -1332,7 +1354,9 @@ export class Sim {
       else if (!this.morgueKey(p)) { if (this.findGrab(p)) this.grab(p); else this.whack(p); }
     }
     if (!p.swingHit && this.time - p.swingT >= SWING_TIME * 0.35) this.landWhack(p);
-    if (inp.th !== last.th) { last.th = inp.th; if (p.item) this.returnItem(p); else this.throwHeld(p); }
+    if (inp.th !== last.th) { last.th = inp.th; if (p.choose) p.choose = null; else this.throwHeld(p); }
+    // a pick from the outfit choice: pk counts the picks, pv is the outfit (index into OUTFITS)
+    if (inp.pk !== last.pk) { last.pk = inp.pk; if (p.choose) this.pickOutfit(p, inp.pv); }
 
     if (p.digging) this.doWork(p, h); // dig, fill, close a lid, nail it, repair
     else { p.tool = null; p.work = 0; }
@@ -1431,21 +1455,10 @@ export class Sim {
       if (!(r.p.grab && (r.p.grab.ent === r.ent || r.p.grab.contents === r.ent))) for (const b of this.bodiesOf(r.ent)) b.collisionFilterMask |= r.p.bit;
       return false;
     });
-    // keep a couple of empty coffins in the morgue
-    if (Math.floor(this.time / 2) !== Math.floor((this.time - h) / 2)) {
-      const coffins = this.ents.filter((e) => e.kind === 'coffin');
-      // only coffins a player can actually use count: upright, open, empty, inside the fence and not already in a grave
-      const free = coffins.filter((c) => this.coffinUp(c) > 0.5 && Math.abs(c.body.position.x) < 27 && Math.abs(c.body.position.z) < 27
-        && !c.lid && !this.coffinContents(c) && !this.plots.some((pl) => this.coffinInPlot(pl) === c));
-      if (free.length < 2 && coffins.length < 8) {
-        // a free spot, pointing at the door, never inside another coffin or under somebody's feet
-        const spot = MORGUE.coffins.find(([x, z]) => !this.ents.some((e) => (e.kind === 'coffin' || e.kind === 'digger')
-          && Math.abs(this.feet(e).x - x) < 1 && Math.abs(this.feet(e).z - z) < 1.6));
-        if (spot) { this.spawnCoffin(spot[0], 0.05, spot[1], 0); this.emit('sfx', { name: 'thud', pos: [spot[0], 0.5, spot[1]] }); }
-      }
-    }
+    // a fresh coffin comes in from the stockroom whenever the stock table is clear
+    if (Math.floor(this.time / 2) !== Math.floor((this.time - h) / 2)) this.restockCoffin();
     if (Math.floor(this.time * 5) !== Math.floor((this.time - h) * 5)) {
-      for (const e of this.ents) if (e.kind === 'digger') { e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
+      for (const e of this.ents) if (e.kind === 'digger') { this.checkWardrobe(e); e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
     }
   }
 
@@ -1564,7 +1577,6 @@ export class Sim {
     this.events = [];
     return {
       score: this.score, buried: this.buried, nails: this.nails, boards: this.boards,
-      tags: this.tags,                                             // name tags on the morgue's board (null = taken)
       fence: this.fence.map((f) => Math.round(f.hp)),              // per section, 0 = down
       traps: this.traps.map((t) => t.dur * 2 + (t.armed ? 1 : 0)), // snaps left * 2 + armed
       plots: this.plots.map((p) => [+p.depth.toFixed(3), +p.fill.toFixed(3), p.buried ? 1 : 0, p.seed, p.name, p.unrest || 0]),
@@ -1575,7 +1587,7 @@ export class Sim {
       risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
-        item: e.item || null, card: e.card || null, sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
+        choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
         grip: e.grab && !(e.grab.coffin && this.holders(e.grab.ent) > 1) ? +Math.max(0, e.grab.grip).toFixed(2) : -1, // two on a coffin: nothing to lose
       })),
       ev,

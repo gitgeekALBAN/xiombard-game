@@ -5,6 +5,27 @@ export const touch = { active: false, mx: 0, mz: 0, run: false, jump: false, dig
 const STICK_R = 52;
 const LOOK_SENS = 0.0055;
 
+// Phones: go fullscreen and hold the screen sideways. Android Chrome does both; iPhone Safari does neither, and there
+// the home-screen shortcut (manifest + apple-mobile-web-app-capable in index.html) is how the browser bars go away.
+// Both need a click (a pointerdown from a finger does not count as a user gesture).
+const root = document.documentElement;
+export const canFullscreen = !!(root.requestFullscreen || root.webkitRequestFullscreen);
+const isFull = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+function lockLandscape() {
+  try { screen.orientation?.lock?.('landscape')?.catch?.(() => {}); } catch { /* not supported */ }
+}
+export function goLandscape() {
+  if (!canFullscreen || isFull()) { lockLandscape(); return; }
+  try {
+    const p = (root.requestFullscreen || root.webkitRequestFullscreen).call(root, { navigationUI: 'hide' });
+    if (p && p.then) p.then(lockLandscape, () => {}); else lockLandscape();
+  } catch { /* refused: play in the page */ }
+}
+export function toggleFullscreen() {
+  if (!isFull()) { goLandscape(); return; }
+  try { (document.exitFullscreen || document.webkitExitFullscreen).call(document)?.catch?.(() => {}); } catch { /* ignore */ }
+}
+
 export function isTouchDevice() {
   return matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
@@ -76,5 +97,13 @@ export function initTouch(root, look, actions) {
   button('#t-flop', actions.flop);
   button('#t-jump', () => { touch.jump = true; }, () => { touch.jump = false; });
   button('#t-dig', () => { touch.dig = true; }, () => { touch.dig = false; });
+  const full = root.querySelector('#t-full');
+  if (full) {
+    if (!canFullscreen) full.remove();
+    else {
+      full.addEventListener('pointerdown', (e) => e.stopPropagation());
+      full.addEventListener('click', (e) => { e.preventDefault(); toggleFullscreen(); });
+    }
+  }
   root.addEventListener('contextmenu', (e) => e.preventDefault());
 }

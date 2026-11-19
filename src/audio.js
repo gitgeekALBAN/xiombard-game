@@ -1,7 +1,9 @@
 // Tiny procedural sound effects (WebAudio oscillators and noise) — no audio files.
 let ctx = null;
+const MUTED = new URLSearchParams(location.search).has('mute'); // ?mute: silent (scripted tests, screenshots)
 export function unlockAudio() {
-  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (MUTED) return;
+  if (!ctx) ctx =new (window.AudioContext || window.webkitAudioContext)();
   if (ctx.state === 'suspended') ctx.resume();
 }
 

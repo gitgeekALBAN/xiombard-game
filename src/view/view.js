@@ -222,7 +222,6 @@ export class View {
       else if (ev.type === 'toast') this.toast(ev.text, ev.pos, ev.big);
       else if (ev.type === 'puff') this.puff(ev.pos, ev.kind);
     }
-    this.world.morgue.setTags(st.tags);
     this.world.setYard(st);
     st.plots.forEach(([d, f, b, seed, name], i) => {
       this.graves.setPlot(i, d, f, b, seed, name, this.time);

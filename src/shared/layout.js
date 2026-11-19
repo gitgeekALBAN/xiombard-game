@@ -7,7 +7,7 @@ export const ROAD_Z = 15;
 export const ROAD_HALF = 2.2;
 export const TRUCK_STOP_X = 1;
 export const TRUCK_START_X = 60;
-export const PILE = { x: -2.9, z: 8.1 }; // fresh coffins: inside the morgue
+export const PILE = { x: -10.6, z: 7.9 }; // fresh coffins: the morgue's stock table (MORGUE.stock)
 export const SPAWN = { x: 0.8, z: 9.4 }; // inside the morgue
 export const CARPENTER = { x: -15.4, z: 7.4 }; // the carpenter's corner by the shed (decor)
 
@@ -18,7 +18,7 @@ export const PLOTS = [];
 for (const z of [3.2, -2.4]) for (const x of [-8, -4.5, -1, 2.5, 6]) PLOTS.push({ x, z });
 
 export const LANTERNS = [
-  [-10.5, 0.4], [9, 0.4], [7.6, 12.9], [-7, 11.5], [-14.5, 10.5], [0, -7],
+  [-10.5, 0.4], [9, 0.4], [7.6, 12.9], [-7, 12.95], [-14.5, 10.5], [0, -7],
 ];
 
 // Coffin and truck dimensions (shared by physics and visuals).
@@ -37,19 +37,34 @@ export const TRUCK = {
   half: [3.1, 1.2, 1.15],
 };
 
-// The one-storey morgue between the road and the graves: the hearse parks along its north wall and passes bodies
-// in through the loading hatch; the south door leads out to the graveyard.
+// The morgue: a long one-storey office between the road and the graves. The hearse parks along its north wall and
+// passes bodies in through the loading hatch; the south door leads out to the graveyard. Inside, a body goes from
+// station to station, east to west along the north wall and back along the west wall:
+//   intake (under the hatch) -> registry desk (E writes the name tag) -> dressing table (E: pick an outfit)
+//   -> the stock table, where coffins come in from the stockroom -> lid (F) and nails (F) -> out the south door.
+// The east end is the clerk's office: nails and boards are kept there.
+const STATION = { hx: 1.1, hz: 0.42, top: 0.85 }; // a table a body lies on lengthwise (along x)
 export const MORGUE = {
-  x0: -4, x1: 6, z0: 6.4, z1: 12.4, h: 2.7, t: 0.12,
+  x0: -13, x1: 13, z0: 6.0, z1: 12.4, h: 3.0, t: 0.12,
   door: [-0.9, 2.3], // south door (x range), wide enough to carry a coffin through
   hatch: [1.0, 3.6], hatchSill: 0.9, hatchTop: 2.0, // loading hatch in the north wall
-  table: { x: 2.3, z: 11.35, hx: 1.1, hz: 0.42, top: 0.85 }, // intake table under the hatch
-  board: { x: -3.86, z0: 9.6, dz: 0.4, n: 6, y: 1.45 }, // name tags hang on the west wall
-  rack: { x: 5.86, z0: 8.0, dz: 0.75, y: 1.45 }, // outfits hang on the east wall
-  crate: { x: 4.9, z: 7.15, hx: 0.45, hy: 0.35, hz: 0.35 }, // nails and boards
-  coffins: [[-2.9, 8.1], [-1.6, 8.1]], // where fresh coffins appear, pointing at the door
-  lamp: [1, 9.4],
+  table: { x: 2.3, z: 11.35, ...STATION },  // 1 intake table under the hatch
+  desk: { x: -3.4, z: 11.35, ...STATION },  // 2 registry desk: a body on it gets its name tag written (E)
+  dress: { x: -8.8, z: 11.35, ...STATION }, // 3 dressing table: a body on it is dressed in the outfit you pick (E)
+  stock: { x: -10.6, z: 7.9, hx: 0.66, hz: 1.3, top: 0.5 }, // 4 a fresh coffin slides in here from the stockroom
+  stockDoor: [7.0, 8.8], // the stockroom door in the west wall (z range), behind the stock table
+  rack: { x: -12.86, z0: 9.7, dz: 0.52, y: 1.5 }, // the outfits on show by the dressing table (west wall)
+  crate: { x: 11.2, z: 7.0, hx: 0.45, hy: 0.35, hz: 0.35 }, // nails and boards, in the office
+  office: [ // clerk's desk and filing cabinets in the east end: furniture you bump into
+    { c: [8.6, 0.4, 11.5], h: [0.85, 0.4, 0.4], kind: 'desk' },
+    { c: [12.5, 0.75, 9.6], h: [0.3, 0.75, 0.45], kind: 'cabinet' },
+    { c: [12.5, 0.75, 10.6], h: [0.3, 0.75, 0.45], kind: 'cabinet' },
+    { c: [6.4, 0.25, 6.5], h: [0.9, 0.25, 0.25], kind: 'bench' },
+  ],
+  lamps: [[-8.8, 9.4], [-3.4, 9.4], [2.3, 9.4], [8.6, 9.4]],
 };
+// stations a player works at (registry, dressing) and how near counts as "at it"
+export const atStation = (st, x, z, m = 0.95) => Math.abs(x - st.x) < st.hx + m && Math.abs(z - st.z) < st.hz + m;
 // Outfits written on the delivery notes. Bodies arrive in a plain shroud.
 export const OUTFITS = [
   { id: 'tux', label: 'Black tuxedo' },
@@ -63,7 +78,7 @@ export const NAIL_COST = 4; // nails to hammer one coffin lid shut
 
 export const insideMorgue = (x, z, m = 0) => x > MORGUE.x0 + m && x < MORGUE.x1 - m && z > MORGUE.z0 + m && z < MORGUE.z1 - m;
 
-// Morgue colliders: walls with door, hatch and sill, plus the intake table and the supply crate.
+// Morgue colliders: walls with door, hatch and sill, plus the station tables, the supply crate and the office furniture.
 export function morgueBoxes(withFurniture = true) {
   const M = MORGUE, t = M.t, out = [];
   const wallX = (z, x0, x1, y0 = 0, y1 = M.h) => out.push({ c: [(x0 + x1) / 2, (y0 + y1) / 2, z], h: [(x1 - x0) / 2, (y1 - y0) / 2, t], wall: 1 });
@@ -73,9 +88,10 @@ export function morgueBoxes(withFurniture = true) {
   wallX(M.z0, M.x0, M.door[0]); wallX(M.z0, M.door[1], M.x1); wallX(M.z0, M.door[0], M.door[1], 2.2, M.h);
   wallZ(M.x0, M.z0, M.z1); wallZ(M.x1, M.z0, M.z1);
   if (withFurniture) {
-    const tb = M.table, c = M.crate;
-    out.push({ c: [tb.x, tb.top / 2, tb.z], h: [tb.hx, tb.top / 2, tb.hz] });
+    for (const tb of [M.table, M.desk, M.dress, M.stock]) out.push({ c: [tb.x, tb.top / 2, tb.z], h: [tb.hx, tb.top / 2, tb.hz] });
+    const c = M.crate;
     out.push({ c: [c.x, c.hy, c.z], h: [c.hx, c.hy, c.hz] });
+    for (const o of M.office) out.push({ c: o.c, h: o.h });
   }
   return out;
 }

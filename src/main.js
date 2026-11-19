@@ -2,8 +2,8 @@ import { View } from './view/view.js';
 import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom } from './net.js';
 import { unlockAudio } from './audio.js';
-import { touch, initTouch, isTouchDevice } from './touch.js';
-import { outfitLabel } from './shared/layout.js';
+import { touch, initTouch, isTouchDevice, goLandscape } from './touch.js';
+import { OUTFITS } from './shared/layout.js';
 import { createBots } from './sim/bots.js';
 
 const $ = (id) => document.getElementById(id);
@@ -32,7 +32,10 @@ function setFirstPerson(on) {
   look.pitch = clampPitch(on ? Math.min(look.pitch, 0.15) : Math.max(look.pitch, 0.32));
 }
 setFirstPerson(new URLSearchParams(location.search).get('view') !== 'third');
-const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 };
+// g/th/fl/pk count presses (one-shot actions survive a dropped packet); pv is the outfit picked with the last pk
+const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0 };
+let choosing = false; // the host says my outfit choice is open (dressing table)
+const pickOutfit = (i) => { input.pv = i; input.pk++; };
 let playing = false;
 const SENS = 0.0024;
 
@@ -43,6 +46,8 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') input.g++;
   if (e.code === 'KeyQ') input.th++;
   if (e.code === 'KeyR') input.fl++;
+  const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  if (digit && choosing && +digit[1] <= OUTFITS.length) pickOutfit(+digit[1] - 1);
   if (e.code === 'KeyH') $('help').classList.toggle('open');
   if (e.code === 'KeyV') setFirstPerson(!view.firstPerson);
   if (e.code === 'Space') e.preventDefault();
@@ -114,7 +119,8 @@ async function host() {
   sim = new Sim({ dayLen: +q.get('daylen') || 0, nightLen: +q.get('nightlen') || 0 });
   myId = sim.addPlayer(playerName()).id;
   // AI teammates so nobody digs alone: ?bots=N (0..5), 3 by default; they step aside for joining humans
-  bots = createBots(sim, q.has('botlog') ? { log: (m) => (window.__botlog || (window.__botlog = [])).push(m) } : {}); // ?botlog: what the bots are up to
+  // ?botlog: what the bots are up to; ?botwork: bots run the whole chain (by default they just stand outside)
+  bots = createBots(sim, { work: q.has('botwork'), ...(q.has('botlog') ? { log: (m) => (window.__botlog || (window.__botlog = [])).push(m) } : {}) });
   const nBots = Math.max(0, Math.min(5, +(new URLSearchParams(location.search).get('bots') ?? 3)));
   for (let i = 0; i < nBots; i++) bots.add(); // each takes the next free crew member and its name
   window.__xiom = { sim, view, look, bots };
@@ -185,23 +191,31 @@ function showRoom(code, note) {
 // The delivery note card: who this is, what they should wear, and the laying-to-rest checklist.
 let lastCard = '';
 function renderCard(me) {
-  const c = me && me.card, it = me && me.item, key = JSON.stringify([c, it]);
+  const c = me && me.card, key = JSON.stringify(c);
   if (key === lastCard) return;
   lastCard = key;
   const el = $('card');
-  el.classList.toggle('show', !!(c || it));
-  if (!c && !it) return;
+  el.classList.toggle('show', !!c);
+  if (!c) return;
   const li = (ok, text, bad) => `<li class="${ok ? 'ok' : bad ? 'bad' : ''}">${text}</li>`;
-  let html = '';
-  if (c) {
-    const closed = c.stage === 'closed' || c.stage === 'nailed', dressed = c.outfit !== 'Plain shroud';
-    html += `<h3>DELIVERY NOTE</h3><div class="who">${escapeHtml(c.name)}</div><div>wants: ${escapeHtml(c.suit.toLowerCase())}</div><ul>`
-      + li(c.tagOk, c.tag ? `name tag: ${escapeHtml(c.tag)}` : 'hang the name tag', c.tag && !c.tagOk)
-      + li(c.suitOk, dressed ? `wearing: ${escapeHtml(c.outfit.toLowerCase())}` : 'dress them', dressed && !c.suitOk)
-      + li(c.stage === 'coffin' || closed, 'in a coffin') + li(closed, 'lid closed') + li(c.stage === 'nailed', 'nailed shut (calms them)') + li(false, 'buried') + '</ul>';
-  }
-  if (it) html += `<div class="held">In hand: ${it.type === 'tag' ? `name tag "${escapeHtml(it.name)}"` : escapeHtml(outfitLabel(it.suit).toLowerCase())}</div>`;
-  el.innerHTML = html;
+  const closed = c.stage === 'closed' || c.stage === 'nailed', dressed = c.outfit !== 'Plain shroud';
+  el.innerHTML = `<h3>DELIVERY NOTE</h3><div class="who">${escapeHtml(c.name)}</div><div>wants: ${escapeHtml(c.suit.toLowerCase())}</div><ul>`
+    + li(c.tagOk, c.tag ? `name tag: ${escapeHtml(c.tag)}` : 'register at the desk (name tag)', c.tag && !c.tagOk)
+    + li(c.suitOk, dressed ? `wearing: ${escapeHtml(c.outfit.toLowerCase())}` : 'dress at the dressing table', dressed && !c.suitOk)
+    + li(c.stage === 'coffin' || closed, 'in a coffin') + li(closed, 'lid closed') + li(c.stage === 'nailed', 'nailed shut (calms them)') + li(false, 'buried') + '</ul>';
+}
+
+// The outfit choice at the dressing table: a list of the outfits, picked with keys 1-5 or a tap.
+function renderWardrobe(me) {
+  const open = !!(me && me.choose);
+  const el = $('wardrobe');
+  if (open === choosing && el.childElementCount) return;
+  choosing = open;
+  el.classList.toggle('show', open);
+  if (!open || el.childElementCount) return;
+  el.innerHTML = '<h3>DRESS THEM IN</h3>' + OUTFITS.map((o, i) => `<button data-i="${i}"><kbd>${i + 1}</kbd>${escapeHtml(o.label)}</button>`).join('')
+    + `<small>${touch.active ? 'THROW to cancel' : 'Q to cancel'}</small>`;
+  for (const b of el.querySelectorAll('button')) b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); pickOutfit(+b.dataset.i); });
 }
 
 function applyState(st) {
@@ -211,6 +225,7 @@ function applyState(st) {
   $('nails').textContent = st.nails ?? 0;
   $('boards').textContent = st.boards ?? 0;
   renderCard(st.players.find((p) => p.id === myId));
+  renderWardrobe(st.players.find((p) => p.id === myId));
   if (st.phase) {
     const [night, left, day, light, zombies] = st.phase;
     view.setDay?.(light);
@@ -228,7 +243,7 @@ function applyState(st) {
   $('players').innerHTML = st.players.map((p) => `<li style="--c:${p.color}">${escapeHtml(p.name)}${p.id === myId ? ' (you)' : ''}</li>`).join('');
 }
 // Hints are written by the host in keyboard terms; on a touch screen show the button names instead.
-const TOUCH_WORDS = [[/Hold F/g, 'Hold WORK'], [/\bE:/g, 'GRAB:'], [/Q to put it back/g, 'THROW to put it back'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'], [/Click to whack/g, 'Tap GRAB to whack'],
+const TOUCH_WORDS = [[/Hold F/g, 'Hold WORK'], [/\bE:/g, 'GRAB:'], [/keys 1-5 · Q to cancel/g, 'tap one · THROW to cancel'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'], [/Click to whack/g, 'Tap GRAB to whack'],
   [/Click to drop/g, 'GRAB to drop'], [/Press R/g, 'Tap LIMP']];
 const hintText = (h) => (touch.active ? TOUCH_WORDS.reduce((t, [re, w]) => t.replace(re, w), h) : h);
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -315,9 +330,11 @@ try {
 
 // ---------- menu ----------
 try { $('name').value = localStorage.getItem('xiombard-name') || ''; } catch {}
-$('host').onclick = host;
-$('join').onclick = () => join($('code').value.trim());
-$('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') join($('code').value.trim()); });
+// on a phone the game goes fullscreen and sideways on the tap that starts it (the tap is the gesture both need)
+const sideways = () => { if (touch.active) goLandscape(); };
+$('host').onclick = () => { sideways(); host(); };
+$('join').onclick = () => { sideways(); join($('code').value.trim()); };
+$('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { sideways(); join($('code').value.trim()); } });
 $('lost').onclick = () => location.reload();
 if (isTouchDevice()) {
   initTouch($('touch'), look, { grab: () => input.g++, throw: () => input.th++, flop: () => input.fl++ });

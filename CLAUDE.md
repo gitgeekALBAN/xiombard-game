@@ -4,16 +4,21 @@ Read this before changing anything. It records the decisions the team has alread
 
 ## What this is
 **XIOMBARD: Night Shift** — a co-op ragdoll gravedigging game ("friendslop") with a day/night cycle.
-By day a hearse parks at the morgue's hatch. The laying-to-rest chain: take the body in from inside → read its delivery
-note (name + outfit) → hang the right name tag from the board → dress them from the rack → lay them in a coffin →
-close the lid (F) → optionally nail it shut (F, 4 nails) → carry it to a dug grave → fill it.
-Each missed item (wrong/no tag, wrong outfit, not nailed) adds 1 `unrest` to the grave and scores fewer peace points.
+By day a hearse parks at the morgue's hatch. The morgue is a long office with work stations, and the laying-to-rest
+chain runs through them: take the body in at the hatch onto the intake table (E) and read its delivery note (name +
+outfit) → lay it on the registry desk, E writes its name tag → lay it on the dressing table, E opens the outfit choice
+(keys 1-5 or tap; hold F to change later) → lay it in the coffin that comes in from the stockroom onto the stock table →
+close the lid (F) → optionally nail it shut (F, 4 nails) → carry it out the south door to a dug grave → fill it.
+A body let go over a free station table is laid out straight on it (`tableAssist`), like a body dropped at a coffin.
+Each missed item (no tag, wrong outfit, not nailed) adds 1 `unrest` to the grave and scores fewer peace points.
 Corpses slip out of your arms when you run, a coffin is too heavy for one, players can go limp and carry each other.
 By **night** zombies come — mostly from outside the fence. They wear fence sections down until they break, step in bear
 traps, chase diggers and dig up graves (restless graves first; nailed coffins take twice as long). Unburied bodies rise.
 The crew whacks them with shovels (a click with empty hands). At dawn visitors crumble; risen bodies lie down, still unburied.
 By day, repair: fence 1 board + 2 nails, trap 2 nails. Nails are scarce (+6 per delivery, +2 boards), so every nail is a
-choice between calmer graves and a sturdier yard. 3 AI bot teammates join by default (`?bots=0..5`); they run the same chain.
+choice between calmer graves and a sturdier yard. 3 AI bot teammates join by default (`?bots=0..5`). For now they are
+off duty: they walk out and stand east of the morgue (`doStand` in `bots.js`). `?botwork` puts them to work on the old
+chain; they have not learned the registry desk and the dressing table yet.
 Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, crooked shapes, big heads, purple night,
 huge moon, curly trees. Inspired by the mood only — never copy characters or designs from existing films/games.
 
@@ -34,7 +39,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/sim/game.js` — **host-only** simulation: cannon-es world, ragdolls, grabbing/grip, digging, truck, scoring.
 - `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
 - `src/view/models.js` — every mesh model built from primitives in code (coffins, truck, headstones, trees, the shovel).
-- `src/view/morgue.js` — the morgue (walls and furniture go into the yard's static batch, the roof is its own mesh so it can hide for a third-person camera indoors, signs and name tags are one canvas) and what the night does to the yard: bear traps (three instanced meshes) and fence sections that lean and fall.
+- `src/view/morgue.js` — the morgue (walls, stations, the stockroom door and the office furniture go into the yard's static batch, the roof is its own mesh so it can hide for a third-person camera indoors, all signs are one canvas; the layout itself is `MORGUE` in `shared/layout.js`) and what the night does to the yard: bear traps (three instanced meshes) and fence sections that lean and fall.
 - `src/view/plants.js` — vegetation: flat ribbons and cards placed by a seeded generator into one static mesh (one draw call). It keeps tall plants away from plots, footpaths, the morgue and the truck's stop. Concept art for sky, ground and plants is kept outside the repo; the palettes in the shaders follow it.
 - `src/chars/` + `src/view/crew.js` — **every character** (diggers, zombies, dogs, the dead). Each one is described by distance formulas in JavaScript (`human.js`, `creatures.js`), turned into a low-poly mesh once at load (`mesher.js`: surface nets, baked occlusion, two bone weights per vertex) and painted by one shader from the rest position (`material.js`: gouache, knitting, stitched patches, dirt, faces, ink hull). No model or texture files. `cast.html` shows the whole cast (`npm run build:cast`).
 - `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs and six odd ones — Bloat, Longshanks, Stack, Granny, Headless, Barrel — all on the same six parts), `layout.js` (level, colliders, decor, the morgue, outfits, fence sections, traps), `rng.js`.
@@ -48,7 +53,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - Messages: guest→host `hello`, `in` (move, yaw, held buttons, and *counters* for one-shot actions: grab/throw/flop).
   Host→guest `welcome`, `ents` (entity list, sent when `sim.version` changes), `snap` (Float32Array of part transforms + small JSON state + events).
 - Every entity is "N parts × (pos, quat)": every character 6 (see `CP` in `shared/crew.js`), coffin 1, truck 1. **Never reorder `CP` or the `ZOMBIES` list** — they are the wire format. A body's look comes from its seed alone (`corpseRig(seed)`), so changing the generator changes every body for host and guests alike.
-- Entity descriptors also carry `outfit`, `tag` (bodies) and `lid` (coffins: 1 closed, 2 nailed); the view rebuilds a model in place when they change. The state snapshot carries `tags` (the board), `fence` (hp per section), `traps`, `nails`, `boards`, `buried`, and per player `item` and `card`.
+- Entity descriptors also carry `outfit`, `tag` (bodies) and `lid` (coffins: 1 closed, 2 nailed); the view rebuilds a model in place when they change. The state snapshot carries `fence` (hp per section), `traps`, `nails`, `boards`, `buried`, and per player `choose` (the outfit choice is open) and `card`. The outfit pick travels in the input as a counter `pk` plus the outfit index `pv`, like the other one-shot actions.
 - Signaling: free PeerJS cloud broker. Some strict NATs need a TURN server (not set up yet). Local testing: run a PeerJS server on
   port 9000 and open `?peerhost=127.0.0.1&peerport=9000`.
 - No host migration: if the host leaves, the game ends for guests.
@@ -65,7 +70,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - The fence is not a static collider: each of `FENCE_SECTIONS` has its own bodies in `sim.fence`, removed when the section breaks and built again on repair.
 - `afterStep` clamps prop speeds as a safety net against solver blow-ups.
 - Anything on its feet at night has a walker in `e.z` (a steered capsule + a pose). A risen corpse keeps its ragdoll bodies as kinematic ghosts that follow the pose, so `e.bodies[...]` stays valid everywhere; a whack turns them dynamic again.
-- Test a night quickly with `?daylen=15&nightlen=90`. `?botlog` collects what the bots are doing in `window.__botlog`.
+- Test a night quickly with `?daylen=15&nightlen=90`. `?botlog` collects what the bots are doing in `window.__botlog`. `?mute` turns the sound off (scripted and headless runs).
 
 ## Workflow
 - `npm install`, `npm run dev` (port 5173), `npm run build` must pass before pushing.
