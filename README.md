@@ -6,6 +6,7 @@ table dresses them in the outfit on the note — lay them in the coffin that com
 nail it shut if you can spare the nails, carry it to a grave and fill it in. By night the dead come for
 the yard: whack them with your shovel, and fix the fence and traps in the morning with boards and nails.
 Bodies slip out of your arms, a coffin is too heavy for one, and you can go limp and get carried by a friend.
+How it was made: the whole working conversation with Claude, step by step, is at [`devlog/`](https://rokunin.github.io/xiombard-game/devlog/).
 Play solo or host a room for friends. 3 AI helpers join, but for now they are off duty and just stand outside
 (`?botwork` puts them to work, `?bots=0` leaves them home).
 
