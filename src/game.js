@@ -20652,8 +20652,8 @@ const Ob = 80,
   es = 2.2,
   Bu = 1,
   Jp = 60,
-  Yt = { x: -12, z: 9 },
-  wc = { x: 0, z: 8.5 },
+  Yt = { x: -2.9, z: 8.1 }, // coffin pile: now inside the morgue
+  wc = { x: 0.8, z: 9.4 }, // spawn: inside the morgue
   st = { x: 0.65, z: 1.3 },
   wo = 1.25,
   Qp = 0.75,
@@ -20662,7 +20662,7 @@ for (const s of [3.2, -2.4]) for (const e of [-8, -4.5, -1, 2.5, 6]) mn.push({ x
 const Lr = [
     [-10.5, 0.4],
     [9, 0.4],
-    [4.5, 11.5],
+    [7.6, 12.9],
     [-7, 11.5],
     [-14.5, 10.5],
     [0, -7],
@@ -20762,19 +20762,84 @@ function Xd() {
     n = 1,
     i = qt - es - 0.3,
     o = qt + es + 0.3;
-  s.push({ c: [0, n, -e], h: [e, n, t] }, { c: [0, n, e], h: [e, n, t] });
-  for (const a of [-e, e])
-    s.push({ c: [a, n, (-e + i) / 2], h: [t, n, (i + e) / 2] }),
-      s.push({ c: [a, n, (o + e) / 2], h: [t, n, (e - o) / 2] });
+  // XIOMBARD: fence colliders are per section now, see FENCE_SECTIONS and the sim's fence state
   const r = Ln.shed;
   s.push({ c: [r.x, r.hy, r.z], h: [r.hx, r.hy, r.hz] });
   for (const a of Ln.trees) s.push({ c: [a.x, 2, a.z], h: [0.35, 2, 0.35] });
   for (const a of Ln.stones) s.push({ c: [a.x, a.h / 2, a.z], h: [a.w / 2, a.h / 2, 0.12], ry: a.ry });
   for (const [a, c] of Lr) s.push({ c: [a, 1, c], h: [0.08, 1, 0.08] });
-  return s;
+  return s.push(...morgueBoxes()), s; // XIOMBARD
 }
 function er(s, e, t = 0) {
   return mn.findIndex((n) => Math.abs(s - n.x) < st.x + t && Math.abs(e - n.z) < st.z + t);
+}
+
+// ===================== XIOMBARD additions: the morgue =====================
+// Everything below marked "XIOMBARD" was added on top of the artifact build (build 73).
+// The one-storey morgue between the road and the graves: the hearse parks along its north wall and passes bodies
+// in through the loading hatch; the south door leads out to the graveyard.
+const MORGUE = {
+  x0: -4, x1: 6, z0: 6.4, z1: 12.4, h: 2.7, t: 0.12,
+  door: [-0.9, 2.3], // south door (x range), wide enough to drag a coffin through
+  hatch: [1.0, 3.6], hatchSill: 0.9, hatchTop: 2.0, // loading hatch in the north wall
+  table: { x: 2.3, z: 11.35, hx: 1.1, hz: 0.42, top: 0.85 }, // intake table under the hatch
+  board: { x: -3.86, z0: 9.6, dz: 0.4, n: 6, y: 1.45 }, // name tags hang on the west wall
+  rack: { x: 5.86, z0: 8.0, dz: 0.75, y: 1.45 }, // outfits hang on the east wall
+  crate: { x: 4.9, z: 7.15, hx: 0.45, hy: 0.35, hz: 0.35 }, // nails and boards
+  coffins: [[-2.9, 8.1], [-1.6, 8.1]], // where fresh coffins appear, pointing at the door
+  lamp: [1, 9.4],
+};
+// Outfits written on the delivery notes. Bodies arrive in a plain shroud.
+const OUTFITS = [
+  { id: "tux", label: "Black tuxedo" },
+  { id: "sailor", label: "Sailor suit" },
+  { id: "clown", label: "Clown outfit" },
+  { id: "gown", label: "Purple gown" },
+  { id: "pajamas", label: "Striped pajamas" },
+];
+const outfitLabel = (id) => (OUTFITS.find((o) => o.id === id) || { label: "Plain shroud" }).label;
+const NAIL_COST = 4; // nails to hammer one coffin lid shut
+// XIOMBARD: the fence is split into sections that zombies wear down at night and players repair by day.
+// Each side runs from -zt to zt in 7 m sections; the road gates on the east and west sides stay open.
+const FENCE_LEN = 7,
+  FENCE_HP = 100,
+  FENCE_SECTIONS = (() => {
+    const out = [],
+      g0 = qt - es - 0.3,
+      g1 = qt + es + 0.3;
+    for (const [axis, at] of [["z", -zt], ["z", zt], ["x", -zt], ["x", zt]])
+      for (let a = -zt; a < zt - 0.01; a += FENCE_LEN) {
+        let pieces = [[a, a + FENCE_LEN]];
+        axis === "x" && (pieces = pieces.flatMap(([p0, p1]) => (p1 <= g0 || p0 >= g1 ? [[p0, p1]] : [[p0, g0], [g1, p1]].filter(([u, v]) => v - u > 0.2))));
+        pieces.length && out.push({ axis, at, a0: a, a1: a + FENCE_LEN, pieces });
+      }
+    return out;
+  })(),
+  // which section a point on the fence line belongs to
+  fenceSectionAt = (x, z) =>
+    FENCE_SECTIONS.findIndex((f) => {
+      const [along, across] = f.axis === "z" ? [x, z] : [z, x];
+      return Math.abs(across - f.at) < 0.6 && along >= f.a0 - 0.01 && along < f.a1 + 0.01;
+    }),
+  // bear traps around the graves, where the restless dead are headed
+  TRAPS = [[-10, -5.6], [-6.2, -5.6], [-2.6, -5.6], [0.9, -5.6], [4.3, -5.6], [8, -5.6], [-12, 0.4], [10.6, 0.4]],
+  TRAP_DUR = 3;
+const insideMorgue = (x, z, m = 0) => x > MORGUE.x0 + m && x < MORGUE.x1 - m && z > MORGUE.z0 + m && z < MORGUE.z1 - m;
+// Morgue colliders: walls with door, hatch and sill, plus the intake table and the supply crate.
+function morgueBoxes(withFurniture = true) {
+  const M = MORGUE, t = M.t, out = [];
+  const wallX = (z, x0, x1, y0 = 0, y1 = M.h) => out.push({ c: [(x0 + x1) / 2, (y0 + y1) / 2, z], h: [(x1 - x0) / 2, (y1 - y0) / 2, t], wall: 1 });
+  const wallZ = (x, z0, z1) => out.push({ c: [x, M.h / 2, (z0 + z1) / 2], h: [t, M.h / 2, (z1 - z0) / 2], wall: 1 });
+  wallX(M.z1, M.x0, M.hatch[0]); wallX(M.z1, M.hatch[1], M.x1);
+  wallX(M.z1, M.hatch[0], M.hatch[1], 0, M.hatchSill); wallX(M.z1, M.hatch[0], M.hatch[1], M.hatchTop, M.h);
+  wallX(M.z0, M.x0, M.door[0]); wallX(M.z0, M.door[1], M.x1); wallX(M.z0, M.door[0], M.door[1], 2.2, M.h);
+  wallZ(M.x0, M.z0, M.z1); wallZ(M.x1, M.z0, M.z1);
+  if (withFurniture) {
+    const tb = M.table, c = M.crate;
+    out.push({ c: [tb.x, tb.top / 2, tb.z], h: [tb.hx, tb.top / 2, tb.hz] });
+    out.push({ c: [c.x, c.hy, c.z], h: [c.hx, c.hy, c.hz] });
+  }
+  return out;
 }
 const jd = Bu + 3.2,
   tm = [
@@ -22487,7 +22552,7 @@ const e0 = (s, e) => {
   },
   MM = new Ys(0.065, 0.013, 3, 5, Math.PI),
   wM = new _i(1, 7, 4);
-function SM(s) {
+function SM(s, lid = 0) {
   const e = wt(s),
     { hx: t, hy: n, hz: i } = Gt,
     o = [
@@ -22591,6 +22656,15 @@ function SM(s) {
     scale: [0.21 + e.range(0, 0.03), 0.06, 0.12],
     outline: !1,
   });
+  if (lid) {
+    // XIOMBARD: the closed lid, a little brass cross, and nail heads once it is nailed shut
+    d.add(gM(ma(o, 0.035), n - 0.005, n + 0.06), { id: Dt.COFFIN_WOOD, color: a, k: [f, e() * 50, 0] });
+    d.add(wM, p("#c9b98f", 0.5), { pos: [0, n + 0.07, -0.1], scale: [0.04, 0.012, 0.32], outline: !1 });
+    d.add(wM, p("#c9b98f", 0.5), { pos: [0, n + 0.07, 0.06], scale: [0.18, 0.012, 0.04], outline: !1 });
+    if (lid === 2)
+      for (const [x, z] of [[-0.5, -0.92], [0.5, -0.92], [-0.88, 0.42], [0.88, 0.42], [-0.6, 0.92], [0.6, 0.92], [-0.8, -0.25], [0.8, -0.25]])
+        d.add(wM, p("#9aa0ad", 0.6), { pos: [x * t, n + 0.065, z * i], scale: [0.03, 0.012, 0.03], outline: !1 });
+  }
   const T = new an(),
     { geo: S, hull: L } = d.bake();
   return T.add(new ct(S, Cl())), T.add(new ct(L, Ks(0.02))), [T];
@@ -26530,6 +26604,7 @@ function bw(s) {
   let j = 1;
   return {
     groundMat: t,
+    fence: { mesh: L, mats: T }, // XIOMBARD: pickets, so damaged sections can lean and broken ones vanish
     setDay(F) {
       (j = Hb(F)), (c.mesh.visible = j > 0), D.setDay(F);
     },
@@ -27851,13 +27926,53 @@ function $w(s) {
     },
   };
 }
+// XIOMBARD: what a body wears. Bodies arrive in a plain shroud; the delivery note asks for one of OUTFITS.
+// Clothes in this art style are the hat, scarf, mittens, legs and boots, so an outfit is a look override.
+function dressLook(t, outfit, tagged) {
+  const L = { ...t, colors: { ...t.colors } },
+    c = L.colors,
+    [l, a] = L.head,
+    [o, n, cc, r] = L.bean,
+    tall = [l + a * 0.4, 0, a * 1.08 + 0.01, 0.17],
+    cap = [l + a * 0.65, a * 1.25, a * 0.78, 0.15],
+    scarf = [cc - 0.05, r + 0.025, 0.045, 0.34];
+  switch (outfit) {
+    case "tux":
+      Object.assign(L, { hat: tall, hat2: [1, 0.065, 0.016, 0.035], scarf: [cc - 0.05, r + 0.02, 0.03, 0.2] });
+      Object.assign(c, { hat: "#1e1a26", band: "#9a1d34", scarf: "#1e1a26", mitten: "#f2eee6", leg: "#2a2633", boot: "#1e1a26" });
+      break;
+    case "sailor":
+      Object.assign(L, { hat: cap, hat2: [0, 0.05, 0.006, 0], scarf });
+      Object.assign(c, { hat: "#f2eee2", band: "#2c3e70", scarf: "#2c3e70", mitten: "#f2eee2", leg: "#2c3e70", boot: "#f2eee2" });
+      break;
+    case "clown":
+      Object.assign(L, { hat: [l + a * 0.65, a * 1.25, a * 0.6, 0.24], hat2: [0, 0.05, 0.006, 0], scarf: [cc - 0.05, r + 0.05, 0.07, 0.42] });
+      Object.assign(c, { hat: "#f0c23a", band: "#d8433a", scarf: "#f4efe4", mitten: "#f4efe4", leg: "#d8433a", boot: "#d8433a", nose: "#d8433a" });
+      break;
+    case "gown":
+      Object.assign(L, { hat: tall, hat2: [1, 0.09, 0.012, 0.03], scarf });
+      Object.assign(c, { hat: "#6b3a7a", band: "#e9d9f0", scarf: "#7d4a8c", mitten: "#e9d9f0", leg: "#6b3a7a", boot: "#3a2a40" });
+      break;
+    case "pajamas":
+      Object.assign(L, { hat: [l + a * 0.65, a * 1.25, a * 0.7, 0.26], hat2: [0, 0.05, 0.006, 0], scarf: null });
+      Object.assign(c, { hat: "#5d6f8c", band: "#e8e2d4", mitten: c.skin, leg: "#5d6f8c", boot: "#e8e2d4" });
+      break;
+    default: // shroud
+      Object.assign(L, { hat: null, scarf: null });
+      Object.assign(c, { mitten: "#d6d0c2", leg: "#d6d0c2", boot: "#c9c2b2" });
+  }
+  // the name tag you hung on them: a little pale patch on the chest
+  if (tagged) L.patches = [...(L.patches || []), [0, o, 0.05, 0.035, "#e9dcc0"]];
+  return L;
+}
 const Lc = new Map();
-function el(s) {
-  let e = Lc.get(s);
+function el(s, outfit = "shroud", tagged = 0) {
+  const key = `${s}|${outfit}|${tagged ? 1 : 0}`;
+  let e = Lc.get(key);
   if (!e) {
     Lc.size > 200 && Lc.clear();
-    const t = $w(s);
-    (e = Pf({ look: t, rig: $a(t) }, Rf)), Lc.set(s, e);
+    const t = dressLook($w(s), outfit, tagged);
+    (e = Pf({ look: t, rig: $a(t) }, Rf)), Lc.set(key, e);
   }
   return e;
 }
@@ -30010,6 +30125,179 @@ const Mm = "#2a2344",
   DS = ["#07040d", "#1a0c22", "#2a1f3c"],
   NS = new Nt(),
   FS = { r: 0, g: 0, b: 0 };
+
+// ===================== XIOMBARD: the morgue's look =====================
+// Built with the same painted materials as the shed. The roof is a separate group so it can hide while a
+// third-person camera follows you indoors. Name tags on the board are painted into canvases at runtime.
+// XIOMBARD: bear traps (armed / sprung / broken) and fence damage on screen
+function buildNightView(scene, fence) {
+  const traps = TRAPS.map(([x, z], n) => {
+    const R = wt(500 + n),
+      looks = ["armed", "sprung", "broken"].map((kind) => {
+        const b = new am(),
+          w = b.sub(Ae([x, 0, z], [0, R() * 6.3, 0])),
+          g = new an();
+        w(Ve.cyl6, Le.iron, Ae([0, 0.03, 0], [kind === "broken" ? 0.25 : 0, 0, 0], [0.24, 0.05, 0.24]), 0.01);
+        for (const side of [-1, 1])
+          for (let i = 0; i < 7; i++) {
+            const a = (i / 6) * Math.PI,
+              r = 0.3;
+            if (kind === "broken" && i % 2) continue;
+            const pos = kind === "sprung" ? [Math.cos(a) * r, 0.05 + Math.sin(a) * r, side * 0.02] : [Math.cos(a) * r, 0.06, side * Math.sin(a) * r];
+            const rot = kind === "sprung" ? [0, 0, a + Math.PI / 2] : [0, -side * a, 0];
+            kind === "broken" && ((pos[0] += R.range(-0.25, 0.25)), (pos[2] += R.range(-0.25, 0.25)));
+            w(Ve.box, Le.iron, Ae(pos, rot, [0.03, 0.03, 0.09]), 0.008);
+            i % 2 || w(Ve.cone4, Jt("#b8b3c4"), Ae([pos[0], pos[1] + (kind === "sprung" ? 0 : 0.05), pos[2] - (kind === "sprung" ? 0 : side * 0.03)], kind === "sprung" ? [0, 0, a + Math.PI] : [0, 0, 0], [0.02, 0.06, 0.02]), 0);
+          }
+        return b.build(g), scene.add(g), g;
+      });
+    return { looks, state: -1 };
+  });
+  // pickets: which section each one belongs to, and its intact matrix
+  const pickets = fence ? fence.mats.map((m) => ({ base: m.clone(), sec: fenceSectionAt(m.elements[12], m.elements[14]) })) : [];
+  let lastFence = "";
+  const tmp = new Fe(),
+    tilt = new Fe();
+  return {
+    set(st) {
+      (st.traps || []).forEach((v, i) => {
+        const t = traps[i],
+          dur = v >> 1,
+          armed = v & 1,
+          s = dur <= 0 ? 2 : armed ? 0 : 1;
+        if (t && t.state !== s) {
+          t.state = s;
+          t.looks.forEach((g, j) => (g.visible = j === s));
+        }
+      });
+      const key = (st.fence || []).join(",");
+      if (!fence || key === lastFence) return;
+      lastFence = key;
+      pickets.forEach((p, i) => {
+        const hp = p.sec >= 0 ? st.fence[p.sec] : FENCE_HP;
+        if (hp <= 0) tmp.makeScale(0, 0, 0);
+        else if (hp < FENCE_HP) {
+          const f = FENCE_SECTIONS[p.sec],
+            lean = (1 - hp / FENCE_HP) * 0.55 * Math.sin(i * 12.9898) ** 2 * (Math.sign(f.at) || 1);
+          f.axis === "z" ? tilt.makeRotationX(lean) : tilt.makeRotationZ(-lean);
+          tmp.copy(p.base).multiply(tilt);
+        } else tmp.copy(p.base);
+        fence.mesh.setMatrixAt(i, tmp);
+      });
+      fence.mesh.instanceMatrix.needsUpdate = !0;
+    },
+  };
+}
+function buildMorgueView(scene) {
+  const M = MORGUE,
+    root = new an(),
+    body = new am(),
+    roofB = new am(),
+    w = body.sub(new Fe()),
+    rw = roofB.sub(new Fe()),
+    R = wt(4711),
+    plaster = Jt("#6a5a72", { pat: Sn.planks, p1: 0.3, rim: 0.8 }),
+    floor = Jt(lt.woodLight, { pat: Sn.planks, p1: 0.35 });
+  for (const b of morgueBoxes(!1)) // walls, with a slight crooked lean
+    w(Ve.box, plaster, Ae(b.c, [0, 0, R.range(-0.012, 0.012)], [b.h[0] * 2, b.h[1] * 2, b.h[2] * 2]), 0.014);
+  // corner posts and a sill beam
+  for (const x of [M.x0, M.x1]) for (const z of [M.z0, M.z1]) w(Ve.box, Le.woodDark, Ae([x, M.h / 2, z], [0, 0, R.range(-0.03, 0.03)], [0.22, M.h + 0.1, 0.22]), 0.016);
+  for (const z of [M.z0, M.z1]) w(Ve.box, Le.boardDark, Ae([(M.x0 + M.x1) / 2, M.h - 0.06, z], [0, 0, 0.01], [M.x1 - M.x0 + 0.3, 0.14, 0.3]), 0.016);
+  w(Ve.box, floor, Ae([(M.x0 + M.x1) / 2, 0.012, (M.z0 + M.z1) / 2], [0, 0, 0], [M.x1 - M.x0, 0.024, M.z1 - M.z0]), 0);
+  // door frame with a little skull, and a stone step
+  const dc = (M.door[0] + M.door[1]) / 2;
+  for (const x of M.door) w(Ve.box, Le.board, Ae([x, 1.1, M.z0], [0, 0, 0], [0.14, 2.2, 0.3]), 0.014);
+  w(Ve.box, Le.board, Ae([dc, 2.25, M.z0], [0, 0, 0.03], [M.door[1] - M.door[0] + 0.3, 0.16, 0.32]), 0.014);
+  w(Ve.sph, Le.skull2, Ae([dc, 2.45, M.z0 - 0.18], [0, Math.PI, 0], [0.13, 0.14, 0.07]), 0.012);
+  w(Ve.box, Le.stone, Ae([dc, 0.06, M.z0 - 0.45], [0, 0.03, 0], [M.door[1] - M.door[0], 0.12, 0.6]), 0.016);
+  // hatch frame and a little awning over it
+  for (const x of M.hatch) w(Ve.box, Le.board, Ae([x, 1.45, M.z1], [0, 0, 0], [0.12, 1.2, 0.3]), 0.014);
+  w(Ve.box, Le.boardLight, Ae([(M.hatch[0] + M.hatch[1]) / 2, M.hatchSill, M.z1], [0, 0, 0], [M.hatch[1] - M.hatch[0] + 0.2, 0.08, 0.5]), 0.014);
+  w(Ve.box, Le.shingle, Ae([(M.hatch[0] + M.hatch[1]) / 2, 2.2, M.z1 + 0.5], [0.45, 0, 0], [M.hatch[1] - M.hatch[0] + 0.6, 0.06, 1.0]), 0.014);
+  // windows (warm glass) on the side walls
+  const win = (x, z, ry) => {
+    w(Vu(0.66, 0.66, 0.07), Jt(lt.amber, { pat: Sn.window, p1: 0.33, p2: 0.33 }), Ae([x, 1.6, z], [0, ry, R.range(-0.06, 0.06)]), 0.012);
+  };
+  win(M.x0 - 0.02, 7.6, Math.PI / 2), win(M.x1 + 0.02, 11.4, -Math.PI / 2), win(-2.4, M.z0 - 0.02, 0), win(4.4, M.z0 - 0.02, 0);
+  // intake table
+  const tb = M.table;
+  w(Ve.box, Jt("#9a93ad", { pat: Sn.stone }), Ae([tb.x, tb.top - 0.05, tb.z], [0, 0, 0], [tb.hx * 2, 0.1, tb.hz * 2]), 0.016);
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) w(Ve.box, Le.iron, Ae([tb.x + sx * (tb.hx - 0.1), tb.top / 2 - 0.05, tb.z + sz * (tb.hz - 0.08)], [0, 0, 0], [0.07, tb.top - 0.1, 0.07]), 0.01);
+  // crate of nails and planks
+  const cr = M.crate;
+  w(Ve.box, Le.board, Ae([cr.x, cr.hy, cr.z], [0, 0.1, 0], [cr.hx * 2, cr.hy * 2, cr.hz * 2]), 0.016);
+  for (let i = 0; i < 3; i++) w(Ve.box, Le.boardLight, Ae([cr.x - 0.05 + i * 0.04, cr.hy * 2 + 0.04 + i * 0.05, cr.z], [0, 0.3 - i * 0.25, 0], [1.1, 0.04, 0.16]), 0.01);
+  for (let i = 0; i < 7; i++) w(Ve.cyl6, Le.iron, Ae([cr.x + 0.28 - i * 0.07, cr.hy * 2 + 0.03, cr.z + 0.22], [0, 0, 1.45], [0.012, 0.13, 0.012]), 0);
+  // tag board on the west wall
+  const B = M.board;
+  w(Ve.box, Le.boardDark, Ae([B.x + 0.05, B.y, B.z0 + ((B.n - 1) * B.dz) / 2], [0, 0, 0], [0.05, 0.62, B.n * B.dz + 0.25]), 0.014);
+  // outfit rack on the east wall: a rail with a little stuffed dummy per outfit
+  const Rk = M.rack;
+  w(Ve.cyl6, Le.iron, Ae([Rk.x - 0.2, Rk.y + 0.42, Rk.z0 + ((OUTFITS.length - 1) * Rk.dz) / 2], [Math.PI / 2, 0, 0], [0.025, OUTFITS.length * Rk.dz + 0.3, 0.025]), 0.008);
+  const look = { tux: ["#1e1a26", "#f2eee6"], sailor: ["#f2eee2", "#2c3e70"], clown: ["#f0c23a", "#d8433a"], gown: ["#6b3a7a", "#e9d9f0"], pajamas: ["#5d6f8c", "#e8e2d4"] };
+  OUTFITS.forEach((o, i) => {
+    const [a, b] = look[o.id], z = Rk.z0 + i * Rk.dz;
+    w(Ve.sph, Jt(a, { pat: o.id === "tux" || o.id === "gown" ? Sn.plain : Sn.stripes, p1: 7 }), Ae([Rk.x - 0.22, Rk.y, z], [0, 0, 0], [0.13, 0.28, 0.2]), 0.012);
+    w(Ve.box, Jt(b), Ae([Rk.x - 0.36, Rk.y + 0.08, z], [0, 0, 0], [0.02, 0.1, 0.1]), 0);
+    w(Ve.box, Le.iron, Ae([Rk.x - 0.22, Rk.y + 0.33, z], [0, 0, 0], [0.015, 0.16, 0.015]), 0);
+    o.id === "gown" && w(Ve.cone6, Jt(a), Ae([Rk.x - 0.22, Rk.y - 0.38, z], [0, 0, 0], [0.24, 0.44, 0.24]), 0.012);
+  });
+  // hanging lamp
+  w(Ve.cyl6, Le.iron, Ae([M.lamp[0], M.h - 0.3, M.lamp[1]], [0, 0, 0], [0.012, 0.6, 0.012]), 0);
+  w(Ve.cone6, Le.iron, Ae([M.lamp[0], M.h - 0.62, M.lamp[1]], [0, 0, 0], [0.2, 0.14, 0.2]), 0.01);
+  w(Ve.sph, Le.glass, Ae([M.lamp[0], M.h - 0.72, M.lamp[1]], [0, 0, 0], 0.09), 0.01);
+  // roof: two crooked shingle slopes and a chimney
+  const cx = (M.x0 + M.x1) / 2, cz = (M.z0 + M.z1) / 2, d = M.z1 - M.z0, wd = M.x1 - M.x0;
+  for (const sz of [-1, 1]) rw(Ve.box, Le.shingle, Ae([cx, M.h + 0.62, cz + sz * d * 0.26], [sz * 0.4, 0, 0.015], [wd + 0.8, 0.12, d * 0.62]), 0.016);
+  rw(Ve.box, Le.boardDark, Ae([cx, M.h + 1.2, cz], [Math.PI / 4, 0, 0.01], [wd + 0.9, 0.16, 0.16]), 0.016);
+  for (const x of [M.x0 - 0.4, M.x1 + 0.4]) rw(Ve.box, plaster, Ae([x + (x < cx ? 0.4 : -0.4), M.h + 0.5, cz], [0, 0, 0], [0.1, 1.0, d * 0.95]), 0.014);
+  rw(Ve.box, Jt("#5a4a62", { pat: Sn.stone }), Ae([M.x1 - 1.6, M.h + 1.1, cz + 1.0], [0, 0.1, 0.06], [0.45, 1.3, 0.45]), 0.016);
+  body.build(root);
+  const roof = new an();
+  roofB.build(roof), root.add(roof);
+  // painted signs and tags
+  const canvasMesh = (wpx, hpx, wm, hm, draw) => {
+    const c = document.createElement("canvas");
+    (c.width = wpx), (c.height = hpx);
+    const tex = new Wp(c);
+    tex.colorSpace = Cn;
+    const m = new ct(new Fi(wm, hm), new bl({ map: tex, fog: !0, transparent: !0 }));
+    return draw && draw(c.getContext("2d"), c), (tex.needsUpdate = !0), { mesh: m, canvas: c, tex };
+  };
+  const sign = (text, x, y, z, ry, wpx) => {
+    const s = canvasMesh(wpx, 128, (wpx / 128) * 0.42, 0.42, (g) => {
+      (g.fillStyle = "#2a2236"), g.fillRect(0, 0, wpx, 128), (g.strokeStyle = "#6a4a52"), (g.lineWidth = 10), g.strokeRect(5, 5, wpx - 10, 118);
+      (g.fillStyle = "#f0c060"), (g.font = "bold 64px Georgia, serif"), (g.textAlign = "center"), g.fillText(text, wpx / 2, 86);
+    });
+    s.mesh.position.set(x, y, z), (s.mesh.rotation.y = ry), (s.mesh.rotation.z = 0.04), root.add(s.mesh);
+  };
+  sign("MORGUE", dc, 2.68, M.z0 - 0.2, Math.PI, 512), sign("DELIVERIES", (M.hatch[0] + M.hatch[1]) / 2, 2.5, M.z1 + 0.2, 0, 640);
+  const tagSlots = [];
+  for (let i = 0; i < B.n; i++) {
+    const t = canvasMesh(256, 128, 0.36, 0.18);
+    t.mesh.position.set(B.x + 0.09, B.y - (i % 2) * 0.12, B.z0 + i * B.dz), t.mesh.rotation.set(0, Math.PI / 2, ((i % 3) - 1) * 0.08), root.add(t.mesh);
+    tagSlots.push({ ...t, text: void 0 });
+  }
+  const glow = UM("#ffc070", 2);
+  glow.add(new K(M.lamp[0], M.h - 0.72, M.lamp[1]), 2.2, 0.75), root.add(glow.mesh);
+  scene.add(root);
+  return {
+    roof,
+    setTags(tags) {
+      (tags || []).forEach((t, i) => {
+        const s = tagSlots[i];
+        if (!s || s.text === t) return;
+        if (((s.text = t), (s.mesh.visible = !!t), !t)) return;
+        const g = s.canvas.getContext("2d");
+        (g.fillStyle = "#e9dcc0"), g.fillRect(0, 0, 256, 128), (g.strokeStyle = "#6a5440"), (g.lineWidth = 8), g.strokeRect(4, 4, 248, 120);
+        (g.fillStyle = "#2a2236"), (g.textAlign = "center");
+        const [a, ...b] = t.split(" ");
+        (g.font = "italic 34px Georgia, serif"), g.fillText(a, 128, 52, 236), (g.font = "bold 40px Georgia, serif"), g.fillText(b.join(" "), 128, 100, 236);
+        s.tex.needsUpdate = !0;
+      });
+    },
+  };
+}
 class US {
   constructor(e) {
     const t = new URLSearchParams(location.search).get("post"),
@@ -30036,6 +30324,8 @@ class US {
       (this.world = bw(this.scene)),
       (this.groundMat = this.world.groundMat),
       (this.graves = Tw(this.scene, this.groundMat)),
+      (this.morgue = buildMorgueView(this.scene)), // XIOMBARD
+      (this.night = buildNightView(this.scene, this.world.fence)),
       (this.billboards = []),
       this.scene.traverse((a) => {
         a.userData.billboard && this.billboards.push(a);
@@ -30145,6 +30435,14 @@ class US {
         (this.billboards = this.billboards.filter((r) => !o.billboards.includes(r))));
     (this.order = e.map((i) => {
       let o = this.ents.get(i.id);
+      const lookKey = `${i.outfit}|${i.tag}|${i.lid}`; // XIOMBARD: outfit, tag or lid changed: rebuild in place
+      let keep = null;
+      o &&
+        o.lookKey !== lookKey &&
+        ((keep = o.groups.map((u) => [u.position.clone(), u.quaternion.clone()])),
+        this.scene.remove(o.root),
+        (this.billboards = this.billboards.filter((u) => !o.billboards.includes(u))),
+        (o = null));
       if (!o) {
         const r =
             i.kind === "digger"
@@ -30152,9 +30450,9 @@ class US {
               : i.kind === "zombie"
                 ? Rh(Ku(i.look))
                 : i.kind === "corpse"
-                  ? Rh(el(i.seed), { q: 0.64 })
+                  ? Rh(el(i.seed, i.outfit, i.tag), { q: 0.64 })
                   : null,
-          a = r ? r.groups : i.kind === "coffin" ? SM(i.seed) : DM(),
+          a = r ? r.groups : i.kind === "coffin" ? SM(i.seed, i.lid) : DM(),
           c = new an();
         for (const u of a) c.add(u);
         r && c.add(r.mesh);
@@ -30173,10 +30471,15 @@ class US {
             crew: r,
             shadow: l,
             billboards: h,
-            fresh: !0,
+            fresh: !keep,
+            lookKey,
             tpos: a.map(() => new K()),
             tq: a.map(() => new Nt()),
           }),
+          keep &&
+            keep.forEach(([u, f], d) => {
+              a[d] && (a[d].position.copy(u), a[d].quaternion.copy(f), o.tpos[d].copy(u), o.tq[d].copy(f));
+            }),
           this.ents.set(i.id, o);
       }
       return o;
@@ -30231,6 +30534,11 @@ class US {
       r = !!(i && this.firstPerson && !o?.rag),
       a = r ? 74 : 62;
     this.camera.fov !== a && ((this.camera.fov = a), this.camera.updateProjectionMatrix());
+    if (this.morgue && i) {
+      // XIOMBARD: a third-person camera indoors needs the roof out of the way
+      const l = i.groups[0].position;
+      this.morgue.roof.visible = r || !insideMorgue(l.x, l.z);
+    }
     for (const l of this.order) {
       for (let h = 0; h < l.groups.length; h++)
         l.groups[h].position.lerp(l.tpos[h], n), l.groups[h].quaternion.slerp(l.tq[h], n);
@@ -34797,6 +35105,10 @@ class RT {
       (this.time = 0),
       (this.acc = 0),
       (this.score = 0),
+      (this.buried = 0), // XIOMBARD: bodies laid to rest (score is peace points)
+      (this.nails = 12),
+      (this.boards = 4),
+      (this.tags = Array.from({ length: MORGUE.board.n }, () => null)), // name tags on the board
       (this.seedCounter = 1),
       (this.rand = wt(Date.now() & 65535)),
       (this._ray = new Ua()),
@@ -34814,11 +35126,15 @@ class RT {
         r.addShape(new Bn(new k(st.x, 1, st.z))),
         r.position.set(i.x, -1, i.z),
         t.addBody(r),
-        { i: o, x: i.x, z: i.z, depth: 0, fill: 0, buried: !1, buriedAt: 0, name: "", seed: 0, floor: r, digSfx: 0 }
+        { i: o, x: i.x, z: i.z, depth: 0, fill: 0, buried: !1, buriedAt: 0, name: "", seed: 0, floor: r, digSfx: 0, unrest: 0, nailed: !1 }
       );
     })),
-      (this.truck = this.spawnTruck());
-    for (let i = 0; i < 3; i++) this.spawnCoffin(Yt.x, 0.1, Yt.z + (i - 1) * 1.35, Math.PI / 2);
+      (this.truck = this.spawnTruck()),
+      (this.fence = FENCE_SECTIONS.map((f) => ({ ...f, hp: FENCE_HP, bodies: [], bashSfx: 0 }))), // XIOMBARD
+      this.fence.forEach((f) => this.buildFence(f)),
+      (this.traps = TRAPS.map(([x, z]) => ({ x, z, dur: TRAP_DUR, armed: !0, rearm: 0 })));
+    for (const [i, o] of MORGUE.coffins) this.spawnCoffin(i, 0.05, o, 0); // XIOMBARD
+    for (let i = 0; i < this.tags.length; i++) this.tags[i] = Ub(Math.floor(this.rand() * 1e6)); // decoy tags
     this.spawnLoad(3);
   }
   addEnt(e) {
@@ -34856,6 +35172,9 @@ class RT {
       color: e.color || "",
       name: e.name || "",
       look: e.look ?? -1,
+      outfit: e.kind === "corpse" ? e.outfit || "shroud" : void 0, // XIOMBARD
+      tag: e.kind === "corpse" && e.tag ? 1 : 0,
+      lid: e.kind === "coffin" ? e.lid || 0 : 0,
     }));
   }
   emit(e, t) {
@@ -34916,7 +35235,17 @@ class RT {
     const i = el(n),
       o = Yu(i, e, t, new Float32Array(ti * 7)),
       { bodies: r, constraints: a } = this.makeCrewRagdoll(i, o, vT),
-      c = this.addEnt({ kind: "corpse", seed: n, bodies: r, constraints: a, name: Ub(n), slip: 0.8 + wt(n)() * 0.7 });
+      c = this.addEnt({
+        kind: "corpse",
+        seed: n,
+        bodies: r,
+        constraints: a,
+        name: Ub(n),
+        slip: 0.8 + wt(n)() * 0.7,
+        suit: wt(n * 13 + 5).pick(OUTFITS).id, // XIOMBARD: what the delivery note asks for
+        outfit: "shroud",
+        tag: null,
+      });
     for (const l of r) l.ent = c;
     return c;
   }
@@ -34952,7 +35281,7 @@ class RT {
       l.quaternion.setFromEuler(0, i, 0),
       (l.sleepSpeedLimit = 0.2),
       this.world.addBody(l);
-    const h = this.addEnt({ kind: "coffin", body: l, seed: this.seedCounter++ });
+    const h = this.addEnt({ kind: "coffin", body: l, seed: this.seedCounter++, lid: 0, passenger: null });
     return (l.ent = h), h;
   }
   spawnTruck() {
@@ -35040,7 +35369,7 @@ class RT {
   }
   removePlayer(e) {
     const t = this.byId(e);
-    t && (this.drop(t), this.removeEnt(t));
+    t && (this.drop(t), this.returnItem(t), this.removeEnt(t));
   }
   setInput(e, t) {
     const n = this.byId(e);
@@ -35057,6 +35386,7 @@ class RT {
     return new k(o.x + Math.sin(i) * n, o.y + t, o.z + Math.cos(i) * n);
   }
   toRagdoll(e, t) {
+    this.returnItem(e); // XIOMBARD
     if (e.rag) return;
     this.drop(e);
     const n = this.diggerPose(e, new Float32Array(ti * 7));
@@ -35098,9 +35428,10 @@ class RT {
       r = new k(),
       a = new Set(
         this.ents.filter((c) => c.kind === "coffin" && this.coffinUp(c) > 0.5).map((c) => this.coffinContents(c)),
-      );
+      ),
+      onTruck = new Set(this.corpsesInBed()); // XIOMBARD
     for (const c of this.ents)
-      if (c !== e && !(c.z && c.z.mode !== "down")) {
+      if (c !== e && !(c.z && c.z.mode !== "down") && !onTruck.has(c)) {
         if (c.kind === "corpse" || ((c.kind === "digger" || c.kind === "zombie") && c.rag)) {
           if (this.holders(c)) continue;
           const l = this.bodiesOf(c);
@@ -35290,6 +35621,7 @@ class RT {
     for (const i of this.ents) {
       if (
         i.kind !== "coffin" ||
+        i.lid ||
         this.coffinUp(i) < 0.7 ||
         this.coffinContents(i) ||
         (i.body.pointToLocalFrame(t, n),
@@ -35330,6 +35662,7 @@ class RT {
     return this.holdersOf(e).length;
   }
   coffinContents(e) {
+    if (e.lid) return null; // XIOMBARD: a closed coffin keeps its passenger as data (see closeLid)
     const t = e.body,
       n = new k();
     for (const i of this.ents)
@@ -35369,12 +35702,10 @@ class RT {
     const t = this.coffinInPlot(e);
     if (t) {
       if (this.coffinUp(t) < 0.5) return { act: null, hint: "The coffin is upside down! Flip it." };
-      const n = this.coffinContents(t);
-      return n
-        ? e.depth < Qp
-          ? { act: null, hint: "Too shallow. Pull the coffin out and dig deeper." }
-          : { act: "fill", coffin: t, body: n, hint: "Hold F to fill the grave" }
-        : { act: null, hint: "This coffin is empty. Put a body in it." };
+      if (!t.lid) return this.coffinStatus(t); // XIOMBARD: close (and maybe nail) it first
+      return e.depth < Qp
+        ? { act: null, hint: "Too shallow. Pull the coffin out and dig deeper." }
+        : { act: "fill", coffin: t, hint: "Hold F to fill the grave" };
     }
     return e.depth < wo
       ? { act: "dig", hint: e.depth > 0 ? "Hold F to keep digging" : "Hold F to dig a grave" }
@@ -35394,26 +35725,342 @@ class RT {
       : i.act === "fill" &&
         ((t.fill += n / 2.5),
         this.time - t.digSfx > 0.45 && ((t.digSfx = this.time), this.emit("sfx", { name: "dig", pos: [t.x, 0, t.z] })),
-        t.fill >= 1 && this.bury(t, i.coffin, i.body));
+        t.fill >= 1 && this.bury(t, i.coffin));
   }
-  bury(e, t, n) {
+  // XIOMBARD: the laying-to-rest checklist. Each missed item makes the grave restless:
+  // zombies go for restless graves first, and a coffin that is not nailed shut is dug up twice as fast.
+  bury(e, t) {
+    const n = t.passenger,
+      named = n.tag === n.name,
+      dressed = n.outfit === n.suit,
+      nailed = t.lid === 2,
+      mark = (ok) => (ok ? "\u2713" : "\u2717");
     if (
-      ((e.name = n.name),
+      ((e.name = n.tag || "Nobody Knows"),
       (e.seed = n.seed),
-      this.removeEnt(n),
+      (e.unrest = (named ? 0 : 1) + (dressed ? 0 : 1) + (nailed ? 0 : 1)),
+      (e.nailed = nailed),
+      (e.who = n),
       this.removeEnt(t),
       (e.buried = !0),
       (e.buriedAt = this.time),
       (e.fill = 0),
       this.setDepth(e, 0),
-      this.score++,
+      this.buried++,
+      (this.score += 1 + (named ? 1 : 0) + (dressed ? 1 : 0) + (nailed ? 1 : 0)),
       this.emit("sfx", { name: "bury", pos: [e.x, 0, e.z] }),
-      this.emit("toast", { text: `R.I.P. ${e.name}`, pos: [e.x, 2, e.z], big: !0 }),
+      this.emit("toast", { text: `R.I.P. ${e.name}`, pos: [e.x, 2.3, e.z], big: !0 }),
+      this.emit("toast", { text: `${mark(named)} name  ${mark(dressed)} outfit  ${mark(nailed)} nailed`, pos: [e.x, 1.7, e.z] }),
+      e.unrest >= 2 && this.emit("toast", { text: "The ground grumbles...", pos: [e.x, 1.1, e.z] }),
       this.plots.every((i) => i.buried))
     ) {
       const i = this.plots.reduce((o, r) => (o.buriedAt < r.buriedAt ? o : r));
       (i.buried = !1), this.emit("toast", { text: "Graveyard full! An old plot was cleared.", pos: [i.x, 2, i.z] });
     }
+  }
+
+
+  // ===================== XIOMBARD: fence, traps and repairs =====================
+  buildFence(f) {
+    for (const [p0, p1] of f.pieces) {
+      const c = (p0 + p1) / 2,
+        h = (p1 - p0) / 2,
+        b = new Ue({ mass: 0, material: this.mGround, collisionFilterGroup: va, collisionFilterMask: Us });
+      b.addShape(new Bn(f.axis === "z" ? new k(h, 1, 0.15) : new k(0.15, 1, h))),
+        f.axis === "z" ? b.position.set(c, 1, f.at) : b.position.set(f.at, 1, c),
+        this.world.addBody(b),
+        f.bodies.push(b);
+    }
+  }
+  damageFence(i, dmg) {
+    const f = this.fence[i];
+    if (!f || f.hp <= 0) return;
+    f.hp = Math.max(0, f.hp - dmg);
+    const [x, z] = f.axis === "z" ? [(f.a0 + f.a1) / 2, f.at] : [f.at, (f.a0 + f.a1) / 2];
+    this.time > f.bashSfx && ((f.bashSfx = this.time + 0.7), this.emit("sfx", { name: "thud", pos: [x, 1, z] }));
+    if (f.hp <= 0) {
+      for (const b of f.bodies) this.world.removeBody(b);
+      (f.bodies = []), this.emit("toast", { text: "The fence gave way!", pos: [x, 2.4, z], big: !0 }), this.emit("sfx", { name: "bonk", pos: [x, 1, z] });
+    }
+  }
+  // a walker shoving the fence from outside wears it down; an armed trap under it snaps shut
+  walkerHazards(e, t) {
+    const n = e.z;
+    if (n.mode !== "walk" && n.mode !== "attack") return;
+    const i = n.body.position;
+    if (Math.abs(i.x) > zt - 0.9 || Math.abs(i.z) > zt - 0.9) {
+      const o = Math.abs(Math.abs(i.x) - zt) < Math.abs(Math.abs(i.z) - zt) ? fenceSectionAt(Math.sign(i.x) * zt, i.z) : fenceSectionAt(i.x, Math.sign(i.z) * zt);
+      o >= 0 && this.fence[o].hp > 0 && n.speed < 0.6 && n.target && this.damageFence(o, t * (n.def.type === Pn.dragger ? 26 : 13));
+    }
+    for (const o of this.traps)
+      if (o.armed && o.dur > 0 && Math.hypot(i.x - o.x, i.z - o.z) < 0.6) {
+        (o.armed = !1), (o.rearm = this.time + 4), o.dur--;
+        const r = Math.atan2(i.x - o.x, i.z - o.z);
+        this.knock(e, Math.sin(r) * 1.5, 2.5, Math.cos(r) * 1.5),
+          this.emit("toast", { text: o.dur ? "SNAP!" : "SNAP! The trap broke.", pos: [o.x, 1.4, o.z] }),
+          this.emit("sfx", { name: "bonk", pos: [o.x, 0.3, o.z] });
+        break;
+      }
+  }
+  // what needs fixing within reach: a worn fence section or a used-up trap
+  repairTarget(e) {
+    const t = e.body.position;
+    for (let n = 0; n < this.traps.length; n++) {
+      const i = this.traps[n];
+      if (i.dur < TRAP_DUR && Math.hypot(t.x - i.x, t.z - i.z) < 1.4)
+        return this.nails >= 2
+          ? { act: "repair", trap: n, hint: `Hold F to fix the trap (2 of ${this.nails} nails)` }
+          : { act: null, hint: "This trap needs 2 nails to fix." };
+    }
+    if (Math.abs(t.x) < zt - 2.3 && Math.abs(t.z) < zt - 2.3) return null;
+    const n = Math.abs(Math.abs(t.x) - zt) < Math.abs(Math.abs(t.z) - zt) ? fenceSectionAt(Math.sign(t.x) * zt, t.z) : fenceSectionAt(t.x, Math.sign(t.z) * zt);
+    if (n < 0 || this.fence[n].hp >= FENCE_HP) return null;
+    return this.boards >= 1 && this.nails >= 2
+      ? { act: "repair", fence: n, hint: this.fence[n].hp > 0 ? "Hold F to patch the fence (1 board, 2 nails)" : "Hold F to rebuild the fence (1 board, 2 nails)" }
+      : { act: null, hint: "The fence needs 1 board and 2 nails." };
+  }
+  repair(w) {
+    if (w.trap !== void 0) {
+      const t = this.traps[w.trap];
+      if (this.nails < 2) return;
+      (this.nails -= 2), (t.dur = TRAP_DUR), (t.armed = !0), this.emit("toast", { text: "Trap fixed and set", pos: [t.x, 1.2, t.z] });
+      return;
+    }
+    const t = this.fence[w.fence];
+    if (this.boards < 1 || this.nails < 2) return;
+    (this.boards -= 1), (this.nails -= 2);
+    const n = t.hp <= 0;
+    (t.hp = FENCE_HP), n && this.buildFence(t);
+    const [i, o] = t.axis === "z" ? [(t.a0 + t.a1) / 2, t.at] : [t.at, (t.a0 + t.a1) / 2];
+    this.emit("toast", { text: n ? "Fence rebuilt" : "Fence patched", pos: [i, 2, o] });
+  }
+  updateTraps() {
+    for (const e of this.traps) !e.armed && e.dur > 0 && this.time > e.rearm && (e.armed = !0);
+  }
+  // ===================== XIOMBARD: the morgue — hatch, tags, outfits, lids, nails =====================
+  coffinDist(e, c) {
+    const t = c.body.pointToLocalFrame(e.body.position);
+    return Math.abs(t.y) > 1.5 ? 1 / 0 : Math.hypot(Math.max(0, Math.abs(t.x) - Gt.hx), Math.max(0, Math.abs(t.z) - Gt.hz));
+  }
+  coffinStatus(c) {
+    if (this.coffinUp(c) < 0.5) return { act: null, hint: "The coffin is upside down! Flip it." };
+    if (!c.lid) {
+      const t = this.coffinContents(c);
+      return t ? { act: "lid", coffin: c, body: t, hint: "Hold F to close the lid" } : { act: null, hint: "Empty coffin. Lay a body in it." };
+    }
+    return c.lid === 1
+      ? this.nails >= NAIL_COST
+        ? { act: "nail", coffin: c, hint: `Hold F to nail it shut (${NAIL_COST} of ${this.nails} nails)` }
+        : { act: null, hint: "Out of nails. Drag it to a dug grave as it is." }
+      : { act: null, hint: "Nailed shut. Drag it to a dug grave." };
+  }
+  // What F does right now: fill a grave, close or nail a coffin, or dig.
+  workTarget(e) {
+    const t = this.nearestPlot(e),
+      n = t && this.plotStatus(t);
+    if (n && n.act === "fill") return { ...n, plot: t };
+    const rt = this.repairTarget(e);
+    if (rt && rt.act) return rt;
+    const i = this.ents
+        .filter((o) => o.kind === "coffin" && this.coffinDist(e, o) < 1.15)
+        .sort((o, r) => this.coffinDist(e, o) - this.coffinDist(e, r)),
+      o = i.map((r) => this.coffinStatus(r)).find((r) => r.act);
+    return o || (n ? { ...n, plot: t } : i.length ? this.coffinStatus(i[0]) : rt);
+  }
+  doWork(e, t) {
+    const n = this.workTarget(e);
+    if (((e.tool = n && n.act), !n || !n.act)) {
+      e.work = 0;
+      return;
+    }
+    const i = n.act + (n.coffin ? n.coffin.id : n.plot ? n.plot.i : n.trap !== void 0 ? "t" + n.trap : n.fence !== void 0 ? "f" + n.fence : "");
+    if ((e.workKey !== i && ((e.workKey = i), (e.work = 0)), n.act === "dig" || n.act === "fill")) {
+      this.workPlot(e, n.plot, t);
+      return;
+    }
+    e.work += t;
+    if ((n.act === "nail" || n.act === "repair") && Math.floor(e.work / 0.27) !== Math.floor((e.work - t) / 0.27)) {
+      const r = n.coffin ? n.coffin.body.position : e.body.position;
+      this.emit("sfx", { name: "bonk", pos: [r.x, r.y, r.z] });
+    }
+    e.work < (n.act === "lid" ? 1 : n.act === "repair" ? 2 : 1.6) ||
+      ((e.work = 0), n.act === "lid" ? this.closeLid(n.coffin, n.body) : n.act === "repair" ? this.repair(n) : this.nailLid(n.coffin));
+  }
+  closeLid(c, t) {
+    c.passenger = { name: t.name, seed: t.seed, suit: t.suit, outfit: t.outfit, tag: t.tag };
+    this.removeEnt(t);
+    c.lid = 1;
+    const n = c.body;
+    n.addShape(new Bn(new k(Gt.hx, 0.03, Gt.hz)), new k(0, Gt.hy, 0)),
+      (n.mass = 25 + vT),
+      n.updateMassProperties(),
+      (n.aabbNeedsUpdate = !0),
+      n.wakeUp(),
+      this.version++,
+      this.emit("sfx", { name: "thud", pos: [n.position.x, n.position.y, n.position.z] }),
+      this.emit("toast", { text: `Goodnight, ${t.tag || "whoever you are"}`, pos: [n.position.x, n.position.y + 1, n.position.z] });
+  }
+  nailLid(c) {
+    if (this.nails < NAIL_COST || c.lid !== 1) return;
+    (this.nails -= NAIL_COST), (c.lid = 2), this.version++;
+    const t = c.body.position;
+    this.emit("toast", { text: `Nailed shut! ${this.nails} nails left`, pos: [t.x, t.y + 1, t.z] });
+  }
+  atHatch(e) {
+    const t = e.body.position,
+      n = MORGUE.table;
+    return Math.abs(t.x - n.x) < n.hx + 0.6 && t.z > n.z - 1.6 && t.z < MORGUE.z1 && insideMorgue(t.x, t.z);
+  }
+  boardSlot(e) {
+    const t = MORGUE.board,
+      n = e.body.position;
+    if (!insideMorgue(n.x, n.z) || n.x > t.x + 1.5) return -1;
+    const i = this.handPoint(e, 1).z;
+    let o = -1,
+      r = 0.45;
+    for (let a = 0; a < t.n; a++) {
+      const c = Math.abs(t.z0 + a * t.dz - i);
+      c < r && ((r = c), (o = a));
+    }
+    return o;
+  }
+  rackSlot(e) {
+    const t = MORGUE.rack,
+      n = e.body.position;
+    if (!insideMorgue(n.x, n.z) || n.x < t.x - 1.5) return -1;
+    const i = this.handPoint(e, 1).z;
+    let o = -1,
+      r = 0.5;
+    for (let a = 0; a < OUTFITS.length; a++) {
+      const c = Math.abs(t.z0 + a * t.dz - i);
+      c < r && ((r = c), (o = a));
+    }
+    return o;
+  }
+  itemTarget(e) {
+    const t = this.handPoint(e, 0.9);
+    let n = null,
+      i = 1.3;
+    for (const o of this.ents)
+      if (o.kind === "corpse" && !o.z)
+        for (const r of o.bodies) {
+          const a = r.position.distanceTo(t);
+          a < i && ((i = a), (n = o));
+        }
+    return n;
+  }
+  // Pull the next body off the hearse through the hatch onto the intake table.
+  acceptBody(e) {
+    const t = this.corpsesInBed()[0];
+    if (!t) return !1;
+    const n = MORGUE.table,
+      i = el(t.seed),
+      o = this.ents.filter(
+        (c) => c.kind === "corpse" && c !== t && Math.abs(c.bodies[0].position.x - n.x) < n.hx + 0.2 && Math.abs(c.bodies[0].position.z - n.z) < 0.8,
+      ).length,
+      r = new Fe()
+        .makeTranslation(n.x + i.height / 2, n.top + i.back + 0.08 + o * 0.45, n.z)
+        .multiply(new Fe().makeRotationY(Math.PI / 2))
+        .multiply(new Fe().makeRotationX(-Math.PI / 2)),
+      a = Yu(i, r, Yw(wt(t.seed)), new Float32Array(ti * 7));
+    if (
+      (t.bodies.forEach((c, l) => {
+        this.bodyFromXf(c, a, l * 7), c.velocity.setZero(), c.angularVelocity.setZero(), c.wakeUp();
+      }),
+      (t.greeted = !0),
+      !this.tags.includes(t.name))
+    ) {
+      // make sure the right name tag hangs on the board, replacing a decoy nobody needs
+      const c = new Set(this.ents.filter((h) => h.kind === "corpse" && h.tag !== h.name).map((h) => h.name));
+      let l = this.tags.indexOf(null);
+      l < 0 && (l = this.tags.findIndex((h) => !c.has(h))), l < 0 && (l = Math.floor(this.rand() * this.tags.length)), (this.tags[l] = t.name);
+    }
+    return (
+      this.emit("sfx", { name: "thud", pos: [n.x, n.top, n.z] }),
+      this.emit("toast", { text: `Note: ${t.name}, ${outfitLabel(t.suit).toLowerCase()}`, pos: [n.x, n.top + 1.1, n.z] }),
+      !0
+    );
+  }
+  returnItem(e) {
+    const t = e.item;
+    if (((e.item = null), t && t.type === "tag")) {
+      const n = this.tags.indexOf(null);
+      n >= 0 && (this.tags[n] = t.name);
+    }
+  }
+  useItem(e) {
+    const t = e.item,
+      n = this.itemTarget(e);
+    if (!n) {
+      this.returnItem(e), this.emit("sfx", { name: "grab", pos: [e.body.position.x, 1, e.body.position.z] });
+      return;
+    }
+    const i = n.bodies[0].position,
+      o = [i.x, i.y + 0.8, i.z];
+    if (t.type === "tag") {
+      if (n.tag) {
+        const r = this.tags.indexOf(null);
+        r >= 0 && (this.tags[r] = n.tag);
+      }
+      (n.tag = t.name), this.emit("toast", { text: `Tagged "${t.name}"`, pos: o });
+    } else (n.outfit = t.suit), this.emit("toast", { text: `Dressed in the ${outfitLabel(t.suit).toLowerCase()}`, pos: o });
+    (e.item = null), this.version++, this.emit("sfx", { name: "grab", pos: o });
+  }
+  // E / Click / GRAB in the morgue: use the item in hand, take a body from the hatch, a tag or an outfit.
+  // Returns false when none of that applies, so the usual grab / shovel swing happens.
+  morgueKey(e) {
+    if (e.item) return this.useItem(e), !0;
+    if (this.truck.state === "wait" && this.atHatch(e) && this.acceptBody(e)) return !0;
+    const t = this.boardSlot(e);
+    if (t >= 0 && this.tags[t])
+      return (e.item = { type: "tag", name: this.tags[t] }), (this.tags[t] = null), this.emit("sfx", { name: "grab", pos: [MORGUE.board.x, 1.4, MORGUE.board.z0] }), !0;
+    const n = this.rackSlot(e);
+    return n >= 0 ? ((e.item = { type: "suit", suit: OUTFITS[n].id }), this.emit("sfx", { name: "grab", pos: [MORGUE.rack.x, 1.4, MORGUE.rack.z0] }), !0) : !1;
+  }
+  morgueHint(e) {
+    if (e.item) {
+      const i = this.itemTarget(e),
+        o = e.item.type === "tag" ? `tag "${e.item.name}"` : outfitLabel(e.item.suit).toLowerCase();
+      return i
+        ? e.item.type === "tag"
+          ? `E: hang the ${o} on this body`
+          : `E: dress this body in the ${o}`
+        : `Holding the ${o} · go to the body · Q to put it back`;
+    }
+    if (this.truck.state === "wait" && this.atHatch(e) && this.corpsesInBed().length) return "E: take the body in through the hatch";
+    const t = this.boardSlot(e);
+    if (t >= 0 && this.tags[t]) return `E: take the name tag "${this.tags[t]}"`;
+    const n = this.rackSlot(e);
+    return n >= 0 ? `E: take the ${OUTFITS[n].label.toLowerCase()}` : "";
+  }
+  // The delivery note of the body this player is dealing with, for the HUD card.
+  cardFor(e) {
+    const t = (o, r) => ({
+      name: o.name,
+      suit: outfitLabel(o.suit),
+      tag: o.tag,
+      outfit: outfitLabel(o.outfit),
+      tagOk: o.tag === o.name,
+      suitOk: o.outfit === o.suit,
+      ...r,
+    });
+    if (e.grab && e.grab.ent.kind === "corpse" && !e.grab.ent.z) return t(e.grab.ent, { stage: "held" });
+    const n = this.feet(e);
+    let i = null,
+      o = 2.2;
+    for (const r of this.ents)
+      if (r.kind === "corpse" && !r.z) {
+        const a = r.bodies[0].position.distanceTo(n);
+        if (a < o) {
+          o = a;
+          const c = this.ents.find((l) => l.kind === "coffin" && this.coffinContents(l) === r);
+          i = t(r, { stage: c ? "coffin" : "loose" });
+        }
+      } else if (r.kind === "coffin" && r.passenger) {
+        const a = r.body.position.distanceTo(n);
+        a < o && ((o = a), (i = t(r.passenger, { stage: r.lid === 2 ? "nailed" : "closed" })));
+      }
+    return i;
   }
   light() {
     const e = (t, n, i) => {
@@ -35470,10 +36117,28 @@ class RT {
       (this.spawns = []),
       this.emit("toast", { text: `Morning! Day ${this.dayN}`, pos: [0, 3.5, 4], big: !0 }),
       this.emit("sfx", { name: "rooster" });
+    {
+      // XIOMBARD: what the night broke
+      const e = this.fence.filter((n) => n.hp <= 0).length,
+        t = this.fence.filter((n) => n.hp > 0 && n.hp < FENCE_HP).length,
+        n = this.traps.filter((i) => i.dur <= 0).length,
+        i = [e && `${e} fence section${e > 1 ? "s" : ""} down`, t && `${t} worn`, n && `${n} trap${n > 1 ? "s" : ""} broken`].filter(Boolean);
+      i.length && this.emit("toast", { text: `Last night: ${i.join(", ")}. Time for repairs.`, pos: [0, 2.8, 4] });
+    }
     for (const e of [...this.ents]) (e.riseAt = 0), e.z && (e.kind === "zombie" ? this.poof(e) : this.layDown(e));
   }
   zombieSpot() {
     const e = this.ents.filter((t) => t.kind === "digger");
+    if (this.rand() < 0.65) {
+      // XIOMBARD: from outside the fence, away from the open road gates
+      for (let t = 0; t < 20; t++) {
+        const n = Math.floor(this.rand() * 4),
+          i = (this.rand() * 2 - 1) * 24,
+          o = zt + 2.5 + this.rand() * 3,
+          [r, a] = n === 0 ? [i, -o] : n === 1 ? [i, o] : n === 2 ? [-o, i] : [o, i];
+        if (!(n >= 2 && Math.abs(i - qt) < es + 2)) return [r, a];
+      }
+    }
     for (let t = 0; t < 40; t++) {
       const n = (this.rand() * 2 - 1) * 22,
         i = -22 + this.rand() * 27;
@@ -35596,7 +36261,7 @@ class RT {
       c = 1 / 0;
     for (const l of this.plots) {
       if (!l.buried) continue;
-      const h = Math.hypot(l.x - n.x, l.z - n.z);
+      const h = Math.hypot(l.x - n.x, l.z - n.z) - (l.unrest || 0) * 8; // XIOMBARD: restless graves call louder
       h < c && ((c = h), (a = l));
     }
     return a && !i ? { plot: a } : o ? { p: o } : null;
@@ -35662,8 +36327,10 @@ class RT {
       ? ((n.digT += t),
         Math.floor(n.digT / 0.6) !== Math.floor((n.digT - t) / 0.6) &&
           this.emit("sfx", { name: "dig", pos: [l, 0, h] }),
-        n.digT > 6 && ((n.digT = 0), this.unbury(a.plot), (n.target = null), (n.think = 0)))
+        n.digT > (a.plot.nailed ? 12 : 6) && ((n.digT = 0), this.unbury(a.plot), (n.target = null), (n.think = 0)))
       : (n.digT = Math.max(0, n.digT - t));
+    this.walkerHazards(e, t); // XIOMBARD: shove the fence, step in traps
+    if (!e.z || e.z.mode === "down") return;
     let m = p > u ? o.speed : 0;
     n.mode === "attack" && (m = r ? o.speed * 0.7 : 0), (m *= Math.max(0, Math.cos(v)));
     const x = Math.min(1, t * 8);
@@ -35750,7 +36417,11 @@ class RT {
     (e.buried = !1), (this.score = Math.max(0, this.score - 1));
     const t = new Fe().makeTranslation(e.x, 0.35, e.z - 0.9).multiply(new Fe().makeRotationX(Math.PI / 2)),
       n = this.spawnCorpse(t, Xw, e.seed);
-    (n.greeted = !0),
+    e.who && ((n.outfit = e.who.outfit), (n.tag = e.who.tag), (e.who = null)), // XIOMBARD: dug up as they were buried
+      (this.buried = Math.max(0, this.buried - 1)),
+      (e.unrest = 0),
+      (e.nailed = !1),
+      (n.greeted = !0),
       this.emit("toast", { text: `${e.name} is back!`, pos: [e.x, 2, e.z], big: !0 }),
       this.riseCorpse(n);
   }
@@ -35807,7 +36478,7 @@ class RT {
     for (const t of this.ents) this.writeXf(t);
   }
   step(e) {
-    (this.time += e), this.updatePhase(e), this.updateTruck(e);
+    (this.time += e), this.updatePhase(e), this.updateTruck(e), this.updateTraps();
     for (const t of [...this.ents]) t.z && this.updateWalker(t, e);
     for (const t of this.ents) t.kind === "digger" && this.updatePlayer(t, e);
     for (const t of this.ents) t.kind === "digger" && t.grab && this.updateHand(t, e);
@@ -35880,16 +36551,15 @@ class RT {
         ((i.g = n.g),
         e.grab
           ? this.drop(e, !0)
-          : this.whackable(e).length || this.threatened(e) || !this.findGrab(e)
+          : this.whackable(e).length || this.threatened(e)
             ? this.whack(e)
-            : this.grab(e)),
+            : this.morgueKey(e) || (this.findGrab(e) ? this.grab(e) : this.whack(e))),
       !e.swingHit && this.time - e.swingT >= Vc * 0.35 && this.landWhack(e),
-      n.th !== i.th && ((i.th = n.th), this.throwHeld(e)),
+      n.th !== i.th && ((i.th = n.th), e.item ? this.returnItem(e) : this.throwHeld(e)),
+      e.digging || ((e.tool = null), (e.work = 0)),
       e.digging)
-    ) {
-      const _ = this.nearestPlot(e);
-      _ && this.workPlot(e, _, t);
-    }
+    )
+      this.doWork(e, t); // XIOMBARD: dig, fill, close a lid or nail it
   }
   updateHand(e, t) {
     const n = e.grab,
@@ -35993,22 +36663,24 @@ class RT {
             this.coffinUp(r) > 0.5 &&
             Math.abs(r.body.position.x) < 27 &&
             Math.abs(r.body.position.z) < 27 &&
+            !r.lid &&
             !this.coffinContents(r) &&
             !mn.some((a, c) => this.coffinInPlot(this.plots[c]) === r),
         ).length < 2 &&
         i.length < 8
       ) {
-        let r = null;
-        for (let a = 0; a < 5 && !r; a++) {
-          const c = Yt.z + [0, 1.35, -1.35, 2.7, -2.7][a];
-          i.some((l) => Math.hypot(l.body.position.x - Yt.x, l.body.position.z - c) < 1.6) || (r = c);
-        }
-        this.spawnCoffin(Yt.x, r === null ? 2.5 : 0.6, r === null ? Yt.z : r, Math.PI / 2),
-          this.emit("sfx", { name: "thud", pos: [Yt.x, 0.5, Yt.z] });
+        // XIOMBARD: fresh coffins appear in the morgue, pointing at the door, never inside another one
+        const r = MORGUE.coffins.find(
+          ([a, c]) =>
+            !this.ents.some(
+              (l) => (l.kind === "coffin" || l.kind === "digger") && Math.abs(this.feet(l).x - a) < 1 && Math.abs(this.feet(l).z - c) < 1.6,
+            ),
+        );
+        r && (this.spawnCoffin(r[0], 0.05, r[1], 0), this.emit("sfx", { name: "thud", pos: [r[0], 0.5, r[1]] }));
       }
     }
     if (Math.floor(this.time * 5) !== Math.floor((this.time - e) * 5))
-      for (const i of this.ents) i.kind === "digger" && (i.hint = this.hintFor(i));
+      for (const i of this.ents) i.kind === "digger" && ((i.hint = this.hintFor(i)), (i.card = i.rag ? null : this.cardFor(i)));
   }
   corpsesInBed() {
     const e = this.truck.body.position;
@@ -36034,10 +36706,13 @@ class RT {
           (n.position.x = Bu),
           (t.state = "wait"),
           (t.t = this.time),
+          (this.nails += 6), // XIOMBARD: each delivery brings a few nails and boards
+          (this.boards += 2),
           this.emit("sfx", { name: "honk", pos: [i, 1.5, qt] }),
-          this.emit("toast", { text: "Delivery!", pos: [i, 3.2, qt], big: !0 }));
+          this.emit("toast", { text: "Hearse at the hatch!", pos: [i, 3.2, qt], big: !0 }),
+          this.emit("toast", { text: "+6 nails, +2 boards", pos: [MORGUE.crate.x, 1.6, MORGUE.crate.z] }));
     } else if (t.state === "wait")
-      ((this.corpsesInBed().length === 0 && this.time - t.t > 3) || this.time - t.t > 90) &&
+      ((this.corpsesInBed().length === 0 && this.time - t.t > 3) || this.time - t.t > 120) &&
         ((t.state = "leave"), (t.t = this.time), this.emit("sfx", { name: "honk", pos: [i, 1.5, qt] }));
     else if (t.state === "leave")
       (o = -Math.min(8, 0.5 + (this.time - t.t) * 2)),
@@ -36053,7 +36728,7 @@ class RT {
     n.velocity.set(o, 0, 0),
       t.cage.position.copy(n.position),
       t.cage.velocity.set(o, 0, 0),
-      (t.cage.collisionFilterMask = t.state === "arrive" ? Bs : 0),
+      (t.cage.collisionFilterMask = t.state === "away" ? 0 : Bs), // XIOMBARD: bodies leave only through the hatch
       (t.cage.aabbNeedsUpdate = !0),
       (t.wheel += (o * e) / 0.5);
   }
@@ -36064,10 +36739,18 @@ class RT {
         ? this.holders(e.grab.ent) > 1
           ? "Teamwork! Walk in file and drop it into a dug grave."
           : "Heavy! Stand still to rest, or get a friend on the other end."
-        : "Put them in a coffin · Click to drop · Right-click to throw";
+        : "Lay them in a coffin \u00b7 Click to drop \u00b7 Right-click to throw";
     if (this.whackable(e).length) return "Click to whack!";
-    const t = this.nearestPlot(e);
-    return t ? this.plotStatus(t).hint : this.findGrab(e) ? "Click to grab" : "";
+    const m = this.morgueHint(e); // XIOMBARD
+    if (m) return m;
+    const t = this.workTarget(e);
+    return t && t.hint
+      ? t.hint
+      : this.findGrab(e)
+        ? "Click to grab"
+        : this.truck.state === "wait" && this.corpsesInBed().length && !insideMorgue(e.body.position.x, e.body.position.z)
+          ? "The hearse is here: take the bodies in through the hatch inside the morgue"
+          : "";
   }
   diggerPose(e, t) {
     const n = e.body.position;
@@ -36153,7 +36836,13 @@ class RT {
       (this.events = []),
       {
         score: this.score,
-        plots: this.plots.map((t) => [+t.depth.toFixed(3), +t.fill.toFixed(3), t.buried ? 1 : 0, t.seed, t.name]),
+        buried: this.buried, // XIOMBARD
+        nails: this.nails,
+        boards: this.boards,
+        tags: this.tags,
+        fence: this.fence.map((e) => Math.round(e.hp)),
+        traps: this.traps.map((e) => e.dur * 2 + (e.armed ? 1 : 0)),
+        plots: this.plots.map((t) => [+t.depth.toFixed(3), +t.fill.toFixed(3), t.buried ? 1 : 0, t.seed, t.name, t.unrest || 0]),
         truck: [+this.truck.wheel.toFixed(3), this.truck.state === "wait" ? 1 : 0],
         phase: [
           this.phase === "night" ? 1 : 0,
@@ -36171,7 +36860,9 @@ class RT {
             color: t.color,
             hint: t.hint,
             rag: !!t.rag,
-            dig: t.digging,
+            dig: t.digging && (t.tool === "dig" || t.tool === "fill"),
+            item: t.item || null, // XIOMBARD
+            card: t.card || null,
             sw: this.swinging(t) ? 1 : 0,
             busy: t.grab ? 1 : 0,
             grip:
@@ -40067,6 +40758,8 @@ function cC() {
     s.push({ x0: t.x - a, x1: t.x + a, z0: t.z - c, z1: t.z + c, kind: "solid" });
   }
   for (const [t, n] of Lr) s.push({ x0: t - 0.08, x1: t + 0.08, z0: n - 0.08, z1: n + 0.08, kind: "solid" });
+  for (const b of morgueBoxes()) // XIOMBARD
+    b.c[1] - b.h[1] < 1 && s.push({ x0: b.c[0] - b.h[0], x1: b.c[0] + b.h[0], z0: b.c[2] - b.h[2], z1: b.c[2] + b.h[2], kind: "solid" });
   return s;
 }
 const Os = (s, e, t) => e > s.x0 && e < s.x1 && t > s.z0 && t < s.z1;
@@ -40159,7 +40852,7 @@ function uC(s, e = {}) {
       Ie = new Map();
     for (const he of H) {
       const ze = s.coffinUp(he),
-        Ke = s.coffinContents(he);
+        Ke = s.coffinContents(he) || he.passenger || null; // XIOMBARD: a closed coffin is full
       ne.set(he, ze), se.set(he, Ke), Ke && ze > 0.5 && Q.set(Ke, he);
     }
     for (const he of s.plots) {
@@ -40490,6 +41183,7 @@ function uC(s, e = {}) {
         O.nearT > 2.5 && ((O.nearT = 0), (O.badSpot = O.cspot.i), (O.cspot = null), (b.path = null)));
   }
   function U(b, H) {
+    if (!H.bodies) return !0; // XIOMBARD: a sealed passenger is data, already settled
     for (const M of H.bodies) {
       const O = b.body.pointToLocalFrame(M.position);
       if (Math.abs(O.x) > Gt.hx + 0.02 || Math.abs(O.z) > Gt.hz + 0.02 || O.y > Gt.hy + 0.1) return !1;
@@ -40546,9 +41240,8 @@ function uC(s, e = {}) {
     );
   }
   function ie(b) {
-    const H = s.truck;
-    if (H.state === "wait") return !1;
-    const M = b.bodies[0].position,
+    const H = s.truck,
+      M = b.bodies[0].position,
       O = H.body.position;
     return M.y > 0.6 && Math.abs(M.z - O.z) < 1.3 && M.x > O.x + Wh - 0.3 && M.x < O.x + qh + 0.3;
   }
@@ -40629,6 +41322,38 @@ function uC(s, e = {}) {
     const Q = (he, ze) => {
       he > se && ((se = he), (ne = ze));
     };
+    // XIOMBARD: morgue jobs — take bodies in at the hatch, tag and dress them, close and nail their coffins
+    if (s.truck.state === "wait" && s.corpsesInBed().length && f(b, "hatch") && !v(b, "hatch"))
+      Q(lo.load * B.load + 20 - ho * pt(MORGUE.table.x - O.x, MORGUE.table.z - 1 - O.z), { kind: "receive", keys: ["hatch"] });
+    for (const he of M.corpses) {
+      if (ie(he) || m(M, H, he) || !f(b, "n" + he.id) || v(b, "n" + he.id)) continue;
+      const ze = he.bodies[0].position;
+      if (!insideMorgue(ze.x, ze.z, -0.5) && !M.boxedIn.has(he)) continue;
+      const need = he.tag !== he.name && s.tags.includes(he.name) ? "tag" : he.outfit !== he.suit ? "suit" : null;
+      need && Q(lo.load * B.load + 6 - ho * G(ze), { kind: "prep", corpse: he, need, keys: ["n" + he.id] });
+    }
+    for (const he of M.coffins) {
+      if (M.up.get(he) < 0.72 || he.lid === 2 || m(M, H, he) || !f(b, "e" + he.id) || v(b, "e" + he.id) || !uo(he.body.position)) continue;
+      const ze = s.coffinContents(he),
+        Ke = ze && (ze.tag === ze.name || !s.tags.includes(ze.name)) && ze.outfit === ze.suit;
+      // close a prepared body's lid; nail it while there are nails to spare for repairs
+      ((!he.lid && Ke) || (he.lid === 1 && s.nails >= NAIL_COST * 2)) &&
+        Q(lo.fill * B.fill - 4 - ho * G(he.body.position), { kind: "seal", coffin: he, keys: ["e" + he.id] });
+    }
+    // XIOMBARD: by day, fix what the night broke while there are boards and nails
+    if (s.phase === "day" && !M.walkers.length) {
+      s.fence.forEach((he, ze) => {
+        if (he.hp >= FENCE_HP || s.boards < 1 || s.nails < 2 || !f(b, "r" + ze) || v(b, "r" + ze)) return;
+        const [Ke, bt] = he.axis === "z" ? [qi(O.x, he.a0 + 0.6, he.a1 - 0.6), he.at - Math.sign(he.at) * 1.9] : [he.at - Math.sign(he.at) * 1.9, qi(O.z, he.a0 + 0.6, he.a1 - 0.6)];
+        Q(lo.dig * B.dig + (he.hp <= 0 ? 14 : 0) - ho * pt(Ke - O.x, bt - O.z), { kind: "repair", fence: ze, spot: { x: Ke, z: bt }, keys: ["r" + ze] });
+      });
+      s.traps.forEach((he, ze) => {
+        if (he.dur >= TRAP_DUR || s.nails < 2 || !f(b, "t" + ze) || v(b, "t" + ze)) return;
+        const Ke = he.x,
+          bt = he.z + (he.z < 0 ? 0.9 : 0);
+        Q(lo.dig * B.dig - 6 - ho * pt(Ke - O.x, bt - O.z), { kind: "repair", trap: ze, spot: { x: Ke, z: bt }, keys: ["t" + ze] });
+      });
+    }
     for (const he of s.plots)
       he.buried ||
         !M.plotCoffin.has(he) ||
@@ -40658,7 +41383,8 @@ function uC(s, e = {}) {
         !f(b, "e" + he.id) ||
         !f(b, "L" + he.id) ||
         v(b, "e" + he.id) ||
-        !uo(he.body.position)
+        !uo(he.body.position) ||
+        !he.lid // XIOMBARD: only closed coffins go out to the graves
       )
         continue;
       const ze = !M.contents.get(he);
@@ -40685,6 +41411,7 @@ function uC(s, e = {}) {
         v(b, "e" + he.id)
       )
         continue;
+      if (!he.lid) continue; // XIOMBARD: open coffins stay in the morgue
       const ze = he.body.position,
         Ke = !!M.contents.get(he),
         bt = P(he),
@@ -40897,6 +41624,32 @@ function uC(s, e = {}) {
           if (((O.bad = (O.bad || 0) + Wc), O.bad > 1.5)) return J(b, "nothing to fill", !1, 3), !1;
         } else O.bad = 0;
         return B > 25 ? (J(b, "too slow", !1), !1) : !0;
+      }
+      case "repair": {
+        const G = O.fence !== void 0 ? s.fence[O.fence].hp >= FENCE_HP : s.traps[O.trap].dur >= TRAP_DUR;
+        return G
+          ? (J(b, "fixed", !0, 0), !1)
+          : s.nails < 2 || (O.fence !== void 0 && s.boards < 1)
+            ? (J(b, "out of materials", !1, 30), !1)
+            : B > 25
+              ? (J(b, "too slow", !1, 10), !1)
+              : !0;
+      }
+      case "receive":
+        return s.truck.state === "wait" && s.corpsesInBed().length ? (B > 20 ? (J(b, "too slow", !1), !1) : !0) : (J(b, "nothing on the truck", !0, 0), !1);
+      case "prep": {
+        const G = O.corpse;
+        return !me(G) || G.z
+          ? (J(b, "gone", !1, 0), !1)
+          : (O.need === "tag" ? G.tag === G.name : G.outfit === G.suit)
+            ? (J(b, "prepped", !0, 0), !1)
+            : B > 30
+              ? (J(b, "too slow", !1, 10), !1)
+              : !0;
+      }
+      case "seal": {
+        const G = O.coffin;
+        return !me(G) ? (J(b, "gone", !1, 0), !1) : G.lid === 2 || (G.lid === 1 && s.nails < NAIL_COST * 2) ? (J(b, "sealed", !0, 0), !1) : B > 15 ? (J(b, "too slow", !1, 8), !1) : !0;
       }
       case "flip": {
         const G = O.coffin;
@@ -41204,7 +41957,7 @@ function uC(s, e = {}) {
     }
     M.emptyT = 0;
     const Me = B.contents.get(G);
-    if (Me && r > (M.tossT || 0) && Me.bodies.some((He) => He.sleepState === 2)) {
+    if (Me && Me.bodies && r > (M.tossT || 0) && Me.bodies.some((He) => He.sleepState === 2)) {
       _(b, "th") && ((M.tossT = r + 3), (M.tossed = !0), u(b, "heave-ho (waking the passenger)"));
       return;
     }
@@ -41345,6 +42098,59 @@ function uC(s, e = {}) {
     }
     R(b, H, M.spot.x, M.spot.z, { arrive: 0.4, slow: 1.2 }, O) < 0.4 && (y(b, M.look, 1.2, O), (b.wantMove = !1));
   }
+  // XIOMBARD: run a morgue job (receive / prep / seal)
+  function morgueJob(b, H, M, O) {
+    if (H.grab) return j(b, H, O);
+    const G = H.body.position;
+    if (M.kind === "receive") {
+      const tb = MORGUE.table;
+      R(b, H, tb.x, tb.z - 1, { arrive: 0.3, slow: 1 }, O) < 0.35 &&
+        ((b.wantMove = !1), y(b, 0, 6, O), Math.abs(fa(0, H.yaw)) < 0.25 && _(b, "g") && J(b, "took a body in", !0, 0));
+      return;
+    }
+    if (M.kind === "prep") {
+      const C = M.corpse,
+        want = M.need === "tag" ? { type: "tag", name: C.name } : { type: "suit", suit: C.suit };
+      if (H.item && (H.item.type !== want.type || (want.type === "tag" ? H.item.name !== want.name : H.item.suit !== want.suit))) {
+        _(b, "th"); // wrong one: put it back
+        return;
+      }
+      if (!H.item) {
+        let x, z, yaw;
+        if (want.type === "tag") {
+          const i = s.tags.indexOf(want.name);
+          if (i < 0) return J(b, "no tag for them", !1, 20);
+          (x = MORGUE.board.x + 0.95), (z = MORGUE.board.z0 + i * MORGUE.board.dz), (yaw = -Math.PI / 2);
+        } else {
+          const i = OUTFITS.findIndex((o) => o.id === want.suit);
+          (x = MORGUE.rack.x - 0.95), (z = MORGUE.rack.z0 + i * MORGUE.rack.dz), (yaw = Math.PI / 2);
+        }
+        R(b, H, x, z, { arrive: 0.2, slow: 1 }, O) < 0.25 && ((b.wantMove = !1), y(b, yaw, 6, O), Math.abs(fa(yaw, H.yaw)) < 0.2 && _(b, "g"));
+        return;
+      }
+      // walk up to them (the planner keeps the goal outside the table) and use it as soon as they are in reach
+      const p = C.bodies[0].position;
+      s.itemTarget(H) === C
+        ? ((b.wantMove = !1), (b.inp.mz = 0), _(b, "g"))
+        : pt(p.x - G.x, p.z - G.z) > 1.3
+          ? R(b, H, p.x, p.z, { arrive: 0.6, slow: 1 }, O)
+          : ((b.wantMove = !1), E(b, H, p.x, p.z, O), (b.inp.mz = 0.25));
+      return;
+    }
+    if (M.kind === "repair") {
+      const tx = M.fence !== void 0 ? (s.fence[M.fence].axis === "z" ? M.spot.x : s.fence[M.fence].at) : s.traps[M.trap].x,
+        tz = M.fence !== void 0 ? (s.fence[M.fence].axis === "z" ? s.fence[M.fence].at : M.spot.z) : s.traps[M.trap].z;
+      R(b, H, M.spot.x, M.spot.z, { arrive: 0.35, slow: 1, run: !0 }, O) < 0.45 && ((b.wantMove = !1), E(b, H, tx, tz, O), (b.inp.mz = 0), (b.inp.dig = !0));
+      return;
+    }
+    if (M.kind === "seal") {
+      const c = M.coffin.body,
+        side = c.pointToLocalFrame(G).x >= 0 ? 1 : -1,
+        spot = c.pointToWorldFrame(new k(side * (Gt.hx + 0.55), 0, 0));
+      R(b, H, spot.x, spot.z, { arrive: 0.3, slow: 1 }, O) < 0.4 &&
+        ((b.wantMove = !1), E(b, H, c.position.x, c.position.z, O), (b.inp.mz = 0), (b.inp.dig = !0));
+    }
+  }
   function Pe(b, H, M, O, B = !1) {
     H.grab ||
       H.rag ||
@@ -41456,7 +42262,8 @@ function uC(s, e = {}) {
       r > b.celebrate.at &&
       (b.celebrate.kind === "flop" ? Pe(b, M, 1 + b.r() * 1.5, "R.I.P.!", !0) : M.grounded && (O.jump = !0),
       (b.celebrate.kind === "flop" || r > b.celebrate.at + 0.15) && (b.celebrate = null)),
-      r >= b.nextPlan && ((b.nextPlan = r + Wc * (0.8 + 0.4 * b.r())), ce(b, M));
+      r >= b.nextPlan && ((b.nextPlan = r + Wc * (0.8 + 0.4 * b.r())), ce(b, M)),
+      M.item && !(b.task && b.task.kind === "prep") && _(b, "th"); // XIOMBARD: put back a tag or outfit it no longer needs
     const G = M.body.position,
       ne = B.coffins.some((Q) => {
         const Me = Q.body.position;
@@ -41511,7 +42318,9 @@ function uC(s, e = {}) {
                     ? We(b, M, Q, H)
                     : Q.kind === "fight"
                       ? N(b, M, Q, H)
-                      : St(b, M, Q, H));
+                      : Q.kind === "receive" || Q.kind === "prep" || Q.kind === "seal" || Q.kind === "repair"
+                        ? morgueJob(b, M, Q, H)
+                        : St(b, M, Q, H));
     }
     rt(b, M), s.setInput(b.id, { ...O, yaw: b.yaw });
   }
@@ -41685,7 +42494,7 @@ async function dC() {
   const s = new URLSearchParams(location.search);
   (tn = new RT({ dayLen: +s.get("daylen") || 0, nightLen: +s.get("nightlen") || 0 })),
     (zo = tn.addPlayer(Cg()).id),
-    (xs = uC(tn));
+    (xs = uC(tn, s.has("botlog") ? { log: (m) => (window.__botlog || (window.__botlog = [])).push(m) } : {})); // XIOMBARD: ?botlog for debugging
   const e = Math.max(0, Math.min(5, +(new URLSearchParams(location.search).get("bots") ?? 3)));
   for (let t = 0; t < e; t++) xs.add();
   (window.__xiom = { sim: tn, view: xn, look: un, bots: xs }), (xn.myId = zo), Tg();
@@ -41763,8 +42572,39 @@ function of(s, e) {
       navigator.clipboard?.writeText(n), (Ht("copy").textContent = "Copied!");
     });
 }
+// XIOMBARD: the delivery note card — who this is, what they should wear, and the laying-to-rest checklist.
+let lastCard = "";
+function renderCard(me) {
+  const c = me && me.card,
+    it = me && me.item,
+    key = JSON.stringify([c, it]);
+  if (key === lastCard) return;
+  lastCard = key;
+  const el = Ht("card");
+  if (!el || (el.classList.toggle("show", !!(c || it)), !c && !it)) return;
+  const li = (ok, text, bad) => `<li class="${ok ? "ok" : bad ? "bad" : ""}">${text}</li>`;
+  let html = "";
+  if (c) {
+    const closed = c.stage === "closed" || c.stage === "nailed",
+      dressed = c.outfit !== "Plain shroud";
+    html += `<h3>DELIVERY NOTE</h3><div class="who">${vC(c.name)}</div><div>wants: ${vC(c.suit.toLowerCase())}</div><ul>`;
+    html += li(c.tagOk, c.tag ? `name tag: ${vC(c.tag)}` : "hang the name tag", c.tag && !c.tagOk);
+    html += li(c.suitOk, dressed ? `wearing: ${vC(c.outfit.toLowerCase())}` : "dress them", dressed && !c.suitOk);
+    html += li(c.stage === "coffin" || closed, "in a coffin") + li(closed, "lid closed") + li(c.stage === "nailed", "nailed shut (calms them)") + li(!1, "buried") + "</ul>";
+  }
+  it && (html += `<div class="held">In hand: ${it.type === "tag" ? `name tag "${vC(it.name)}"` : vC(outfitLabel(it.suit).toLowerCase())}</div>`);
+  el.innerHTML = html;
+}
 function Rg(s) {
-  if ((xn.setState(s), (Ht("score").textContent = s.score), s.phase)) {
+  if (
+    (xn.setState(s),
+    xn.morgue && xn.morgue.setTags(s.tags),
+    xn.night && xn.night.set(s),
+    (Ht("score").textContent = s.buried ?? s.score),
+    Ht("points") && ((Ht("points").textContent = s.score), (Ht("nails").textContent = s.nails), (Ht("boards").textContent = s.boards)),
+    renderCard(s.players.find((n) => n.id === zo)),
+    s.phase)
+  ) {
     const [n, i, o, r, a] = s.phase;
     xn.setDay?.(r), document.body.classList.toggle("night", !!n);
     const c = `${Math.floor(i / 60)}:${String(i % 60).padStart(2, "0")}`;
@@ -41783,7 +42623,9 @@ function Rg(s) {
       .join(""));
 }
 const mC = [
-    [/Hold F/g, "Hold DIG"],
+    [/Hold F/g, "Hold WORK"],
+    [/\bE:/g, "GRAB:"],
+    [/Q to put it back/g, "THROW to put it back"],
     [/Right-click to throw/g, "THROW to throw"],
     [/Click to grab/g, "Tap GRAB"],
     [/Click to whack/g, "Tap GRAB to whack"],

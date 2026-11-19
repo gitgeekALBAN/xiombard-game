@@ -3,20 +3,19 @@
 Read this before changing anything. It records the decisions the team has already made.
 
 ## What this is
-**XIOMBARD: Night Shift** — a co-op ragdoll gravedigging game ("friendslop"). A truck delivers floppy corpses;
-players unload them, put each one in a coffin, dig a grave, drop the coffin in and fill it. Corpses slip out of
-your hands, coffins tip over, players can go limp and carry each other.
-The laying-to-rest chain: the hearse parks at the morgue's hatch → someone inside takes the body in onto the
-intake table → read the delivery note (name + outfit) → hang the right name tag from the board → dress them from the
-rack → lay them in a coffin → close the lid (F) → optionally nail it shut (F, costs nails) → drag it to a dug grave →
-fill it. Each missed item (wrong/no tag, wrong outfit, not nailed) adds 1 `unrest` to the grave and scores fewer peace points.
-Nails are scarce (+6 per delivery). Boards exist for repairs.
-Planned next (not built yet): a night phase where restless graves cause trouble (traps and the fence wear down);
-by day players repair with boards + nails, so every nail is a choice between nailing coffins (less unrest) and repairs.
-Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, crooked shapes, big heads, purple night,
-huge moon, curly trees. Inspired by the mood only — never copy characters or designs from existing films/games.
+**XIOMBARD: Night Shift** — a co-op ragdoll gravedigging game ("friendslop") with a day/night cycle.
+By day a hearse parks at the morgue's hatch. The laying-to-rest chain: take the body in from inside → read its delivery
+note (name + outfit) → hang the right name tag from the board → dress them from the rack → lay them in a coffin →
+close the lid (F) → optionally nail it shut (F, 4 nails) → drag it to a dug grave → fill it.
+Each missed item (wrong/no tag, wrong outfit, not nailed) adds 1 `unrest` to the grave and scores fewer peace points.
+By night zombies come — mostly from outside the fence. They wear fence sections down until they break, step in bear
+traps, chase diggers and dig up graves (restless graves first; nailed coffins take twice as long). Unburied bodies rise.
+Whack them with the shovel (click). By day, repair: fence 1 board + 2 nails, trap 2 nails. Nails are scarce
+(+6 per delivery, +2 boards), so every nail is a choice between calmer graves and a sturdier yard.
+3 AI bot teammates join by default (`?bots=0..5`); they run the same chain, including morgue jobs and repairs.
+Art direction: painted, gloomy-storybook mood (Tim Burton-ish *mood* only — never copy existing characters or designs).
 
-Built on **three.js** + **Vite**, published to **GitHub Pages**.
+Built on **three.js** + **cannon-es** + **PeerJS**, bundled with **Vite**, published to **GitHub Pages**.
 Live: https://gitgeekalban.github.io/xiombard-game/
 
 ## Core rule: code-generated assets only
@@ -26,25 +25,25 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - Anything both physics and visuals need (level layout, colliders, skeleton) lives in `src/shared/` — one source of truth. GLSL that gameplay also needs must have a JS twin.
 - Text on in-game objects (e.g. headstone names) is drawn into a canvas at runtime — that counts as code-generated.
 
-## Stack and layout
-- `three`, `cannon-es` (physics), `peerjs` (WebRTC P2P) from npm — no CDN imports. `vite.config.js` uses `base: './'`.
-- `src/main.js` — menu, input, host/guest session wiring, frame loop.
-- `src/net.js` — PeerJS rooms: 4-letter code → peer id `xiombard-gy-<CODE>`.
-- `src/sim/game.js` — **host-only** simulation: cannon-es world, ragdolls, grabbing/grip, digging, truck, scoring.
-- `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
-- `src/view/models.js` — every model built from primitives in code (diggers, corpses, coffins, truck, headstones, trees).
-- `src/shared/` — data both sides need: `skeleton.js` (part list + FK + animation), `layout.js` (level, colliders, decor), `rng.js`.
-- `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `sky.js`, `ground.js`, `noise.glsl.js`.
-- `src/audio.js` — procedural WebAudio SFX, no audio files.
-- Morgue layout (walls, hatch, table, tag board, outfit rack, crate, coffin spots) is `MORGUE` in `src/shared/layout.js`; outfits are `OUTFITS`.
-- `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard.
-- Custom shaders use `ShaderMaterial`; they write linear color and include `colorspace_fragment` + fog chunks.
+## Stack and layout (read this — it is unusual)
+- The game base is **build 73 from claude.ai/artifact/GCkmUVmGFHny8ezmCLGH6T**. Its source was never available, so
+  `src/game.js` is that compiled bundle run through prettier (three.js, cannon-es and PeerJS are inlined in it).
+  Module-level names are minified (`RT` = sim, `US` = view, `uC` = bot AI, `Xd()` = static colliders, `mn` = plots…);
+  class method and property names are intact (`startNight`, `pickTarget`, `whack`, `coffinContents`…).
+- **Everything we add is marked `XIOMBARD`** — search for it. Our own named helpers live near the layout constants:
+  `MORGUE`, `OUTFITS`, `NAIL_COST`, `morgueBoxes()`, `FENCE_SECTIONS`, `TRAPS`, plus `buildMorgueView()` /
+  `buildNightView()` (view), `dressLook()` (outfits on corpses), and sim methods (`morgueKey`, `closeLid`, `repair`…).
+- If the artifact author ever shares the real source, port the `XIOMBARD` blocks onto it and drop the bundle.
+- The pre-artifact modular version of the game is in git history (commit `887a2a2`).
+- `index.html` holds the menu/HUD markup and styles; `npm run build` must pass.
+- Debug URL params: `?bots=N`, `?view=third`, `?post=off|low|high`, `?day=0..1`, `?fps`, `?daylen=`/`?nightlen=`, `?botlog`.
 
 ## Multiplayer architecture (decided)
 - **Host-authoritative P2P.** The host's browser runs `Sim`; guests only send input (30 Hz) and render snapshots (20 Hz).
 - Messages: guest→host `hello`, `in` (move, yaw, held buttons, and *counters* for one-shot actions: grab/throw/flop).
   Host→guest `welcome`, `ents` (entity list, sent when `sim.version` changes), `snap` (Float32Array of part transforms + small JSON state + events).
-- Every entity is "N parts × (pos, quat)": digger/corpse 11 (see `PARTS`), coffin 1, truck 1. **Never reorder `PARTS`** — it is the wire format.
+- Every entity is "N parts × (pos, quat)" (characters use the artifact's 6-part crew rig; coffin 1, truck 1).
+- Entity descriptors carry `outfit`, `tag` and `lid`; the view rebuilds a model in place when they change.
 - Signaling: free PeerJS cloud broker. Some strict NATs need a TURN server (not set up yet). Local testing: run a PeerJS server on
   port 9000 and open `?peerhost=127.0.0.1&peerport=9000`.
 - No host migration: if the host leaves, the game ends for guests.
@@ -59,7 +58,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 
 ## Workflow
 - `npm install`, `npm run dev` (port 5173), `npm run build` must pass before pushing.
-- Debug handle on the host: `window.__xiom = { sim, view, look }` — scripted tests drive `sim.step()` / `sim.input` directly.
+- Debug handle on the host: `window.__xiom = { sim, view, look, bots }` — scripted tests drive `sim.step()` / `bots.update()` directly.
 - Branch from `main`, open a PR, one review, merge. Push to `main` auto-deploys via `.github/workflows/deploy.yml`.
 - Keep the page working at phone width; check FPS on a mid-range laptop before merging heavy shaders.
 
