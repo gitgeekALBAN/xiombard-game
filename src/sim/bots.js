@@ -8,24 +8,31 @@
 //
 // How they think: every ~0.3 s a bot without a job scores the jobs on offer by its role (one digger, the rest
 // haulers; a lone bot does everything), the distance and what teammates already claimed, and takes the best one:
-//   fill    — hold dig at a grave holding a coffin with a body
-//   deliver — drag a coffin to a dug grave (full ones first; empty ones too when corpses are waiting, then bodies
-//             are dropped straight into the grave), or park a full coffin beside the grave that opens next
+//   fill    — hold dig at a grave holding a closed coffin
+//   deliver — carry a closed coffin to a dug grave, or park it beside the grave that opens next
 //   load    — carry a loose corpse to an empty coffin (one waiting in a grave is best) and let go over it
 //   dig     — keep one to three graves open ahead of the coffins and corpses on their way
 //   flip    — right a tipped coffin (also inside a grave, where it blocks the burial)
+//   receive — stand at the intake table and take the bodies off the hearse through the hatch
+//   prep    — fetch the right name tag (board) or outfit (rack) and put it on a body in the morgue or in its coffin
+//   seal    — close the lid on a prepared body, then nail it while nails can be spared (NAIL_COST * 2 stay for repairs);
+//             only closed coffins are carried out to the graves
+//   repair  — by day with no walkers about, mend broken fence sections and traps while boards and nails last
 // At night one job outranks all of these whenever a zombie on its feet needs a shovel (see threatScore):
 //   fight   — drop what you carry, run over, face it and click when sim.whackable says the blow will land; wait beside
 //             it while it is down but will get up again. After me > scratching at a grave > dog > chasing a teammate >
 //             near. Teammates already on it make it less attractive, so several zombies get spread over the crew.
 // Knocked over at night, a bot gets up as soon as the sim allows; theatrical flops wait until no zombie is within 8 m.
 // Every frame it steers along a small visibility-graph path around the truck, open graves, plots, coffins, posts
-// and the shed, with a turn-rate limit. The sim is only ever read; bots act through the same input a human sends,
+// the shed and the morgue's walls and furniture, with a turn-rate limit. The sim is only ever read; bots act through the same input a human sends,
 // so they slip, drop and fumble like one. Stalls trigger a back-off and sidestep, a snagged coffin gets a toss and
 // a regrab, a bot in a hole hops out, and a job that keeps failing is dropped and its target ignored for a while.
 // Personality: per-bot pace, turn speed and hesitation, plus flops when bored, after a burial or wearing a coffin.
 // The optional second argument is for tests: createBots(sim, { log: (msg) => ..., inspect: {} }).
-import { PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, ROAD_Z, PILE, DECOR, LANTERNS, plotAt } from '../shared/layout.js';
+import {
+  PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, ROAD_Z, PILE, DECOR, LANTERNS, plotAt,
+  MORGUE, OUTFITS, NAIL_COST, insideMorgue, morgueBoxes, FENCE_HP, TRAP_DUR,
+} from '../shared/layout.js';
 import { rng } from '../shared/rng.js';
 import { TRAIN } from './game.js';
 
@@ -71,6 +78,8 @@ function staticObstacles() {
     out.push({ x0: st.x - ex, x1: st.x + ex, z0: st.z - ez, z1: st.z + ez, kind: 'solid' });
   }
   for (const [x, z] of LANTERNS) out.push({ x0: x - 0.08, x1: x + 0.08, z0: z - 0.08, z1: z + 0.08, kind: 'solid' });
+  // morgue walls, table and crate; the lintel over the door and the wall over the hatch are overhead, not in the way
+  for (const m of morgueBoxes()) if (m.c[1] - m.h[1] < 1) out.push({ x0: m.c[0] - m.h[0], x1: m.c[0] + m.h[0], z0: m.c[2] - m.h[2], z1: m.c[2] + m.h[2], kind: 'solid', wall: !!m.wall });
   return out;
 }
 
@@ -128,7 +137,7 @@ export function createBots(sim, opts = {}) {
     for (const d of diggers) if (d.grab) held.set(d.grab.ent, (held.get(d.grab.ent) || 0) + 1);
     const up = new Map(), contents = new Map(), boxedIn = new Map(), inPlot = new Map(), plotCoffin = new Map();
     for (const c of coffins) {
-      const u = sim.coffinUp(c), k = sim.coffinContents(c);
+      const u = sim.coffinUp(c), k = sim.coffinContents(c) || c.passenger || null; // a closed coffin is full
       up.set(c, u); contents.set(c, k);
       if (k && u > 0.5) boxedIn.set(k, c);
     }
@@ -168,6 +177,8 @@ export function createBots(sim, opts = {}) {
       if (e.x1 < bx0 || e.x0 > bx1 || e.z1 < bz0 || e.z0 > bz1) return;
       if (inside(e, sx, sz) || inside(e, gx, gz)) {
         e = { x0: r.x0 - mm, x1: r.x1 + mm, z0: r.z0 - mm, z1: r.z1 + mm };
+        // a thin wall we stand right next to still blocks: dropping it would send us straight through it
+        if (inside(e, sx, sz) && r.wall) e = { x0: r.x0, x1: r.x1, z0: r.z0, z1: r.z1 };
         if (inside(e, sx, sz)) return;
       }
       rs.push(e);
@@ -323,7 +334,7 @@ export function createBots(sim, opts = {}) {
   // Take the body that is actually in reach instead of the one we were aiming for (they are all the same to a gravedigger).
   function swapCorpse(b, p, t, k) {
     const w = world();
-    if (w.boxedIn.has(k) || heldByOthers(w, p, k) || !isFree(b, 'e' + k.id) || corpseOnMovingTruck(k)) return false;
+    if (w.boxedIn.has(k) || heldByOthers(w, p, k) || !isFree(b, 'e' + k.id) || corpseOnTruck(k)) return false;
     claims.delete('e' + t.corpse.id); b.claims.delete('e' + t.corpse.id);
     claim(b, 'e' + k.id);
     t.keys = ['e' + k.id, 'L' + t.coffin.id];
@@ -394,6 +405,7 @@ export function createBots(sim, opts = {}) {
     }
   }
   function settled(c, k) {
+    if (!k.bodies) return true; // a sealed passenger is data, already settled
     for (const bd of k.bodies) {
       const l = c.body.pointToLocalFrame(bd.position);
       if (Math.abs(l.x) > COFFIN.hx + 0.02 || Math.abs(l.z) > COFFIN.hz + 0.02 || l.y > COFFIN.hy + 0.1) return false;
@@ -435,9 +447,9 @@ export function createBots(sim, opts = {}) {
   }
 
   // ---------- jobs ----------
-  function corpseOnMovingTruck(k) {
+  // bodies on the hearse come in through the hatch (receive job), never by hand
+  function corpseOnTruck(k) {
     const tr = sim.truck;
-    if (tr.state === 'wait') return false;
     const q = k.bodies[0].position, tb = tr.body.position;
     return q.y > 0.6 && Math.abs(q.z - tb.z) < 1.3 && q.x > tb.x + TRUCK_X0 - 0.3 && q.x < tb.x + TRUCK_X1 + 0.3;
   }
@@ -508,6 +520,44 @@ export function createBots(sim, opts = {}) {
     let best = null, bestS = -Infinity;
     const consider = (s, t) => { if (s > bestS) { bestS = s; best = t; } };
 
+    // the morgue: take bodies in at the hatch, tag and dress them, close and nail their coffins
+    if (sim.truck.state === 'wait' && sim.corpsesInBed().length && isFree(b, 'hatch') && !banned(b, 'hatch')) {
+      const tb = MORGUE.table;
+      consider(BASE.load * rw.load + 20 - COST_PER_M * hyp(tb.x - me.x, tb.z - 1 - me.z), { kind: 'receive', keys: ['hatch'] });
+    }
+    for (const k of w.corpses) {
+      if (corpseOnTruck(k) || heldByOthers(w, p, k) || !isFree(b, 'n' + k.id) || banned(b, 'n' + k.id)) continue;
+      const q = k.bodies[0].position;
+      if (!insideMorgue(q.x, q.z, -0.5) && !w.boxedIn.has(k)) continue;
+      // a tag or outfit goes on the body nearest the hand: one lying behind another (stacked on the intake table)
+      // cannot be reached, so it is prepared later, in its coffin
+      if (!w.boxedIn.has(k) && w.corpses.some((o) => o !== k && !w.boxedIn.has(o) && o.bodies[0].position.z < q.z - 0.2 && hyp(o.bodies[0].position.x - q.x, o.bodies[0].position.z - q.z) < 1.1)) continue;
+      const need = k.tag !== k.name && sim.tags.includes(k.name) ? 'tag' : k.outfit !== k.suit ? 'suit' : null;
+      if (need) consider(BASE.load * rw.load + 6 - COST_PER_M * dist(q), { kind: 'prep', corpse: k, need, keys: ['n' + k.id] });
+    }
+    for (const c of w.coffins) {
+      if (w.up.get(c) < 0.72 || c.lid === 2 || heldByOthers(w, p, c) || !isFree(b, 'e' + c.id) || banned(b, 'e' + c.id) || !inYard(c.body.position)) continue;
+      const k = sim.coffinContents(c), prepped = k && (k.tag === k.name || !sim.tags.includes(k.name)) && k.outfit === k.suit;
+      // close a prepared body's lid; nail it while there are nails to spare for repairs
+      if ((!c.lid && prepped) || (c.lid === 1 && sim.nails >= NAIL_COST * 2)) {
+        consider(BASE.fill * rw.fill - 4 - COST_PER_M * dist(c.body.position), { kind: 'seal', coffin: c, keys: ['e' + c.id] });
+      }
+    }
+    // by day, fix what the night broke while there are boards and nails
+    if (sim.phase === 'day' && !w.walkers.length) {
+      sim.fence.forEach((f, i) => {
+        if (f.hp >= FENCE_HP || sim.boards < 1 || sim.nails < 2 || !isFree(b, 'r' + i) || banned(b, 'r' + i)) return;
+        // stand inside the fence, opposite the stretch nearest to me
+        const [x, z] = f.axis === 'z' ? [clamp(me.x, f.a0 + 0.6, f.a1 - 0.6), f.at - Math.sign(f.at) * 1.9] : [f.at - Math.sign(f.at) * 1.9, clamp(me.z, f.a0 + 0.6, f.a1 - 0.6)];
+        consider(BASE.dig * rw.dig + (f.hp <= 0 ? 14 : 0) - COST_PER_M * hyp(x - me.x, z - me.z), { kind: 'repair', fence: i, spot: { x, z }, keys: ['r' + i] });
+      });
+      sim.traps.forEach((tr, i) => {
+        if (tr.dur >= TRAP_DUR || sim.nails < 2 || !isFree(b, 't' + i) || banned(b, 't' + i)) return;
+        const x = tr.x, z = tr.z + (tr.z < 0 ? 0.9 : 0);
+        consider(BASE.dig * rw.dig - 6 - COST_PER_M * hyp(x - me.x, z - me.z), { kind: 'repair', trap: i, spot: { x, z }, keys: ['t' + i] });
+      });
+    }
+
     for (const pl of sim.plots) { // fill a grave that has a coffin with a body in it
       if (pl.buried || !w.plotCoffin.has(pl) || !isFree(b, 'p' + pl.i) || banned(b, 'p' + pl.i)) continue;
       if (sim.plotStatus(pl).act !== 'fill') continue;
@@ -530,6 +580,7 @@ export function createBots(sim, opts = {}) {
     for (const c of w.coffins) { // deliver a coffin to a dug grave: full ones first, empty ones for the corpses still to come
       if (w.inPlot.has(c) || w.up.get(c) < 0.6 || heldByOthers(w, p, c)) continue;
       if (!isFree(b, 'e' + c.id) || !isFree(b, 'L' + c.id) || banned(b, 'e' + c.id) || !inYard(c.body.position)) continue;
+      if (!c.lid) continue; // only closed coffins go out to the graves
       const empty = !w.contents.get(c);
       if (empty && (w.up.get(c) < 0.72 || loose <= graveBoxes + emptyRuns || ready <= full)) continue;
       const pl = plotForDeliver(b, c, w, empty);
@@ -541,6 +592,7 @@ export function createBots(sim, opts = {}) {
     }
     for (const c of w.coffins) { // park a full coffin that clutters the pile (every grave taken), any coffin sitting on a plot, or a stray
       if (w.inPlot.has(c) || w.up.get(c) < 0.6 || heldByOthers(w, p, c) || !isFree(b, 'e' + c.id) || !isFree(b, 'L' + c.id) || banned(b, 'e' + c.id)) continue;
+      if (!c.lid) continue; // open coffins stay in the morgue
       const q = c.body.position, full = !!w.contents.get(c);
       const bx = coffinBox(c), covers = sim.plots.some((pl) => !pl.buried && overlapsPlot(bx, pl, 0.25)) || (stray(q) && inYard(q));
       if (!covers && (!full || hyp(q.x - PILE.x, q.z - PILE.z) > 3.6)) continue;
@@ -554,7 +606,7 @@ export function createBots(sim, opts = {}) {
       for (const k of w.corpses) {
         if (w.boxedIn.has(k) || heldByOthers(w, p, k) || !isFree(b, 'e' + k.id) || banned(b, 'e' + k.id)) continue;
         const q = k.bodies[0].position;
-        if (!inYard(q) || corpseOnMovingTruck(k)) continue;
+        if (!inYard(q) || corpseOnTruck(k)) continue;
         const hole = holePlotOf(k.bodies[0].position);
         let bc = null, bd = Infinity;
         if (hole >= 0 && w.plotCoffin.has(sim.plots[hole])) { // it missed the coffin in that grave: hop in and fix it
@@ -621,7 +673,7 @@ export function createBots(sim, opts = {}) {
     b.stats[ok ? 'done' : 'fail']++;
   }
   function stage(b, s) { b.task.stage = s; b.task.st0 = T; b.hist.length = 0; b.stallN = 0; b.path = null; }
-  const desc = (t) => (t.foe ? `fight ${t.foe.name || (t.foe.z ? t.foe.z.def.name : 'zombie')}#${t.foe.id}` : t.kind) + (t.staging ? ' (park)' : '') + (t.empty ? ' (empty)' : '') + (t.corpse ? ` ${t.corpse.name}` : '') + (t.coffin ? ` coffin#${t.coffin.id}` : '') + (t.plot ? ` plot${t.plot.i}` : '') + (t.dump ? ' (into grave)' : '') + (t.inPlot !== undefined ? ' (in grave)' : '') + (t.hole >= 0 ? ' (from hole)' : '');
+  const desc = (t) => (t.foe ? `fight ${t.foe.name || (t.foe.z ? t.foe.z.def.name : 'zombie')}#${t.foe.id}` : t.kind) + (t.staging ? ' (park)' : '') + (t.empty ? ' (empty)' : '') + (t.corpse ? ` ${t.corpse.name}` : '') + (t.need ? ` (${t.need})` : '') + (t.fence !== undefined ? ` fence${t.fence}` : '') + (t.trap !== undefined ? ` trap${t.trap}` : '') + (t.coffin ? ` coffin#${t.coffin.id}` : '') + (t.plot ? ` plot${t.plot.i}` : '') + (t.dump ? ' (into grave)' : '') + (t.inPlot !== undefined ? ' (in grave)' : '') + (t.hole >= 0 ? ' (from hole)' : '');
   const alive = (e) => e && sim.ents.includes(e);
 
   // Is the current job still worth doing? (also detects success)
@@ -650,7 +702,7 @@ export function createBots(sim, opts = {}) {
         if (!cargo(k)) return endTask(b, 'it got up', false, 0), false;
         if (w.boxedIn.has(k) && !(p.grab && p.grab.ent === k)) return endTask(b, 'boxed', t.stage === 'verify'), false;
         if (heldByOthers(w, p, k)) return endTask(b, 'taken', false, 4), false;
-        if (corpseOnMovingTruck(k) && !(p.grab && p.grab.ent === k)) return endTask(b, 'truck left', false, 0), false;
+        if (corpseOnTruck(k) && !(p.grab && p.grab.ent === k)) return endTask(b, 'truck left', false, 0), false;
         if (age > 28 || T - t.t0 > 75) return endTask(b, 'too slow', false), false;
         return true;
       }
@@ -683,6 +735,32 @@ export function createBots(sim, opts = {}) {
         if (pl.buried) return endTask(b, 'buried', true), false;
         if (sim.plotStatus(pl).act !== 'fill') { t.bad = (t.bad || 0) + PLAN_DT; if (t.bad > 1.5) return endTask(b, 'nothing to fill', false, 3), false; } else t.bad = 0;
         if (age > 25) return endTask(b, 'too slow', false), false;
+        return true;
+      }
+      case 'repair': {
+        const fixed = t.fence !== undefined ? sim.fence[t.fence].hp >= FENCE_HP : sim.traps[t.trap].dur >= TRAP_DUR;
+        if (fixed) return endTask(b, 'fixed', true, 0), false;
+        if (sim.nails < 2 || (t.fence !== undefined && sim.boards < 1)) return endTask(b, 'out of materials', false, 30), false;
+        if (age > 25) return endTask(b, 'too slow', false, 10), false;
+        return true;
+      }
+      case 'receive': {
+        if (sim.truck.state !== 'wait' || !sim.corpsesInBed().length) return endTask(b, 'nothing on the truck', true, 0), false;
+        if (age > 20) return endTask(b, 'too slow', false), false;
+        return true;
+      }
+      case 'prep': {
+        const k = t.corpse;
+        if (!alive(k) || k.z) return endTask(b, 'gone', false, 0), false;
+        if (t.need === 'tag' ? k.tag === k.name : k.outfit === k.suit) return endTask(b, 'prepped', true, 0), false;
+        if (age > 30) return endTask(b, 'too slow', false, 10), false;
+        return true;
+      }
+      case 'seal': {
+        const c = t.coffin;
+        if (!alive(c)) return endTask(b, 'gone', false, 0), false;
+        if (c.lid === 2 || (c.lid === 1 && sim.nails < NAIL_COST * 2)) return endTask(b, 'sealed', true, 0), false;
+        if (age > 15) return endTask(b, 'too slow', false, 8), false;
         return true;
       }
       case 'flip': {
@@ -941,7 +1019,7 @@ export function createBots(sim, opts = {}) {
     // A passenger that dozed off is pinned in place by the physics engine and pins the coffin with it.
     // Heave-ho: toss the coffin a little (the jolt wakes them up) and grab it again.
     const k0 = w.contents.get(c);
-    if (k0 && T > (t.tossT || 0) && k0.bodies.some((bd) => bd.sleepState === 2)) {
+    if (k0 && k0.bodies && T > (t.tossT || 0) && k0.bodies.some((bd) => bd.sleepState === 2)) {
       if (toggle(b, 'th')) { t.tossT = T + 3; t.tossed = true; say(b, 'heave-ho (waking the passenger)'); }
       return;
     }
@@ -1044,12 +1122,81 @@ export function createBots(sim, opts = {}) {
     else if (a > 0.5 && toggle(b, 'g')) stage(b, 'settle');
   }
 
+  // The morgue jobs and repairs: all done with the grab button (hatch, board, rack, using the item) or by holding dig.
+  function doMorgue(b, p, t, dt) {
+    if (p.grab) return dropSafely(b, p, dt);
+    const pos = p.body.position;
+    if (t.kind === 'receive') { // stand at the table facing the hatch and pull the next body in
+      const tb = MORGUE.table;
+      if (go(b, p, tb.x, tb.z - 1, { arrive: 0.3, slow: 1 }, dt) < 0.35) {
+        b.wantMove = false; turn(b, 0, 6, dt);
+        if (Math.abs(angDiff(0, b.yaw)) < 0.25 && toggle(b, 'g')) endTask(b, 'took a body in', true, 0);
+      }
+      return;
+    }
+    if (t.kind === 'prep') {
+      const k = t.corpse, want = t.need === 'tag' ? { type: 'tag', name: k.name } : { type: 'suit', suit: k.suit };
+      const it = p.item;
+      // done since the last check (validate only runs between decisions): do not mistake it for a missing tag
+      if (!it && (t.need === 'tag' ? k.tag === k.name : k.outfit === k.suit)) return endTask(b, 'prepped', true, 0);
+      if (it && (it.type !== want.type || (want.type === 'tag' ? it.name !== want.name : it.suit !== want.suit))) { toggle(b, 'th'); return; } // wrong one: put it back
+      if (!it) { // fetch it: name tags hang on the west wall, outfits on the east wall
+        let x, z, yaw;
+        if (want.type === 'tag') {
+          const i = sim.tags.indexOf(want.name);
+          if (i < 0) return endTask(b, 'no tag for them', false, 20);
+          x = MORGUE.board.x + 0.95; z = MORGUE.board.z0 + i * MORGUE.board.dz; yaw = -Math.PI / 2;
+        } else {
+          const i = OUTFITS.findIndex((o) => o.id === want.suit);
+          x = MORGUE.rack.x - 0.95; z = MORGUE.rack.z0 + i * MORGUE.rack.dz; yaw = Math.PI / 2;
+        }
+        if (go(b, p, x, z, { arrive: 0.2, slow: 1 }, dt) < 0.25) {
+          b.wantMove = false; turn(b, yaw, 6, dt);
+          if (Math.abs(angDiff(yaw, b.yaw)) < 0.2) toggle(b, 'g');
+        }
+        return;
+      }
+      // walk up to them and use it as soon as they are in reach; a body on the intake table is reached from the
+      // room side (the planner would push the goal into the gap behind the table)
+      const q = k.bodies[0].position, tb = MORGUE.table;
+      const tgt = sim.itemTarget(p);
+      if (tgt === k) { b.wantMove = false; b.inp.mz = 0; toggle(b, 'g'); return; }
+      t.blockT = tgt ? (t.blockT || 0) + dt : 0; // somebody else lies nearer the hand
+      if (t.blockT > 6) return endTask(b, 'another body in the way', false, 15);
+      const onTable = Math.abs(q.x - tb.x) < tb.hx + 0.3 && Math.abs(q.z - tb.z) < tb.hz + 0.5;
+      const gx = onTable ? clamp(q.x, tb.x - tb.hx + 0.2, tb.x + tb.hx - 0.2) : q.x, gz = onTable ? tb.z - tb.hz - 0.55 : q.z;
+      const d = hyp(q.x - pos.x, q.z - pos.z), r = onTable || d > 1.3 ? go(b, p, gx, gz, { arrive: onTable ? 0.25 : 0.6, slow: 1 }, dt) : 0;
+      if (r < 0.7 && (onTable || d < 2.2)) { b.wantMove = false; face(b, p, q.x, q.z, dt); b.inp.mz = onTable ? 0.1 : 0.25; }
+      return;
+    }
+    if (t.kind === 'repair') { // stand by it and hold dig
+      let tx, tz;
+      if (t.fence !== undefined) { const f = sim.fence[t.fence]; [tx, tz] = f.axis === 'z' ? [t.spot.x, f.at] : [f.at, t.spot.z]; }
+      else { tx = sim.traps[t.trap].x; tz = sim.traps[t.trap].z; }
+      if (go(b, p, t.spot.x, t.spot.z, { arrive: 0.35, slow: 1, run: true }, dt) < 0.45) {
+        // the planner stops at the yard's edge: step on toward the fence until it is within reach
+        const rt = sim.repairTarget(p);
+        b.wantMove = false; face(b, p, tx, tz, dt); b.inp.mz = rt && rt.act ? 0 : 0.35; b.inp.dig = true;
+      }
+      return;
+    }
+    if (t.kind === 'seal') { // stand at the nearer long side and hold dig: closes the lid, then nails it
+      const c = t.coffin, q = c.body.position, a = coffinAxes(c);
+      const side = (pos.x - q.x) * a.sx + (pos.z - q.z) * a.sz >= 0 ? 1 : -1, off = COFFIN.hx + 0.55;
+      if (go(b, p, q.x + a.sx * side * off, q.z + a.sz * side * off, { arrive: 0.3, slow: 1, except: c }, dt) < 0.4) {
+        b.wantMove = false; face(b, p, q.x, q.z, dt); b.inp.mz = 0; b.inp.dig = true;
+      }
+    }
+  }
+
   function doIdle(b, p, t, dt) {
     if (p.grab) return dropSafely(b, p, dt);
     const tr = sim.truck, idx = [...bots.keys()].indexOf(b.id);
     if (!t.spot || T > t.next) {
       const waitTruck = tr.state === 'arrive' || (tr.state === 'away' && sim.time - tr.t > 9);
-      const bx = waitTruck ? 2.5 + idx * 1.4 - 2 : -6 + idx * 2.6, bz = waitTruck ? 11.6 : 6.3;
+      // in the morgue in front of the intake table while the hearse comes, else by the door outside
+      const tb = MORGUE.table;
+      const bx = waitTruck ? tb.x - 2 + idx * 1.1 : -6 + idx * 2.6, bz = waitTruck ? tb.z - 1.6 : MORGUE.z0 - 1.2;
       t.spot = { x: bx + (b.r() - 0.5) * 2, z: bz + (b.r() - 0.5) * 1.2 };
       t.next = T + 3 + b.r() * 4;
       t.look = b.r() * Math.PI * 2;
@@ -1150,6 +1297,7 @@ export function createBots(sim, opts = {}) {
       if (b.celebrate.kind === 'flop' || T > b.celebrate.at + 0.15) b.celebrate = null;
     }
     if (T >= b.nextPlan) { b.nextPlan = T + PLAN_DT * (0.8 + 0.4 * b.r()); plan(b, p); }
+    if (p.item && !(b.task && b.task.kind === 'prep')) toggle(b, 'th'); // put back a tag or outfit it no longer needs
     const pos = p.body.position;
     // wearing a coffin as a hat (it landed on my head): go limp so it slides off
     const hat = w.coffins.some((c) => { const q = c.body.position; return q.y > pos.y + 1.2 && q.y < pos.y + 2.6 && hyp(q.x - pos.x, q.z - pos.z) < 0.8 && !w.held.get(c); });
@@ -1186,6 +1334,7 @@ export function createBots(sim, opts = {}) {
         else if (t.kind === 'dig' || t.kind === 'fill') doWork(b, p, t, dt);
         else if (t.kind === 'flip') doFlip(b, p, t, dt);
         else if (t.kind === 'fight') doFight(b, p, t, dt);
+        else if (t.kind === 'receive' || t.kind === 'prep' || t.kind === 'seal' || t.kind === 'repair') doMorgue(b, p, t, dt);
         else doIdle(b, p, t, dt);
       }
     }
