@@ -3,11 +3,17 @@
 Read this before changing anything. It records the decisions the team has already made.
 
 ## What this is
-**XIOMBARD: Night Shift** — a co-op ragdoll gravedigging game ("friendslop"). A truck delivers floppy corpses;
-players unload them, put each one in a coffin, dig a grave, drop the coffin in and fill it. Corpses slip out of
-your arms when you run, a coffin is too heavy for one, players can go limp and carry each other.
-The shift has two halves: a cheerful **day** (the truck delivers, the crew buries) and a **night** when zombies climb out of the ground,
-unburied bodies get up too, and the crew whacks them with shovels (a click with empty hands). At dawn visitors crumble; risen bodies lie down, still unburied.
+**XIOMBARD: Night Shift** — a co-op ragdoll gravedigging game ("friendslop") with a day/night cycle.
+By day a hearse parks at the morgue's hatch. The laying-to-rest chain: take the body in from inside → read its delivery
+note (name + outfit) → hang the right name tag from the board → dress them from the rack → lay them in a coffin →
+close the lid (F) → optionally nail it shut (F, 4 nails) → carry it to a dug grave → fill it.
+Each missed item (wrong/no tag, wrong outfit, not nailed) adds 1 `unrest` to the grave and scores fewer peace points.
+Corpses slip out of your arms when you run, a coffin is too heavy for one, players can go limp and carry each other.
+By **night** zombies come — mostly from outside the fence. They wear fence sections down until they break, step in bear
+traps, chase diggers and dig up graves (restless graves first; nailed coffins take twice as long). Unburied bodies rise.
+The crew whacks them with shovels (a click with empty hands). At dawn visitors crumble; risen bodies lie down, still unburied.
+By day, repair: fence 1 board + 2 nails, trap 2 nails. Nails are scarce (+6 per delivery, +2 boards), so every nail is a
+choice between calmer graves and a sturdier yard. 3 AI bot teammates join by default (`?bots=0..5`); they run the same chain.
 Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, crooked shapes, big heads, purple night,
 huge moon, curly trees. Inspired by the mood only — never copy characters or designs from existing films/games.
 
@@ -28,10 +34,11 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/sim/game.js` — **host-only** simulation: cannon-es world, ragdolls, grabbing/grip, digging, truck, scoring.
 - `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
 - `src/view/models.js` — every mesh model built from primitives in code (coffins, truck, headstones, trees, the shovel).
-- `src/view/plants.js` — vegetation: flat ribbons and cards placed by a seeded generator into one static mesh (one draw call). It keeps tall plants away from plots, footpaths, the coffin pile and the truck's stop. Concept art for sky, ground and plants is kept outside the repo; the palettes in the shaders follow it.
+- `src/view/morgue.js` — the morgue (walls and furniture go into the yard's static batch, the roof is its own mesh so it can hide for a third-person camera indoors, signs and name tags are one canvas) and what the night does to the yard: bear traps (three instanced meshes) and fence sections that lean and fall.
+- `src/view/plants.js` — vegetation: flat ribbons and cards placed by a seeded generator into one static mesh (one draw call). It keeps tall plants away from plots, footpaths, the morgue and the truck's stop. Concept art for sky, ground and plants is kept outside the repo; the palettes in the shaders follow it.
 - `src/chars/` + `src/view/crew.js` — **every character** (diggers, zombies, dogs, the dead). Each one is described by distance formulas in JavaScript (`human.js`, `creatures.js`), turned into a low-poly mesh once at load (`mesher.js`: surface nets, baked occlusion, two bone weights per vertex) and painted by one shader from the rest position (`material.js`: gouache, knitting, stitched patches, dirt, faces, ink hull). No model or texture files. `cast.html` shows the whole cast (`npm run build:cast`).
-- `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs and six odd ones — Bloat, Longshanks, Stack, Granny, Headless, Barrel — all on the same six parts), `layout.js` (level, colliders, decor), `rng.js`.
-- `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `paint-env.js` (the static yard: one painted mesh), `paint-props.js` (coffins, headstones, truck: planks, iron, carvings and lettering as paint), `paint-plants.js` (all vegetation: one material, fifteen painted kinds, wind in the vertex shader), `sky.js` (gradient, moon, sun, stars, brushed streaks and three rows of cumulus painted on a cylinder around the viewer), `ground.js` (lawn of brushed grass clumps, clover, footpaths with pebbles and prints, rutted road with puddles, dug earth, soil walls of graves), `noise.glsl.js`.
+- `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs and six odd ones — Bloat, Longshanks, Stack, Granny, Headless, Barrel — all on the same six parts), `layout.js` (level, colliders, decor, the morgue, outfits, fence sections, traps), `rng.js`.
+- `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `paint-env.js` (the static yard: one painted mesh), `paint-props.js` (coffins and their lids, headstones, truck: planks, iron, carvings, nail heads and lettering as paint), `paint-plants.js` (all vegetation: one material, fifteen painted kinds, wind in the vertex shader), `sky.js` (gradient, moon, sun, stars, brushed streaks and three rows of cumulus painted on a cylinder around the viewer), `ground.js` (lawn of brushed grass clumps, clover, footpaths with pebbles and prints, rutted road with puddles, dug earth, soil walls of graves), `noise.glsl.js`.
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
 - `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard.
 - Custom shaders use `ShaderMaterial`; they write linear color and include `colorspace_fragment` + fog chunks.
@@ -41,6 +48,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - Messages: guest→host `hello`, `in` (move, yaw, held buttons, and *counters* for one-shot actions: grab/throw/flop).
   Host→guest `welcome`, `ents` (entity list, sent when `sim.version` changes), `snap` (Float32Array of part transforms + small JSON state + events).
 - Every entity is "N parts × (pos, quat)": every character 6 (see `CP` in `shared/crew.js`), coffin 1, truck 1. **Never reorder `CP` or the `ZOMBIES` list** — they are the wire format. A body's look comes from its seed alone (`corpseRig(seed)`), so changing the generator changes every body for host and guests alike.
+- Entity descriptors also carry `outfit`, `tag` (bodies) and `lid` (coffins: 1 closed, 2 nailed); the view rebuilds a model in place when they change. The state snapshot carries `tags` (the board), `fence` (hp per section), `traps`, `nails`, `boards`, `buried`, and per player `item` and `card`.
 - Signaling: free PeerJS cloud broker. Some strict NATs need a TURN server (not set up yet). Local testing: run a PeerJS server on
   port 9000 and open `?peerhost=127.0.0.1&peerport=9000`.
 - No host migration: if the host leaves, the game ends for guests.
@@ -52,15 +60,18 @@ Live: https://gitgeekalban.github.io/xiombard-game/
   Each player owns one collision bit (`PLAYER_BITS`).
 - The coffin's inner width must stay wider than the widest belly `corpses.js` can generate (0.74 m today), or bodies cannot lie in it.
 - Assists are deliberate: a body dropped at an open coffin is laid inside; a coffin dropped by a dug grave is aligned and falls in.
+- **Closing a lid turns the passenger into data** (`coffin.passenger`): the ragdoll is removed and the coffin weighs for both. `coffinContents()` is null for a closed coffin; burial reads the passenger. A dug-up grave gives the body back as it was buried (`plot.who`).
+- Bodies cannot be grabbed off the hearse: its cage stays solid and the grab button at the hatch (`morgueKey`) puts the next one on the intake table.
+- The fence is not a static collider: each of `FENCE_SECTIONS` has its own bodies in `sim.fence`, removed when the section breaks and built again on repair.
 - `afterStep` clamps prop speeds as a safety net against solver blow-ups.
 - Anything on its feet at night has a walker in `e.z` (a steered capsule + a pose). A risen corpse keeps its ragdoll bodies as kinematic ghosts that follow the pose, so `e.bodies[...]` stays valid everywhere; a whack turns them dynamic again.
-- Test a night quickly with `?daylen=15&nightlen=90`.
+- Test a night quickly with `?daylen=15&nightlen=90`. `?botlog` collects what the bots are doing in `window.__botlog`.
 
 ## Workflow
 - `npm install`, `npm run dev` (port 5173), `npm run build` must pass before pushing.
 - `npm run build:single` packs the game into one self-contained html file (`dist-single/`): it runs from disk in any browser, so it can be sent to anyone.
 - Every build carries a label at the bottom edge of the screen: `build <number of commits> · <commit> · <time>` (`build-info.js`). Commit first, then build, so the number names the commit; a `+` after the number means uncommitted changes went in.
-- Debug handle on the host: `window.__xiom = { sim, view, look }` — scripted tests drive `sim.step()` / `sim.input` directly.
+- Debug handle on the host: `window.__xiom = { sim, view, look, bots }` — scripted tests drive `sim.step()` / `bots.update()` directly.
 - Branch from `main`, open a PR, one review, merge. Push to `main` auto-deploys via `.github/workflows/deploy.yml`.
 - Keep the page working at phone width; check FPS on a mid-range laptop before merging heavy shaders.
 
