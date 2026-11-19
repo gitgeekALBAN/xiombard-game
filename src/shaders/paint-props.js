@@ -14,7 +14,7 @@ import { COFFIN } from '../shared/layout.js';
 
 export const PAINT = {
   PLAIN: 1, // aK = (1, mottle, rim, emissive)
-  COFFIN_WOOD: 10, COFFIN_LINING: 11, COFFIN_RAIL: 12,
+  COFFIN_WOOD: 10, COFFIN_LINING: 11, COFFIN_RAIL: 12, COFFIN_LID: 13, // lid: aK = (13, nailed, seed, 0)
   STONE: 20,
   TRUCK_BODY: 30, TRUCK_FLOOR: 31, TRUCK_RAIL: 32, RADIATOR: 33, LAMP: 34, SKULL: 35, WHEEL: 36, GATE: 37,
 };
@@ -311,6 +311,27 @@ void coffinWood(inout vec3 col, inout float ink, vec3 p, vec3 on) {
     ink = max(ink, 0.6 * line(rivet, 0.0013) * fill(band) * step(0.04, dc));
   }
 }
+// The lid: boards running its length, a brass cross (short arm toward the head) and, once it is nailed shut,
+// eight nail heads along the rim.
+const vec2 LIDNAIL[8] = vec2[](${[[-0.5, -0.92], [0.5, -0.92], [-0.88, 0.42], [0.88, 0.42], [-0.6, 0.92], [0.6, 0.92], [-0.8, -0.25], [0.8, -0.25]].map(([x, z]) => `vec2(${f(x * hx)}, ${f(z * hz)})`).join(', ')});
+void coffinLid(inout vec3 col, inout float ink, vec3 p, vec3 on) {
+  if (on.y < 0.5) { col *= 0.8; return; }
+  float seed = vK.z;
+  float px = p.x * 6.0 + 0.03 * sin(p.z * 7.0 + seed);
+  float board = floor(px), fx = fract(px);
+  col *= 0.86 + 0.24 * h1(board * 3.7 + seed);
+  col *= 0.88 + 0.22 * vnoise(vec2(p.z * 5.0 + board * 13.0, fx * 9.0 + seed)) * vnoise(vec2(p.z * 1.3, fx * 30.0 + board));
+  col = mix(col, ${V(PAL.plumDark)}, line(abs(fx - 0.5) - 0.5, 0.05) * 0.85);
+  float cr = min(sdBox(p.xz - vec2(0.0, -0.1), vec2(0.035, 0.32)), sdBox(p.xz - vec2(0.0, 0.06), vec2(0.17, 0.035)));
+  col = mix(col, ${V('#c9b98f')} * (0.8 + 0.35 * vnoise(p.xz * 40.0)), fill(cr));
+  ink = max(ink, 0.8 * line(cr, 0.003));
+  if (vK.y > 0.5) {
+    float nd = 1e3;
+    for (int i = 0; i < 8; i++) nd = min(nd, length(p.xz - LIDNAIL[i]));
+    col = mix(col, ${V('#9aa0ad')} * (0.75 + 0.5 * smoothstep(0.02, 0.0, length(vec2(nd - 0.008, 0.0)))), fill(nd - 0.024));
+    ink = max(ink, 0.85 * line(nd - 0.024, 0.0035));
+  }
+}
 void coffinLining(inout vec3 col, inout float ink, inout float em, vec3 p, vec3 on) {
   // pleated satin: folds run the length of the coffin (across it on the end walls), every other fold darker
   float c = (abs(on.z) > 0.6 ? p.x : p.z) * 11.0;
@@ -470,6 +491,7 @@ void main() {
   float ink = 0.0, em = 0.0, rim = 1.0, mottle = 0.4;
   if (id == ${PAINT.PLAIN}) { mottle = vK.y; rim = vK.z; em = vK.w; }
   else if (id == ${PAINT.COFFIN_WOOD}) { mottle = 0.4; coffinWood(col, ink, p, on); }
+  else if (id == ${PAINT.COFFIN_LID}) { mottle = 0.4; coffinLid(col, ink, p, on); }
   else if (id == ${PAINT.COFFIN_LINING}) { mottle = 0.2; rim = 0.4; coffinLining(col, ink, em, p, on); }
   else if (id == ${PAINT.COFFIN_RAIL}) {
     // striped top rail: the stripe index is carried in aQ.xy as (u * q, q), so the blocks follow the coffin's outline

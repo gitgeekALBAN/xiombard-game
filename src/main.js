@@ -3,6 +3,7 @@ import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom } from './net.js';
 import { unlockAudio } from './audio.js';
 import { touch, initTouch, isTouchDevice } from './touch.js';
+import { outfitLabel } from './shared/layout.js';
 import { createBots } from './sim/bots.js';
 
 const $ = (id) => document.getElementById(id);
@@ -113,7 +114,7 @@ async function host() {
   sim = new Sim({ dayLen: +q.get('daylen') || 0, nightLen: +q.get('nightlen') || 0 });
   myId = sim.addPlayer(playerName()).id;
   // AI teammates so nobody digs alone: ?bots=N (0..5), 3 by default; they step aside for joining humans
-  bots = createBots(sim);
+  bots = createBots(sim, q.has('botlog') ? { log: (m) => (window.__botlog || (window.__botlog = [])).push(m) } : {}); // ?botlog: what the bots are up to
   const nBots = Math.max(0, Math.min(5, +(new URLSearchParams(location.search).get('bots') ?? 3)));
   for (let i = 0; i < nBots; i++) bots.add(); // each takes the next free crew member and its name
   window.__xiom = { sim, view, look, bots };
@@ -181,9 +182,35 @@ function showRoom(code, note) {
   $('copy').onclick = () => { navigator.clipboard?.writeText(link); $('copy').textContent = 'Copied!'; };
 }
 
+// The delivery note card: who this is, what they should wear, and the laying-to-rest checklist.
+let lastCard = '';
+function renderCard(me) {
+  const c = me && me.card, it = me && me.item, key = JSON.stringify([c, it]);
+  if (key === lastCard) return;
+  lastCard = key;
+  const el = $('card');
+  el.classList.toggle('show', !!(c || it));
+  if (!c && !it) return;
+  const li = (ok, text, bad) => `<li class="${ok ? 'ok' : bad ? 'bad' : ''}">${text}</li>`;
+  let html = '';
+  if (c) {
+    const closed = c.stage === 'closed' || c.stage === 'nailed', dressed = c.outfit !== 'Plain shroud';
+    html += `<h3>DELIVERY NOTE</h3><div class="who">${escapeHtml(c.name)}</div><div>wants: ${escapeHtml(c.suit.toLowerCase())}</div><ul>`
+      + li(c.tagOk, c.tag ? `name tag: ${escapeHtml(c.tag)}` : 'hang the name tag', c.tag && !c.tagOk)
+      + li(c.suitOk, dressed ? `wearing: ${escapeHtml(c.outfit.toLowerCase())}` : 'dress them', dressed && !c.suitOk)
+      + li(c.stage === 'coffin' || closed, 'in a coffin') + li(closed, 'lid closed') + li(c.stage === 'nailed', 'nailed shut (calms them)') + li(false, 'buried') + '</ul>';
+  }
+  if (it) html += `<div class="held">In hand: ${it.type === 'tag' ? `name tag "${escapeHtml(it.name)}"` : escapeHtml(outfitLabel(it.suit).toLowerCase())}</div>`;
+  el.innerHTML = html;
+}
+
 function applyState(st) {
   view.setState(st);
-  $('score').textContent = st.score;
+  $('score').textContent = st.buried ?? st.score;
+  $('points').textContent = st.score;
+  $('nails').textContent = st.nails ?? 0;
+  $('boards').textContent = st.boards ?? 0;
+  renderCard(st.players.find((p) => p.id === myId));
   if (st.phase) {
     const [night, left, day, light, zombies] = st.phase;
     view.setDay?.(light);
@@ -201,7 +228,7 @@ function applyState(st) {
   $('players').innerHTML = st.players.map((p) => `<li style="--c:${p.color}">${escapeHtml(p.name)}${p.id === myId ? ' (you)' : ''}</li>`).join('');
 }
 // Hints are written by the host in keyboard terms; on a touch screen show the button names instead.
-const TOUCH_WORDS = [[/Hold F/g, 'Hold DIG'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'], [/Click to whack/g, 'Tap GRAB to whack'],
+const TOUCH_WORDS = [[/Hold F/g, 'Hold WORK'], [/\bE:/g, 'GRAB:'], [/Q to put it back/g, 'THROW to put it back'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'], [/Click to whack/g, 'Tap GRAB to whack'],
   [/Click to drop/g, 'GRAB to drop'], [/Press R/g, 'Tap LIMP']];
 const hintText = (h) => (touch.active ? TOUCH_WORDS.reduce((t, [re, w]) => t.replace(re, w), h) : h);
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

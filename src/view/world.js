@@ -9,13 +9,14 @@ import {
   gateLeafParts, shedParts, carpenterParts, coffinLidParts, signLabels,
 } from './models/environment.js';
 import { buildPlants } from './plants.js';
+import { buildMorgue, buildYardDamage, railMesh } from './morgue.js';
 import { buildBackdrop } from './backdrop.js';
 import { rng } from '../shared/rng.js';
 import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, CARPENTER } from '../shared/layout.js';
 
 // The static graveyard: ground, old headstones, trees, shed, fence, gates, lanterns, and the backdrop beyond the fence.
 // Positions and sizes come from shared/layout.js because the host's colliders use the same numbers.
-// buildWorld(scene) returns { groundMat, update(time, dt, camera), setDay(k) }.
+// buildWorld(scene) returns { groundMat, morgue, update(time, dt, camera), setDay(k), setYard(state) }.
 // Any mesh with userData.billboard = true is turned to face the camera every frame by the view.
 // Static set pieces go into one Batch: one painted mesh plus its ink hulls (see models/environment.js).
 
@@ -87,7 +88,7 @@ export function buildWorld(scene) {
     new THREE.CylinderGeometry(0.032, 0.032, BAR_H, 4, 1, true).rotateY(Math.PI / 4).translate(0, BAR_H / 2, 0),
     new THREE.ConeGeometry(0.065, 0.26, 4, 1, true).rotateY(Math.PI / 4).translate(0, BAR_H + 0.1, 0),
   ].map((g) => { g.deleteAttribute('uv'); return g.toNonIndexed(); }));
-  const bars = [];
+  const bars = [], rails = []; // instanced, so a section the night broke can lean and fall (see morgue.js)
   const posts = [];
   // sides: [axis along which the side runs, fixed coordinate]
   for (const [along, fixed] of [['x', -FENCE], ['x', FENCE], ['z', -FENCE], ['z', FENCE]]) {
@@ -120,7 +121,7 @@ export function buildWorld(scene) {
       for (const y of [0.22, 1.28]) {
         const [x, z] = pt((a + b) / 2);
         // rails are as dark as the ink, so like the bars they go without a hull
-        add(G.box, MAT.iron, M([x, y + R.range(-0.02, 0.02), z], [0, along === 'x' ? 0 : Math.PI / 2, R.range(-0.008, 0.008)], [b - a, 0.05, 0.04]), 0);
+        rails.push(M([x, y + R.range(-0.02, 0.02), z], [0, along === 'x' ? 0 : Math.PI / 2, R.range(-0.008, 0.008)], [b - a, 0.05, 0.04]));
       }
     }
   }
@@ -138,6 +139,12 @@ export function buildWorld(scene) {
   bars.forEach((m, i) => barMesh.setMatrixAt(i, m));
   barMesh.frustumCulled = false;
   s.add(barMesh);
+  const rails3 = railMesh(rails);
+  s.add(rails3);
+  const damage = buildYardDamage(s, { bars: { mesh: barMesh, mats: bars }, rails: { mesh: rails3, mats: rails } });
+
+  // the morgue between the road and the graves (its walls and furniture join the static batch)
+  const morgue = buildMorgue(s, batch);
 
   // gateways: leaning stone pillars with lanterns, iron leaves swung open outward (the truck enters at +X)
   for (const sx of [1, -1]) {
@@ -209,9 +216,12 @@ export function buildWorld(scene) {
   let lamps = 1; // lantern and window glow sprites: 1 at night, out by day
   return {
     groundMat,
+    morgue,
+    setYard: (st) => damage.set(st), // traps and fence sections from the host's state
     setDay(k) {
       lamps = lampsOn(k);
       glow.mesh.visible = lamps > 0;
+      morgue.setDay(k);
       backdrop.setDay(k);
     },
     update(time, dt, camera) {

@@ -3,7 +3,7 @@ import { createSky } from '../shaders/sky.js';
 import { buildCoffin, buildTruck } from './models.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
-import { PLOTS, PLOT_HALF } from '../shared/layout.js';
+import { PLOTS, PLOT_HALF, insideMorgue } from '../shared/layout.js';
 import { CP, crewRig } from '../shared/crew.js';
 import { zombieRig } from '../shared/zombies.js';
 import { corpseRig } from '../shared/corpses.js';
@@ -166,11 +166,20 @@ export class View {
     }
     this.order = list.map((d) => {
       let e = this.ents.get(d.id);
+      // a body got a name tag or new clothes, a coffin got its lid: build the model again where the old one is
+      const lookKey = `${d.outfit}|${d.tag}|${d.lid}`;
+      let keep = null;
+      if (e && e.lookKey !== lookKey) {
+        keep = e.groups.map((g) => [g.position.clone(), g.quaternion.clone()]);
+        this.scene.remove(e.root);
+        this.billboards = this.billboards.filter((b) => !e.billboards.includes(b));
+        e = null;
+      }
       if (!e) {
         // every character is six frames plus one low-poly mesh sculpted from its formulas; coffins and the truck are hand-built meshes
         const crew = d.kind === 'digger' ? buildCrew(crewRig(d.look), { shovel: true }) : d.kind === 'zombie' ? buildCrew(zombieRig(d.look))
-          : d.kind === 'corpse' ? buildCrew(corpseRig(d.seed), { q: 0.64 }) : null;
-        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed) : buildTruck();
+          : d.kind === 'corpse' ? buildCrew(corpseRig(d.seed, d.outfit, d.tag), { q: 0.64 }) : null;
+        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed, d.lid) : buildTruck();
         const root = new THREE.Group();
         for (const g of groups) root.add(g);
         if (crew) root.add(crew.mesh);
@@ -184,7 +193,8 @@ export class View {
         const billboards = [];
         root.traverse((o) => { if (o.userData.billboard) billboards.push(o); });
         this.billboards.push(...billboards);
-        e = { ...d, root, groups, crew, shadow, billboards, fresh: true, tpos: groups.map(() => new THREE.Vector3()), tq: groups.map(() => new THREE.Quaternion()) };
+        e = { ...d, root, groups, crew, shadow, billboards, lookKey, fresh: !keep, tpos: groups.map(() => new THREE.Vector3()), tq: groups.map(() => new THREE.Quaternion()) };
+        if (keep) keep.forEach(([p, q], i) => { if (groups[i]) { groups[i].position.copy(p); groups[i].quaternion.copy(q); e.tpos[i].copy(p); e.tq[i].copy(q); } });
         this.ents.set(d.id, e);
       }
       return e;
@@ -212,6 +222,8 @@ export class View {
       else if (ev.type === 'toast') this.toast(ev.text, ev.pos, ev.big);
       else if (ev.type === 'puff') this.puff(ev.pos, ev.kind);
     }
+    this.world.morgue.setTags(st.tags);
+    this.world.setYard(st);
     st.plots.forEach(([d, f, b, seed, name], i) => {
       this.graves.setPlot(i, d, f, b, seed, name, this.time);
       this.groundMat.uniforms.uPlotState.value[i] = b;
@@ -243,6 +255,8 @@ export class View {
     const fp = !!(me && this.firstPerson && !meState?.rag);
     const fov = fp ? 74 : 62;
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
+    // a third-person camera indoors needs the morgue's roof out of the way
+    if (me) { const q = me.groups[0].position; this.world.morgue.roof.visible = (fp && !this.debugCam) || !insideMorgue(q.x, q.z); }
     for (const e of this.order) {
       for (let i = 0; i < e.groups.length; i++) {
         e.groups[i].position.lerp(e.tpos[i], a);

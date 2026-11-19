@@ -35,7 +35,8 @@ class Soup {
 const outward = (a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz); let nx = dz / l, nz = -dx / l; if (nx * (a[0] + b[0]) + nz * (a[1] + b[1]) < 0) { nx = -nx; nz = -nz; } return [nx, 0, nz]; };
 const HANDLE_RING = new THREE.TorusGeometry(0.065, 0.013, 3, 5, Math.PI);
 const PILLOW = new THREE.SphereGeometry(1, 7, 4);
-export function buildCoffin(seed) {
+// lid: 0 open, 1 closed, 2 nailed shut (the cross and the nail heads are paint, see coffinLid in paint-props.js)
+export function buildCoffin(seed, lid = 0) {
   const R = rng(seed);
   const { hx, hy, hz, wall } = COFFIN;
   const out = [[-0.6 * hx, -hz], [0.6 * hx, -hz], [hx, 0.42 * hz], [0.72 * hx, hz], [-0.72 * hx, hz], [-hx, 0.42 * hz]];
@@ -90,6 +91,7 @@ export function buildCoffin(seed) {
   }
   // a small lumpy pillow at the head end
   k.add(PILLOW, plain('#ddd2e6', 0.3), { pos: [0, -hy + 0.12, hz - 0.24], scale: [0.21 + R.range(0, 0.03), 0.06, 0.12], outline: false });
+  if (lid) k.add(prism(offsetPoly(out, 0.035), hy - 0.005, hy + 0.06), { id: PAINT.COFFIN_LID, color: woodC, k: [lid === 2 ? 1 : 0, R() * 50, 0] });
   const g = new THREE.Group();
   const { geo, hull } = k.bake();
   g.add(new THREE.Mesh(geo, propPaint()));
