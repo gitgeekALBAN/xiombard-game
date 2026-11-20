@@ -238,10 +238,13 @@ function renderCard(me) {
   if (!c) return;
   const li = (ok, text, bad) => `<li class="${ok ? 'ok' : bad ? 'bad' : ''}">${text}</li>`;
   const closed = c.stage === 'closed' || c.stage === 'nailed', dressed = c.outfit !== 'Plain shroud';
-  el.innerHTML = `<h3>DELIVERY NOTE</h3><div class="who">${escapeHtml(c.name)}</div><div>wants: ${escapeHtml(c.suit.toLowerCase())}</div><ul>`
+  el.innerHTML = `<h3>DELIVERY NOTE</h3><div class="who">${escapeHtml(c.name)}</div><div>wants: ${escapeHtml(c.suit.toLowerCase())}</div>`
+    + `<div>blessing: ${escapeHtml(c.rite)} · candles: ${escapeHtml(c.cand)}</div><ul>`
     + li(c.tagOk, c.tag ? `name tag: ${escapeHtml(c.tag)}` : 'register at the desk (name tag)', c.tag && !c.tagOk)
     + li(c.suitOk, dressed ? `wearing: ${escapeHtml(c.outfit.toLowerCase())}` : 'dress at the dressing table', dressed && !c.suitOk)
-    + li(c.stage === 'coffin' || closed, 'in a coffin') + li(closed, 'lid closed') + li(c.stage === 'nailed', 'nailed shut (calms them)') + li(false, 'buried') + '</ul>';
+    + li(c.riteOk, c.blessed ? `blessed with the ${escapeHtml(c.blessed)}` : 'bless them at the chapel', c.blessed && !c.riteOk)
+    + li(c.stage === 'coffin' || closed, 'in a coffin') + li(closed, 'lid closed') + li(c.stage === 'nailed', 'nailed shut (calms them)')
+    + li(false, 'buried, then candles at the headstone') + '</ul>';
 }
 
 // The outfit choice at the dressing table: a list of the outfits, picked with keys 1-5 or a tap.

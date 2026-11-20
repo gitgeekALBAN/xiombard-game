@@ -6,7 +6,7 @@ import { ZOMBIES, ZTYPE, Z_WALKERS, Z_DRAGGER, Z_DOGS, Z_ODD, zombieRig, zombieP
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
   ROAD_Z, FENCE, ROAD_HALF, SPAWN, staticBoxes,
-  MORGUE, OUTFITS, outfitLabel, NAIL_COST, insideMorgue, atStation, FENCE_SECTIONS, FENCE_HP, fenceSectionAt, TRAPS, TRAP_DUR,
+  MORGUE, OUTFITS, outfitLabel, RITES, riteLabel, CANDLES, MAX_CANDLES, candleLabel, NOTE, NAIL_COST, insideMorgue, atStation, FENCE_SECTIONS, FENCE_HP, fenceSectionAt, TRAPS, TRAP_DUR,
 } from '../shared/layout.js';
 import { rng, corpseName } from '../shared/rng.js';
 
@@ -36,7 +36,7 @@ const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it 
 const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
 
 const v3 = (a) => new CANNON.Vec3(a[0], a[1], a[2]);
-const PARTS_OF = { digger: NCREW, zombie: NCREW, corpse: NCREW, coffin: 1, truck: 1 };
+const PARTS_OF = { digger: NCREW, zombie: NCREW, corpse: NCREW, coffin: 1, truck: 1, note: 1 };
 
 export class Sim {
   // opts: { dayLen, nightLen } in seconds (for tests and tuning)
@@ -129,7 +129,7 @@ export class Sim {
   bodiesOf(e) {
     if (e.kind === 'digger' || e.kind === 'zombie') return e.rag ? e.rag.bodies : [];
     if (e.kind === 'corpse') return e.bodies;
-    if (e.kind === 'coffin') return [e.body];
+    if (e.kind === 'coffin' || e.kind === 'note') return [e.body];
     return [];
   }
   byId(id) { return this.ents.find((e) => e.id === id); }
@@ -138,6 +138,8 @@ export class Sim {
       id: e.id, kind: e.kind, seed: e.seed || 0, color: e.color || '', name: e.name || '', look: e.look ?? -1,
       // what the view rebuilds a model for: a body's clothes and name tag, a coffin's lid (1 closed, 2 nailed)
       outfit: e.kind === 'corpse' ? e.outfit || 'shroud' : undefined, tag: e.kind === 'corpse' && e.tag ? 1 : 0, lid: e.kind === 'coffin' ? e.lid || 0 : 0,
+      // a delivery note: what is written on it (name and seed are above)
+      note: e.kind === 'note' ? [e.suit, e.rite, e.cand.c, e.cand.n] : undefined,
     }));
   }
   emit(type, data) { this.events.push({ type, ...data }); }
@@ -192,11 +194,30 @@ export class Sim {
     const e = this.addEnt({
       kind: 'corpse', seed, bodies, constraints, name: corpseName(seed), slip: 0.8 + rng(seed)() * 0.7,
       suit: rng(seed * 13 + 5).pick(OUTFITS).id, // what the delivery note asks for
+      rite: rng(seed * 17 + 3).pick(RITES).id,    // the charm to bless them with at the chapel
+      cand: { c: rng(seed * 19 + 7).pick(CANDLES).id, n: 1 + Math.floor(rng(seed * 23 + 1)() * MAX_CANDLES) }, // candles at the headstone
       outfit: 'shroud', tag: null,               // what they wear and the name tag hung on them so far
+      blessed: null,                              // the charm they were blessed with (null: not yet)
     });
     for (const b of bodies) b.ent = e;
     return e;
   }
+
+  // A body's delivery note: a sheet of card that goes where it is put (picked up, carried, laid on a table, dropped).
+  // It carries a copy of what the note asks for; the body keeps the truth (the note can get lost, the body cannot).
+  spawnNote(body, x, y, z, yaw = 0) {
+    const b = new CANNON.Body({ mass: 0.3, material: this.mProp, linearDamping: 0.3, angularDamping: 0.6, collisionFilterGroup: G_PROP, collisionFilterMask: ALL });
+    b.addShape(new CANNON.Box(new CANNON.Vec3(NOTE.hx, NOTE.hy, NOTE.hz)));
+    b.position.set(x, y + NOTE.hy, z);
+    b.quaternion.setFromEuler(0, yaw, 0);
+    b.sleepSpeedLimit = 0.15;
+    b.grabR = 0.18;
+    this.world.addBody(b);
+    const e = this.addEnt({ kind: 'note', body: b, of: body.id, seed: body.seed, name: body.name, suit: body.suit, rite: body.rite, cand: body.cand });
+    b.ent = e;
+    return e;
+  }
+  notesOf(body) { return this.ents.filter((e) => e.kind === 'note' && e.of === body.id); }
 
   spawnLoad(n) {
     const t = this.truck.body.position;
@@ -347,6 +368,10 @@ export class Sim {
         b.pointToWorldFrame(loc, tmp);
         const d = tmp.distanceTo(hand) - 0.1;
         if (d < bestD) { bestD = d; best = { body: b, ent: e, pivot: loc.clone() }; }
+      } else if (e.kind === 'note') {
+        if (this.holders(e)) continue;
+        const d = e.body.position.distanceTo(hand) - e.body.grabR + 0.1; // a little less eager than a body: it is small and often lies on one
+        if (d < bestD) { bestD = d; best = { body: e.body, ent: e, pivot: new CANNON.Vec3() }; }
       }
     }
     return best;
@@ -405,6 +430,12 @@ export class Sim {
   holdTarget(ent, hs) {
     const p = hs[0], g = p.grab, b = g.body, t = this.time + p.id * 1.7;
     const q = new CANNON.Quaternion(), tilt = new CANNON.Quaternion();
+    if (ent.kind === 'note') { // held up in front of the face to be read, text toward the carrier
+      const pos = this.handPoint(p, this.carryY(p, false) + 0.4 + Math.sin(p.phase * 2) * 0.01, 0.55, g.yaw); // just under the eyes
+      q.setFromEuler(0, g.yaw, 0);
+      q.mult(tilt.setFromEuler(-1.15, 0, 0), q);
+      return { pos, quat: q, firm: 1 };
+    }
     if (!g.coffin) { // a body lies on its back across the arms, head to the carrier's right
       const pos = this.handPoint(p, this.carryY(p, false) + Math.sin(p.phase * 2) * 0.02, CORPSE_FWD, g.yaw);
       q.setFromEuler(0, g.yaw, 0);
@@ -613,6 +644,7 @@ export class Sim {
     plot.nailed = nailed;
     plot.who = who;
     this.removeEnt(coffin);
+    for (const n of this.ents.filter((e) => e.kind === 'note' && e.of === who.id)) this.removeEnt(n); // laid to rest: the paperwork goes with them
     plot.buried = true;
     plot.buriedAt = this.time;
     plot.fill = 0;
@@ -770,7 +802,7 @@ export class Sim {
   }
   // The lid goes on: from here the passenger is data on the coffin, not a ragdoll, and the coffin weighs for both.
   closeLid(c, body) {
-    c.passenger = { name: body.name, seed: body.seed, suit: body.suit, outfit: body.outfit, tag: body.tag };
+    c.passenger = { name: body.name, seed: body.seed, suit: body.suit, outfit: body.outfit, tag: body.tag, rite: body.rite, cand: body.cand, blessed: body.blessed, id: body.id };
     this.removeEnt(body);
     c.lid = 1;
     const b = c.body;
@@ -842,6 +874,8 @@ export class Sim {
     const tb = MORGUE.table;
     this.layOn(body, tb, this.bodiesOn(tb).filter((e) => e !== body).length);
     body.greeted = true;
+    for (const n of this.notesOf(body)) this.removeEnt(n); // one note per body
+    this.spawnNote(body, tb.x + tb.hx - 0.22, tb.top + 0.01, tb.z - tb.hz + 0.16, 0.12); // its note, at the front corner of the table
     this.truck.t = this.time; // the driver waits again for the next one (see the 'wait' state in the truck update)
     this.emit('sfx', { name: 'thud', pos: [tb.x, tb.top, tb.z] });
     this.emit('toast', { text: `Note: ${body.name}, ${outfitLabel(body.suit).toLowerCase()}`, pos: [tb.x, tb.top + 1.1, tb.z] });
@@ -929,8 +963,13 @@ export class Sim {
   }
   // The delivery note of the body this player is dealing with, for the HUD card.
   cardFor(p) {
-    const card = (o, more) => ({ name: o.name, suit: outfitLabel(o.suit), tag: o.tag, outfit: outfitLabel(o.outfit), tagOk: o.tag === o.name, suitOk: o.outfit === o.suit, ...more });
+    const card = (o, more) => ({ name: o.name, suit: outfitLabel(o.suit), tag: o.tag, outfit: outfitLabel(o.outfit), tagOk: o.tag === o.name, suitOk: o.outfit === o.suit,
+      rite: riteLabel(o.rite), blessed: o.blessed ? riteLabel(o.blessed) : '', riteOk: !!o.blessed && o.blessed === o.rite, cand: candleLabel(o.cand), ...more });
     if (p.grab && p.grab.ent.kind === 'corpse' && !p.grab.ent.z) return card(p.grab.ent, { stage: 'held' });
+    if (p.grab && p.grab.ent.kind === 'note') { // reading a note: what it asks for, and how its body is doing if it is still around
+      const n = p.grab.ent, b = this.byId(n.of);
+      return card(b && b.kind === 'corpse' ? b : { ...n, outfit: 'shroud' }, { stage: 'note' });
+    }
     const f = this.feet(p);
     let best = null, bd = 2.2;
     for (const e of this.ents) {
@@ -1224,7 +1263,7 @@ export class Sim {
     this.score = Math.max(0, this.score - 1);
     const m = new THREE.Matrix4().makeTranslation(plot.x, 0.35, plot.z - 0.9).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
     const e = this.spawnCorpse(m, REST_ROTS, plot.seed);
-    if (plot.who) { e.outfit = plot.who.outfit; e.tag = plot.who.tag; plot.who = null; } // dug up as they were buried
+    if (plot.who) { e.outfit = plot.who.outfit; e.tag = plot.who.tag; e.blessed = plot.who.blessed || null; plot.who = null; } // dug up as they were buried
     this.buried = Math.max(0, this.buried - 1);
     plot.unrest = 0;
     plot.nailed = false;

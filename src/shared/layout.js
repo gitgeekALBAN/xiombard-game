@@ -77,6 +77,25 @@ export const OUTFITS = [
   { id: 'pajamas', label: 'Striped pajamas' },
 ];
 export const outfitLabel = (id) => (OUTFITS.find((o) => o.id === id) || { label: 'Plain shroud' }).label;
+// The blessing at the chapel: each note names one of these charms. They are made up for this graveyard on purpose:
+// no real religion's symbols, ever. The view draws them (models/charms.js), the note prints the name.
+export const RITES = [
+  { id: 'moth', label: 'Hush Moth' },
+  { id: 'snail', label: 'Slow Snail' },
+  { id: 'key', label: 'Bone Key' },
+  { id: 'teacup', label: 'Teacup Moon' },
+];
+export const riteLabel = (id) => (RITES.find((r) => r.id === id) || { label: 'none' }).label;
+// Candles at the headstone: the note asks for a color and how many.
+export const CANDLES = [
+  { id: 'bone', label: 'Bone white', color: '#efe6d0' },
+  { id: 'plum', label: 'Plum', color: '#8a4f9e' },
+  { id: 'ember', label: 'Ember', color: '#e0703a' },
+];
+export const MAX_CANDLES = 4;
+// a delivery note: a stiff card, half sizes in meters (physics box and the drawn sheet)
+export const NOTE = { hx: 0.15, hy: 0.006, hz: 0.105 };
+export const candleLabel = (c) => (c ? `${c.n} ${(CANDLES.find((k) => k.id === c.c) || CANDLES[0]).label.toLowerCase()}` : 'none');
 export const NAIL_COST = 4; // nails to hammer one coffin lid shut
 
 export const insideMorgue = (x, z, m = 0) => x > MORGUE.x0 + m && x < MORGUE.x1 - m && z > MORGUE.z0 + m && z < MORGUE.z1 - m;

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createSky } from '../shaders/sky.js';
 import { buildCoffin, buildTruck } from './models.js';
+import { buildNote } from './models/note.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
 import { PLOTS, PLOT_HALF, insideMorgue } from '../shared/layout.js';
@@ -179,12 +180,12 @@ export class View {
         // every character is six frames plus one low-poly mesh sculpted from its formulas; coffins and the truck are hand-built meshes
         const crew = d.kind === 'digger' ? buildCrew(crewRig(d.look), { shovel: true }) : d.kind === 'zombie' ? buildCrew(zombieRig(d.look))
           : d.kind === 'corpse' ? buildCrew(corpseRig(d.seed, d.outfit, d.tag), { q: 0.64 }) : null;
-        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed, d.lid) : buildTruck();
+        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed, d.lid) : d.kind === 'note' ? buildNote(d) : buildTruck();
         const root = new THREE.Group();
         for (const g of groups) root.add(g);
         if (crew) root.add(crew.mesh);
         let shadow = null;
-        if (d.kind !== 'truck') {
+        if (d.kind !== 'truck' && d.kind !== 'note') {
           shadow = new THREE.Mesh(this.shadowGeo, this.shadowMat);
           shadow.renderOrder = 1;
           root.add(shadow);
