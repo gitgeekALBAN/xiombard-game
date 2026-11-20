@@ -172,12 +172,43 @@ export function buildMorgue(scene, batch) {
   glow.mesh.visible = false;
   scene.add(glow.mesh);
 
+  // the hatch counter: a square plate beside the DELIVERIES sign outside and the INTAKE sign inside, with the number
+  // of bodies still waiting in the hearse (a dash while it is away). Same material settings as the signs, so it draws
+  // with their shader. Repainted only when the number changes.
+  const cc = document.createElement('canvas');
+  cc.width = cc.height = 128;
+  const cg = cc.getContext('2d'), ctex = new THREE.CanvasTexture(cc);
+  ctex.colorSpace = THREE.SRGBColorSpace;
+  const countMat = new THREE.MeshBasicMaterial({ map: ctex, alphaTest: 0.5, fog: true });
+  const paintCount = (text) => {
+    cg.fillStyle = '#2a2236'; cg.fillRect(0, 0, 128, 128);
+    cg.strokeStyle = '#6a4a52'; cg.lineWidth = 10; cg.strokeRect(5, 5, 118, 118);
+    cg.fillStyle = '#f0c060'; cg.textAlign = 'center';
+    cg.font = 'bold 78px Georgia, serif'; cg.fillText(text, 64, 84);
+    cg.font = 'bold 15px Georgia, serif'; cg.fillText('IN THE HEARSE', 64, 112);
+    ctex.needsUpdate = true;
+  };
+  paintCount('-');
+  const plate = new THREE.PlaneGeometry(0.5, 0.5);
+  const counters = [
+    M([hc + 1.35, 2.5, Mg.z1 + 0.2], [0, 0, -0.05]),               // outside, right of DELIVERIES
+    M([Mg.table.x + 0.95, 2.45, Mg.z1 - 0.2], [0, Math.PI, 0.05]),   // inside, right of INTAKE
+  ].map((m) => { const c = new THREE.Mesh(plate, countMat); c.applyMatrix4(m); c.name = 'hatch-counter'; scene.add(c); return c; });
+  let shown = null;
+
   return {
     roof,
     setDay(k) {
       glow.mesh.visible = lampsOn(k) > 0;
       textMat.color.setScalar(0.5 + 0.5 * k); // the paper is not a lamp: dimmer at night
+      countMat.color.copy(textMat.color);
     },
+    // n bodies in the hearse; parked: it is waiting at the hatch (away and empty shows a dash)
+    setWaiting(n, parked) {
+      const text = n || parked ? String(n) : '-';
+      if (text !== shown) { shown = text; paintCount(text); }
+    },
+    counters,
   };
 }
 

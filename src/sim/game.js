@@ -1590,6 +1590,7 @@ export class Sim {
       phase: [this.phase === 'night' ? 1 : 0, Math.ceil((this.phase === 'day' ? this.dayLen : this.nightLen) - this.phaseT), this.dayN, +this.light().toFixed(3),
         this.ents.filter((e) => e.z).length],
       risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
+      bed: this.corpsesInBed().map((e) => e.id), // bodies riding in the hearse: not drawn (the doors stay shut), counted on the hatch sign
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
         choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open

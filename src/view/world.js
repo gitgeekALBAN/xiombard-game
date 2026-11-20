@@ -217,7 +217,7 @@ export function buildWorld(scene) {
   return {
     groundMat,
     morgue,
-    setYard: (st) => damage.set(st), // traps and fence sections from the host's state
+    setYard: (st) => { damage.set(st); morgue.setWaiting(st.bed ? st.bed.length : 0, !!(st.truck && st.truck[1])); }, // traps, fence, the hatch sign
     setDay(k) {
       lamps = lampsOn(k);
       glow.mesh.visible = lamps > 0;

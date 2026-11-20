@@ -227,9 +227,12 @@ export class View {
       this.graves.setPlot(i, d, f, b, seed, name, this.time);
       this.groundMat.uniforms.uPlotState.value[i] = b;
     });
-    const pl = new Map(st.players.map((p) => [p.id, p])), risen = new Set(st.risen || []);
+    const pl = new Map(st.players.map((p) => [p.id, p])), risen = new Set(st.risen || []), bed = new Set(st.bed || []);
     for (const e of this.order) {
-      if (e.kind === 'corpse') { const up = risen.has(e.id); if (up !== e.up) { e.up = up; e.crew.setRisen(up); } }
+      if (e.kind === 'corpse') {
+        const up = risen.has(e.id); if (up !== e.up) { e.up = up; e.crew.setRisen(up); }
+        e.root.visible = !bed.has(e.id); // inside the closed hearse: nobody sees them until they come through the hatch
+      }
       if (e.kind === 'digger') {
         const p = pl.get(e.id);
         const sh = e.groups[CP.armR].userData.shovel;
@@ -237,7 +240,7 @@ export class View {
       } else if (e.kind === 'truck') {
         const u = e.groups[0].userData;
         for (const w of u.wheels) w.rotation.z = st.truck[0];
-        u.gate.userData.open = st.truck[1];
+        u.gate.userData.open = 0; // the rear doors stay shut: the load comes out through the hatch, never in view
       }
     }
   }
