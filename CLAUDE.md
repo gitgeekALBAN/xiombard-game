@@ -4,17 +4,26 @@ Read this before changing anything. It records the decisions the team has alread
 
 ## What this is
 **GraveQuota** (formerly XIOMBARD: Night Shift) — a co-op ragdoll gravedigging game ("friendslop") with a day/night cycle.
-By day a hearse parks at the morgue's hatch. The morgue is a long office with work stations, and the laying-to-rest
-chain runs through them: take the body in at the hatch onto the intake table (E) and read its delivery note (name +
-outfit) → lay it on the registry desk, E writes its name tag → lay it on the dressing table, E opens the outfit choice
-(keys 1-5 or tap; hold F to change later) → lay it in the coffin that comes in from the stockroom onto the stock table →
-close the lid (F) → optionally nail it shut (F, 4 nails) → carry it out the south door to a dug grave → fill it.
+By day a closed hearse parks at the morgue's hatch (a plate by the hatch counts the bodies still aboard; they are not
+drawn). The morgue is a long office with work stations, and the laying-to-rest chain runs through them: take the body
+in at the hatch onto the intake table (E, only onto a clear table) → its **delivery note** comes with it: a physical
+card (`note` entity) with the name, the outfit, the charm for the blessing and the candles; pick it up to read it, carry
+it, put it anywhere → lay the body on the registry desk, E writes its name tag → on the dressing table, E opens the
+outfit choice (keys 1-5 or tap; hold F to change later) → on the **chapel** bier (south wall), E takes the charms, the
+wheel / keys 1-4 / a tap pick one, E hums the blessing for 3 s (`RITES`: four made-up charms — never real religious
+symbols) → lay it in the coffin from the stockroom on the stock table → close the lid (F) → optionally nail it shut
+(F, 4 nails) → carry it out the south door to a dug grave → fill it → E at the headstone: **candles** (color 1-3, count
+by wheel, E lights them; `CANDLES`).
 A body let go over a free station table is laid out straight on it (`tableAssist`), like a body dropped at a coffin.
-Each missed item (no tag, wrong outfit, not nailed) adds 1 `unrest` to the grave and scores fewer peace points.
+Each missed item (no tag, wrong outfit, wrong or no blessing, not nailed, wrong or no candles) adds 1 `unrest` to the
+grave and scores fewer peace points. A station's first E does its job; the next E picks the body up.
 Corpses slip out of your arms when you run, a coffin is too heavy for one, players can go limp and carry each other.
 By **night** zombies come — mostly from outside the fence. They wear fence sections down until they break, step in bear
-traps, chase diggers and dig up graves (restless graves first; nailed coffins take twice as long). Unburied bodies rise.
-The crew whacks them with shovels (a click with empty hands). At dawn visitors crumble; risen bodies lie down, still unburied.
+traps, chase diggers and dig up graves (restless graves first; nailed coffins take twice as long): the body rises, and
+a fresh copy of its note lies by the grave. Unburied bodies rise at nightfall (not those still in the hearse).
+The crew whacks them with shovels (a click with empty hands). A visitor beaten for good leaves a stranger's body with
+its own note (`remains`): bury it properly or it gets up the next night (dogs just crumble). At dawn visitors crumble;
+risen bodies lie down, still unburied.
 By day, repair: fence 1 board + 2 nails, trap 2 nails. Nails are scarce (+6 per delivery, +2 boards), so every nail is a
 choice between calmer graves and a sturdier yard. 3 AI bot teammates join by default (`?bots=0..5`). For now they are
 off duty: they walk out and stand east of the morgue (`doStand` in `bots.js`). `?botwork` puts them to work on the old

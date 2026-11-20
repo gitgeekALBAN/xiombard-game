@@ -1,10 +1,11 @@
 # GraveQuota
 
 A co-op ragdoll gravedigging game for the browser. By day the hearse parks at the morgue: take each body in through the
-hatch, read its delivery note, carry it from station to station — the registry desk writes its name tag, the dressing
-table dresses them in the outfit on the note — lay them in the coffin that comes in from the stockroom, close the lid,
-nail it shut if you can spare the nails, carry it to a grave and fill it in. By night the dead come for
-the yard: whack them with your shovel, and fix the fence and traps in the morning with boards and nails.
+hatch, pick up and read its delivery note, carry it from station to station — the registry desk writes its name tag, the
+dressing table dresses them in the outfit on the note, the chapel blesses them with the right charm — lay them in the
+coffin that comes in from the stockroom, close the lid, nail it shut if you can spare the nails, carry it to a grave,
+fill it in and light the candles the note asks for. By night the dead come for the yard and dig up graves: whack them
+with your shovel (the ones you beat leave bodies to bury), and fix the fence and traps in the morning with boards and nails.
 Bodies slip out of your arms, a coffin is too heavy for one, and you can go limp and get carried by a friend.
 How it was made: the whole working conversation with Claude, step by step, is at [`devlog/`](https://rokunin.github.io/xiombard-game/devlog/).
 Play solo or host a room for friends. 3 AI helpers join, but for now they are off duty and just stand outside
@@ -22,9 +23,10 @@ Host a game, share the 4-letter room code (or the invite link) with friends, the
 |---|---|
 | WASD / Shift / Space | move / run / jump |
 | Mouse (click to lock) or arrow keys | look |
-| Click or E | grab / drop, whack with the shovel, take a body in at the hatch, write the name tag at the registry desk, open the outfit choice at the dressing table |
-| 1–5 | pick an outfit while the choice is open |
-| Right-click or Q | throw what you hold / cancel the outfit choice |
+| Click or E | grab / drop, whack with the shovel, take a body in at the hatch, write the name tag at the registry desk, open the outfit choice at the dressing table, take the charms and bless at the chapel, choose and light candles at a headstone |
+| 1–5 | pick an outfit / a charm (1–4) / a candle color (1–3) while that choice is open |
+| Mouse wheel | next charm at the chapel / how many candles |
+| Right-click or Q | throw what you hold / cancel the outfit or candle choice / put the charms back |
 | F (hold) | work: dig, close a coffin lid, nail it shut, fill a grave, repair the fence or a trap, change a body's clothes |
 | R | go limp (ragdoll) / get up |
 | V | first-person / third-person view |
