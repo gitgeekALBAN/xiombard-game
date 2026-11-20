@@ -1097,8 +1097,9 @@ export class Sim {
     this.emit('sfx', { name: 'night' });
     const t = this.truck;
     if (t.state === 'wait') { t.state = 'leave'; t.t = this.time; } // the driver does not work nights
-    // every body left above ground gets up, one after another
-    for (const e of this.ents) if (e.kind === 'corpse' && !e.z) e.riseAt = this.time + 2 + this.rand() * 7;
+    // every body left above ground gets up, one after another (not the ones still riding in the closed hearse)
+    const aboard = new Set(this.corpsesInBed());
+    for (const e of this.ents) if (e.kind === 'corpse' && !e.z && !aboard.has(e)) e.riseAt = this.time + 2 + this.rand() * 7;
     // tonight's visitors: the first night shows one of everything, later nights bring more
     const pick = (a) => a[Math.floor(this.rand() * a.length)];
     const odd = Object.values(Z_ODD);
@@ -1231,7 +1232,7 @@ export class Sim {
     const z = e.z, b = z.body, def = z.def, dog = def.type === ZTYPE.dog;
     if (z.mode === 'down') {
       const lying = this.time - z.t, held = this.holders(e);
-      if (z.hp > 0 ? lying > (held ? 6 : 3.2) : lying > 2 && !held) { if (z.hp > 0) this.standWalker(e); else if (e.kind === 'zombie') this.poof(e); else this.layDown(e); }
+      if (z.hp > 0 ? lying > (held ? 6 : 3.2) : lying > 2 && !held) { if (z.hp > 0) this.standWalker(e); else if (e.kind === 'zombie') this.remains(e); else this.layDown(e); }
       return;
     }
     if (e.kind === 'corpse') this.poseRisen(e);
@@ -1347,6 +1348,21 @@ export class Sim {
     this.emit('puff', { pos: [q.x, 0.7, q.z], kind: 0 });
     this.removeEnt(e);
   }
+  // A visitor beaten for good does not just crumble: the dust settles into a body (a stranger, with a delivery note of
+  // its own beside it) that has to be laid to rest like any other. Left unburied, it gets up again at the next nightfall
+  // (bodies lying about at dusk rise, see startNight). Dogs only crumble.
+  remains(e) {
+    const q = (e.rag ? e.rag.bodies[0].position : e.z.body.position).clone(), dog = ZOMBIES[e.look].type === ZTYPE.dog;
+    this.poof(e);
+    if (dog) return null;
+    const seed = this.seedCounter++ * 977 + Math.floor(this.rand() * 1000), yaw = this.rand() * Math.PI * 2;
+    const m = new THREE.Matrix4().makeTranslation(q.x, 0.32, q.z).multiply(new THREE.Matrix4().makeRotationY(yaw)).multiply(new THREE.Matrix4().makeRotationX(Math.PI / 2));
+    const body = this.spawnCorpse(m, REST_ROTS, seed);
+    body.greeted = true;
+    this.spawnNote(body, q.x + Math.cos(yaw) * 0.75, 0.01, q.z - Math.sin(yaw) * 0.75, yaw);
+    this.emit('toast', { text: `${body.name}. Bury them properly, or they'll be back`, pos: [q.x, 1.5, q.z] });
+    return body;
+  }
   unbury(plot) {
     plot.buried = false;
     this.score = Math.max(0, this.score - 1);
@@ -1357,6 +1373,7 @@ export class Sim {
     plot.unrest = 0; plot.baseUnrest = 0; plot.candles = null;
     plot.nailed = false;
     e.greeted = true;
+    this.spawnNote(e, plot.x + PLOT_HALF.x + 0.5, 0.01, plot.z, 0.3); // a fresh copy of their note on the heap: they need burying again
     this.emit('toast', { text: `${plot.name} is back!`, pos: [plot.x, 2, plot.z], big: true });
     this.riseCorpse(e);
   }
