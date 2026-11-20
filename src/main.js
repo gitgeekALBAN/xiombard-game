@@ -317,7 +317,7 @@ function applyState(st) {
   renderWardrobe(st.players.find((p) => p.id === myId));
   renderCharms(st.players.find((p) => p.id === myId));
   renderCandles(st.players.find((p) => p.id === myId));
-  { const me = st.players.find((p) => p.id === myId); document.body.classList.toggle('infected', !!(me && me.inf)); } // only my own bite shows
+  { const me = st.players.find((p) => p.id === myId), inf = !!(me && me.inf); document.body.classList.toggle('infected', inf); $('health').textContent = inf ? 'infected' : 'healthy'; } // only my own bite shows
   if (st.phase) {
     const [night, left, day, light, zombies] = st.phase;
     view.setDay?.(light);

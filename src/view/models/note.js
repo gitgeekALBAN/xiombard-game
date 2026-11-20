@@ -38,10 +38,11 @@ export function noteTexture(name, [suit, rite, cc, cn]) {
   return tex;
 }
 
-const geo = new THREE.BoxGeometry(NOTE.hx * 2, NOTE.hy * 2, NOTE.hz * 2);
+// the sheet sits on top of the (thicker) physics box, so a note on the floor shows above the planks and the grass
+const geo = new THREE.BoxGeometry(NOTE.hx * 2, NOTE.sheet * 2, NOTE.hz * 2).translate(0, NOTE.hy - NOTE.sheet, 0);
 // the card is written on the box's top face; the mesh is turned half round so it reads from the holder's side
 export function buildNote(d) {
-  const mat = new THREE.MeshBasicMaterial({ map: noteTexture(d.name, d.note), alphaTest: 0.5, fog: true });
+  const mat = new THREE.MeshBasicMaterial({ map: noteTexture(d.name, d.note), alphaTest: 0.5, fog: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const g = new THREE.Group(), m = new THREE.Mesh(geo, mat);
   m.rotation.y = Math.PI; // so the text reads upright for the one holding it (see holdTarget in game.js)
   g.add(m);

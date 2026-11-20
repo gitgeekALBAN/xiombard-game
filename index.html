@@ -49,6 +49,12 @@
       #hud.visible { opacity: 1; }
       #score-box { position: absolute; left: 16px; top: 14px; font-size: 22px; text-shadow: 2px 2px 0 #000; }
       #score-box small { display: block; font-size: 13px; color: var(--muted); }
+      /* my own health, only on my screen: healthy, or infected after a bite */
+      #health { display: inline-block; margin-top: 5px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px;
+        border-radius: 8px 3px 8px 3px; background: rgba(60, 110, 70, .55); color: #d8f0c8; text-shadow: none; }
+      #health::before { content: '\2665  '; }
+      body.infected #health { background: rgba(120, 150, 40, .75); color: #f4ffb0; animation: fever 1.2s ease-in-out infinite alternate; }
+      body.infected #health::before { content: '\2623  '; }
       #phase { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); text-align: center; font-size: 16px; text-shadow: 2px 2px 0 #000;
         background: var(--panel); padding: 6px 14px; border-radius: 14px 6px 14px 6px; border: 2px solid #f0c060; white-space: nowrap; }
       #phase b { color: #f0c060; margin-right: 6px; letter-spacing: .06em; }
@@ -211,7 +217,7 @@
       </div>
     </div>
     <div id="hud">
-      <div id="score-box"><span id="score">0</span> laid to rest<small><span id="points">0</span> peace points · <span id="nails">0</span> nails · <span id="boards">0</span> boards · $<span id="cash">0</span></small></div>
+      <div id="score-box"><span id="score">0</span> laid to rest<small><span id="points">0</span> peace points · <span id="nails">0</span> nails · <span id="boards">0</span> boards · $<span id="cash">0</span></small><div id="health">healthy</div></div>
       <div id="card"></div>
       <div id="wardrobe"></div>
       <div id="charms"></div>

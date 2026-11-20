@@ -116,7 +116,7 @@ export function buildMorgue(scene, batch) {
 
   // the two hand-in windows in the office end of the south wall: a shuttered hatch with a frame, a counter, a bell
   for (const wd of Object.values(Mg.windows)) {
-    w(G.box, MAT.boardDark, M([wd.x, 1.5, Mg.z0 + Mg.t + 0.02], [0, 0, 0], [1.0, 0.9, 0.03]), 0);                       // the shutter
+    w(G.box, MAT.boardDark, M([wd.x, 1.5, Mg.z0 + Mg.t + 0.01], [0, 0, 0], [1.0, 0.9, 0.02]), 0);                       // the booth behind (the shutter slides: below)
     for (const sx of [-1, 1]) w(G.box, MAT.board, M([wd.x + sx * 0.55, 1.45, Mg.z0 + Mg.t + 0.05], [0, 0, 0], [0.1, 1.1, 0.08]), 0.01);
     w(G.box, MAT.board, M([wd.x, 2.02, Mg.z0 + Mg.t + 0.05], [0, 0, 0], [1.2, 0.1, 0.08]), 0.01);
     w(G.box, MAT.boardLight, M([wd.x, wd.top - 0.04, wd.z + 0.2], [0, 0, 0], [1.1, 0.08, 0.36]), 0.012);                // the counter
@@ -240,6 +240,40 @@ export function buildMorgue(scene, batch) {
     rack.name = 'charm-rack';
     scene.add(rack);
   }
+  // The hand-in windows open when someone comes up to them: the shutter slides up and the clerk inside looks out
+  // (Lost & Found in round glasses, the police in a peaked cap). Clerks are canvas paintings, same material settings as
+  // the signs; the shutter is a plank panel of its own so it can move (updateWindows).
+  const clerk = (police) => {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 224;
+    const g = c.getContext('2d');
+    g.fillStyle = '#1a1422'; g.fillRect(0, 0, 256, 224);
+    g.fillStyle = police ? '#4a5a8a' : '#8a7a9a'; g.beginPath(); g.ellipse(128, 200, 70, 60, 0, Math.PI, 0); g.fill();   // shoulders
+    g.fillStyle = '#d8d2c8'; g.beginPath(); g.ellipse(128, 120, 52, 62, 0, 0, Math.PI * 2); g.fill();                    // head
+    g.fillStyle = '#231d33';
+    for (const x of [108, 148]) { g.beginPath(); g.arc(x, 112, 7, 0, Math.PI * 2); g.fill(); }                           // eyes
+    g.lineWidth = 4; g.strokeStyle = '#231d33'; g.beginPath(); g.arc(128, 140, 14, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+    if (police) { // a peaked cap with a badge
+      g.fillStyle = '#2a3460'; g.fillRect(74, 52, 108, 30); g.fillRect(64, 78, 128, 10);
+      g.fillStyle = '#f0c060'; g.beginPath(); g.arc(128, 66, 8, 0, Math.PI * 2); g.fill();
+    } else { // round glasses and a tuft of hair
+      g.lineWidth = 3; for (const x of [108, 148]) { g.beginPath(); g.arc(x, 112, 15, 0, Math.PI * 2); g.stroke(); }
+      g.beginPath(); g.moveTo(123, 112); g.lineTo(133, 112); g.stroke();
+      g.fillStyle = '#77707c'; g.beginPath(); g.ellipse(128, 62, 38, 14, 0, Math.PI, 0); g.fill();
+    }
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    return new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: true });
+  };
+  const slats = toon('#6a4a3a', { mottle: 0.6 });
+  const windows = Object.entries(Mg.windows).map(([k, wd]) => {
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.79), clerk(k === 'police'));
+    face.position.set(wd.x, 1.5, Mg.z0 + Mg.t + 0.025);
+    const shutter = part(new THREE.BoxGeometry(0.98, 0.88, 0.03), slats, { outline: 0.008 });
+    shutter.position.set(wd.x, 1.5, Mg.z0 + Mg.t + 0.05);
+    face.name = shutter.name = `window-${k}`;
+    scene.add(face, shutter);
+    return { wd, shutter, k: 0 };
+  });
+
   // the button's cap: pushed in and gone dark red while today's deliveries are off
   const capOn = toon('#7a1e1a', { mottle: 0.3 }), capOff = toon('#e0402e', { mottle: 0.3, rim: 1.3 });
   const cap = part(new THREE.CylinderGeometry(0.17, 0.2, 0.12, 20).rotateX(Math.PI / 2), capOff, { outline: 0.012 });
@@ -268,6 +302,14 @@ export function buildMorgue(scene, batch) {
     },
     counters,
     setNoDelivery(on) { cap.material = on ? capOn : capOff; cap.position.z = capZ + (on ? 0.05 : 0); },
+    // diggers: positions of everyone on their feet; a window opens while someone stands within 2.6 m of its counter
+    updateWindows(dt, diggers) {
+      for (const w of windows) {
+        const near = diggers.some((q) => Math.hypot(q.x - w.wd.x, q.z - (w.wd.z + 0.8)) < 2.6);
+        w.k += ((near ? 1 : 0) - w.k) * Math.min(1, dt * 5);
+        w.shutter.position.y = 1.5 + w.k * 0.86;
+      }
+    },
   };
 }
 

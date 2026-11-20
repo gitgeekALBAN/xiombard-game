@@ -265,6 +265,7 @@ export class View {
     this.sky.material.uniforms.uTime.value = this.time;
     this.ghosts.update(dt, this.camera);
     FACE_T.value = this.time; // the faces' mood animations (tongue, sweat, trembling pupils)
+    this.world.morgue.updateWindows(dt, this.order.filter((e) => e.kind === 'digger').map((e) => e.groups[0].position)); // the hand-in windows open for whoever comes up
     const a = 1 - Math.exp(-dt * 16);
     const me = this.ents.get(this.myId);
     const meState = me && this.state ? this.state.players.find((p) => p.id === this.myId) : null;
@@ -286,10 +287,10 @@ export class View {
         const own = e === me && fp && !this.debugCam;
         e.crew.mesh.visible = !own;
         e.crew.update(false);
-        // a chapel charm stands upright in the mitten whatever the arm does: its stick follows the body's up, the disc
-        // faces where the digger faces (the arm's frame turns with every pose, the body's does not)
+        // the chapel's charm stack stands upright in the mitten whatever the arm does, discs facing where the digger faces
+        // (the arm's frame turns with every pose, the body's does not)
         const ch = e.kind === 'digger' && e.groups[CP.armR].userData.charm;
-        if (ch && ch.visible) ch.quaternion.copy(e.groups[CP.armR].quaternion).invert().multiply(e.groups[0].quaternion);
+        if (ch && ch.visible) { ch.quaternion.copy(e.groups[CP.armR].quaternion).invert().multiply(e.groups[0].quaternion); ch.userData.update(dt); }
       }
       if (e.shadow) {
         const c = e.groups[0].position; // coffin, pelvis or belly

@@ -497,6 +497,7 @@ export class Sim {
   // ---------- grabbing ----------
   findGrab(p) {
     const hand = this.handPoint(p, 1.0);
+    const low = this.handPoint(p, 0.3, 0.65); // small things on the floor (a note, a bag) are picked up with a stoop
     let best = null, bestD = 1.15;
     const tmp = new CANNON.Vec3(), loc = new CANNON.Vec3();
     // a body resting in an upright coffin is left alone: you grab the coffin (tip it over to get them out)
@@ -524,11 +525,11 @@ export class Sim {
         if (d < bestD) { bestD = d; best = { body: b, ent: e, pivot: loc.clone() }; }
       } else if (e.kind === 'item') {
         if (this.holders(e)) continue;
-        const d = e.body.position.distanceTo(hand) - e.body.grabR;
+        const d = Math.min(e.body.position.distanceTo(hand), e.body.position.distanceTo(low)) - e.body.grabR;
         if (d < bestD) { bestD = d; best = { body: e.body, ent: e, pivot: new CANNON.Vec3() }; }
       } else if (e.kind === 'note') {
         if (this.holders(e)) continue;
-        const d = e.body.position.distanceTo(hand) - e.body.grabR + 0.1; // a little less eager than a body: it is small and often lies on one
+        const d = Math.min(e.body.position.distanceTo(hand), e.body.position.distanceTo(low)) - e.body.grabR + 0.1; // a little less eager than a body: it is small and often lies on one
         if (d < bestD) { bestD = d; best = { body: e.body, ent: e, pivot: new CANNON.Vec3() }; }
       }
     }
@@ -1178,7 +1179,7 @@ export class Sim {
     const nb = MORGUE.noDelivery, pos = [nb.x, nb.y + 0.6, MORGUE.z1 - 0.4];
     if (this.phase !== 'day') { this.emit('toast', { text: 'No hearse comes at night anyway', pos }); return; }
     this.noDelivery = !this.noDelivery;
-    this.emit('sfx', { name: this.noDelivery ? 'honk' : 'bell', pos });
+    this.emit('sfx', { name: 'buzzer', pos }); // a low buzzer either way
     this.emit('toast', { text: this.noDelivery ? 'NO MORE DELIVERIES TODAY. Tomorrow brings twice as many!' : 'Deliveries are back on for today', pos, big: true });
   }
 

@@ -111,7 +111,9 @@ export const ODDITIES = [
 export const ODD_CHANCE = 0.3; // per slot in a delivery, after the first body
 export const WINDOW_LABEL = { lost: 'Lost & Found', police: 'Police!' };
 // a delivery note: a stiff card, half sizes in meters (physics box and the drawn sheet)
-export const NOTE = { hx: 0.15, hy: 0.006, hz: 0.105 };
+// The drawn card is thin (sheet); the physics box is thicker (hy) so it rests a little above floors and grass and never
+// sinks into them visually; the sheet is drawn on the box's top face.
+export const NOTE = { hx: 0.15, hy: 0.022, hz: 0.105, sheet: 0.008 };
 export const candleLabel = (c) => (c ? `${c.n} ${(CANDLES.find((k) => k.id === c.c) || CANDLES[0]).label.toLowerCase()}` : 'none');
 export const NAIL_COST = 4; // nails to hammer one coffin lid shut
 

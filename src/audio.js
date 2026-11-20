@@ -62,6 +62,8 @@ function hum(vol, len = 3.1) {
 
 const SOUNDS = {
   hum: (v) => hum(0.32 * v),
+  // the big red NO DELIVERY button: a low factory buzzer
+  buzzer: (v) => { tone('sawtooth', 78, 74, 0.9, 0.22 * v); tone('square', 58, 56, 0.9, 0.12 * v); noise(0.9, 220, 0.06 * v); },
   // a grave's ghost: happy, a rising sparkly arpeggio; sad, a long wavering "wooo" sliding down
   ghostHappy: (v) => { [523, 659, 784, 1046, 1318].forEach((f, i) => tone('sine', f, f * 1.02, 0.35, 0.12 * v, i * 0.09)); },
   ghostSad: (v) => { tone('sine', 520, 260, 1.6, 0.16 * v); tone('triangle', 515, 255, 1.6, 0.06 * v, 0.05); },

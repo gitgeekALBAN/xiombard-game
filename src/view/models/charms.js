@@ -59,16 +59,35 @@ export function charmTexture(id) {
   return tex;
 }
 
-// A charm on a stick, as held at the chapel: the stick runs along +y from the origin (the mitten), the disc on top
-// faces +z. Materials: the face uses the signs' settings (map, alpha test, fog); the stick is plain wood.
-const disc = new THREE.CylinderGeometry(0.1, 0.1, 0.018, 20).rotateX(Math.PI / 2).translate(0, 0.42, 0);
-const stick = new THREE.BoxGeometry(0.022, 0.36, 0.022).translate(0, 0.18, 0);
+// The chapel's charms as held: a stack of four discs fanned in the right mitten, the one in use in front. Picking
+// another (wheel, keys, a tap) shuffles the stack: the front disc slides to the back and the chosen one comes forward.
+// The stack sits on the origin (the mitten), discs facing +z. userData.setCharm(id) picks, userData.update(dt) animates.
+// Materials: each face uses the signs' settings (map, alpha test, fog); the rims are plain wood.
+const DISC = new THREE.CylinderGeometry(0.1, 0.1, 0.016, 22).rotateX(Math.PI / 2);
+const RIM = new THREE.TorusGeometry(0.1, 0.008, 6, 22);
 const wood = new THREE.MeshBasicMaterial({ color: '#5a3a2a', fog: true });
-export function buildCharmStick() {
-  const mat = new THREE.MeshBasicMaterial({ map: charmTexture(RITES[0].id), alphaTest: 0.5, fog: true });
+export function buildCharmStack() {
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(stick, wood), new THREE.Mesh(disc, mat));
-  let shown = RITES[0].id;
-  g.userData.setCharm = (id) => { if (id !== shown) { shown = id; mat.map = charmTexture(id); } };
+  const discs = RITES.map((r) => {
+    const d = new THREE.Group();
+    d.add(new THREE.Mesh(DISC, new THREE.MeshBasicMaterial({ map: charmTexture(r.id), alphaTest: 0.5, fog: true })), new THREE.Mesh(RIM, wood));
+    g.add(d);
+    return d;
+  });
+  let front = 0;
+  const slot = (k, out) => out.set(0.028 * k, 0.11 - 0.022 * k, 0.03 - 0.022 * k); // fanned back and to the side
+  discs.forEach((d, i) => { slot(i, d.position); d.rotation.z = -0.16 * i; });
+  g.userData.setCharm = (id) => { const i = RITES.findIndex((r) => r.id === id); if (i >= 0) front = i; };
+  const _p = new THREE.Vector3();
+  g.userData.update = (dt) => {
+    const k = Math.min(1, dt * 12);
+    discs.forEach((d, i) => {
+      const n = (i - front + discs.length) % discs.length; // place in the stack: 0 in front
+      slot(n, _p);
+      d.position.lerp(_p, k);
+      d.rotation.z += (-0.16 * n - d.rotation.z) * k;
+      d.scale.setScalar(1 - 0.06 * n);
+    });
+  };
   return g;
 }
