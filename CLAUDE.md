@@ -1,9 +1,9 @@
-# XIOMBARD — project context for AI agents and teammates
+# GraveQuota — project context for AI agents and teammates
 
 Read this before changing anything. It records the decisions the team has already made.
 
 ## What this is
-**XIOMBARD: Night Shift** — a co-op ragdoll gravedigging game ("friendslop") with a day/night cycle.
+**GraveQuota** (formerly XIOMBARD: Night Shift) — a co-op ragdoll gravedigging game ("friendslop") with a day/night cycle.
 By day a hearse parks at the morgue's hatch. The morgue is a long office with work stations, and the laying-to-rest
 chain runs through them: take the body in at the hatch onto the intake table (E) and read its delivery note (name +
 outfit) → lay it on the registry desk, E writes its name tag → lay it on the dressing table, E opens the outfit choice

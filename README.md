@@ -1,4 +1,4 @@
-# XIOMBARD: Night Shift
+# GraveQuota
 
 A co-op ragdoll gravedigging game for the browser. By day the hearse parks at the morgue: take each body in through the
 hatch, read its delivery note, carry it from station to station — the registry desk writes its name tag, the dressing
