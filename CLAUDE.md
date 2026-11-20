@@ -72,7 +72,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - The coffin's inner width must stay wider than the widest belly `corpses.js` can generate (0.74 m today), or bodies cannot lie in it.
 - Assists are deliberate: a body dropped at an open coffin is laid inside; a coffin dropped by a dug grave is aligned and falls in.
 - **Closing a lid turns the passenger into data** (`coffin.passenger`): the ragdoll is removed and the coffin weighs for both. `coffinContents()` is null for a closed coffin; burial reads the passenger. A dug-up grave gives the body back as it was buried (`plot.who`).
-- Bodies cannot be grabbed off the hearse: its cage stays solid and the grab button at the hatch (`morgueKey`) puts the next one on the intake table.
+- Bodies cannot be grabbed off the hearse: its cage stays solid and the grab button at the hatch (`morgueKey`) puts the next one on the intake table — only when that table is clear; with a body lying there the same button picks it up. Each station action (hatch, name tag, opening the outfit choice) takes one press; the next press picks the body up.
 - The fence is not a static collider: each of `FENCE_SECTIONS` has its own bodies in `sim.fence`, removed when the section breaks and built again on repair.
 - `afterStep` clamps prop speeds as a safety net against solver blow-ups.
 - Anything on its feet at night has a walker in `e.z` (a steered capsule + a pose). A risen corpse keeps its ragdoll bodies as kinematic ghosts that follow the pose, so `e.bodies[...]` stays valid everywhere; a whack turns them dynamic again.

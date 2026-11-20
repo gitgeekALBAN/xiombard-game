@@ -842,6 +842,7 @@ export class Sim {
     const tb = MORGUE.table;
     this.layOn(body, tb, this.bodiesOn(tb).filter((e) => e !== body).length);
     body.greeted = true;
+    this.truck.t = this.time; // the driver waits again for the next one (see the 'wait' state in the truck update)
     this.emit('sfx', { name: 'thud', pos: [tb.x, tb.top, tb.z] });
     this.emit('toast', { text: `Note: ${body.name}, ${outfitLabel(body.suit).toLowerCase()}`, pos: [tb.x, tb.top + 1.1, tb.z] });
     return true;
@@ -898,17 +899,22 @@ export class Sim {
   }
   // E in the morgue: take a body in at the hatch, write the name tag at the registry desk, choose an outfit at the
   // dressing table. False when none of that applies, so the usual grab / shovel swing happens.
+  // The next body comes through the hatch only onto a clear intake table: with one lying there, E picks it up.
+  // With the outfit choice open, E picks the body up too (the choice closes), so nobody is stuck dressing them.
   morgueKey(p) {
-    if (this.truck.state === 'wait' && this.atHatch(p) && this.acceptBody()) return true;
+    if (this.truck.state === 'wait' && this.atHatch(p) && !this.bodiesOn(MORGUE.table).length && this.acceptBody()) return true;
     const reg = this.stationBody(p, MORGUE.desk);
     if (reg && reg.tag !== reg.name) { this.register(reg); return true; }
     const dr = this.stationBody(p, MORGUE.dress);
-    if (dr && dr.outfit === 'shroud') { this.openWardrobe(p, dr); return true; }
+    if (dr && dr.outfit === 'shroud' && !p.choose) { this.openWardrobe(p, dr); return true; }
     return false;
   }
   morgueHint(p) {
     if (p.choose) return 'Pick an outfit: keys 1-5 · Q to cancel';
-    if (this.truck.state === 'wait' && this.atHatch(p) && this.corpsesInBed().length) return 'E: take the body in through the hatch';
+    if (this.truck.state === 'wait' && this.atHatch(p) && this.corpsesInBed().length) {
+      const on = this.bodiesOn(MORGUE.table)[0];
+      return on ? `E: pick up ${on.name} · the next one comes in when the table is clear` : 'E: take the body in through the hatch';
+    }
     if (this.nearStation(p, MORGUE.desk)) {
       const reg = this.stationBody(p, MORGUE.desk);
       if (!reg) return 'Registry desk: lay a body on it to write its name tag';
