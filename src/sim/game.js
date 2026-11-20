@@ -1592,7 +1592,8 @@ export class Sim {
       risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
-        choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
+        choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open
+        sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
         grip: e.grab && !(e.grab.coffin && this.holders(e.grab.ent) > 1) ? +Math.max(0, e.grab.grip).toFixed(2) : -1, // two on a coffin: nothing to lose
       })),
       ev,
