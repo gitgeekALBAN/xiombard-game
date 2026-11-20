@@ -147,6 +147,17 @@ vec4 crewMood(vec2 f, float s, float lw) {
   return vec4(ink, white, 0.0, blush);
 }
 
+// The crew's little button nose, painted like the rest of the face: a slightly darker oval, an ink curve along its
+// underside and a soft highlight on top. Added to whatever face r is (any mood).
+vec4 withNose(vec4 r, vec2 f, float s, float lw) {
+  vec2 q = f - vec2(0.0, -0.05) * s;
+  float nd = ellipse(q, vec2(0.13, 0.11) * s);
+  float inside = smoothstep(0.06, -0.06, nd);
+  float under = stroke(abs(nd) * 0.12 * s, lw * 0.85) * smoothstep(0.02 * s, -0.04 * s, q.y);   // the ink only underneath
+  float shine = smoothstep(0.045 * s, 0.02 * s, length(q - vec2(-0.04, 0.035) * s));
+  return vec4(max(r.x, under), max(r.y * (1.0 - inside), shine * 0.7), max(r.z, 0.18 * inside), r.w * (1.0 - inside));
+}
+
 // The face is painted onto the front of the head. Returns ink (x), eye white (y), shade (z), blush (w).
 vec4 faceAt(vec3 p, vec4 uHeadC) {
   float s = uHeadC.w; vec2 f = p.xy - uHeadC.xy;
@@ -160,7 +171,7 @@ vec4 faceAt(vec3 p, vec4 uHeadC) {
     return vec4(ink, white, shade, 0.0);
   }
   if (p.z < uHeadC.z) return vec4(0.0);
-  if (uFace < 0.5 && uMood > 0.5) return crewMood(f, s, lw); // working, straining or fighting (see crewMood)
+  if (uFace < 0.5 && uMood > 0.5) return withNose(crewMood(f, s, lw), f, s, lw); // working, straining or fighting (see crewMood)
   if (uFace < 0.5) { // calm: closed happy eyes, a lopsided smile, rosy cheeks
     for (int i = 0; i < 2; i++) {
       vec2 q = f - vec2(i == 0 ? -0.4 : 0.4, 0.36) * s;
@@ -186,7 +197,7 @@ vec4 faceAt(vec3 p, vec4 uHeadC) {
       if (seg(f, a, b) < 0.07 * s) ink = max(ink, stroke(tk, lw * 0.9));
     }
   }
-  return vec4(ink, white, shade, blush);
+  return uFace < 0.5 ? withNose(vec4(ink, white, shade, blush), f, s, lw) : vec4(ink, white, shade, blush);
 }
 
 void main() {

@@ -147,9 +147,7 @@ export function humanPieces(k, q = 1) {
     if (pom > 0) out.push({ mesh: set(place(ball(pom, pom, pom, 10, 6), (x, y, z) => [x, y, z], 0, ch + pom * 0.55, 0)), mat: MAT.fluff, color: col.pom || col.hat, bone: 1 }); // the fluff is paint
   }
 
-  if (!k.face) { // the living have a little button of a nose
-    out.push({ mesh: place(ball(rH * 0.17, rH * 0.15, rH * 0.24, 8, 5), (x, y, z) => [x, y, z], ho[0], yH - rH * 0.1 + ho[1], rH * zs * 0.98 + ho[2]), mat: MAT.nose, color: col.nose, bone: 1 });
-  }
+  // the crew's nose is painted with the face (withNose in material.js), not modeled: the face stays flat ink and paint
   // Hair and a shawl are paint on the head and the shoulders (`uHair`, `uWrap` in material.js): they lie flat on
   // the body, so modeling them would only add triangles. A bun sticks out, so it is a small ball.
   if (k.hair && k.bun) out.push({ mesh: place(ball(rH * 0.42, rH * 0.42, rH * 0.42, 8, 5), (x, y, z) => [x, y, z], 0, yH + rH * 0.25, -rH * 1.05), mat: MAT.hair, color: col.hair, bone: 1 });
