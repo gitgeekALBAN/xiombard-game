@@ -10,12 +10,37 @@ const $ = (id) => document.getElementById(id);
 // which build is this? Shown at the bottom edge, on the menu and in the game (see build-info.js); the middle of the
 // bottom edge is free on phones too, between the stick and the buttons
 const BUILD = typeof __BUILD__ === 'string' ? __BUILD__ : 'dev build';
+const BUILD_N = typeof __BUILD_N__ === 'number' ? __BUILD_N__ : 0;
 {
   const el = document.createElement('div');
   el.id = 'build';
   el.textContent = BUILD;
   el.style.cssText = 'position:fixed;z-index:3;left:50%;transform:translateX(-50%);bottom:calc(4px + env(safe-area-inset-bottom, 0px));font:11px/1.2 system-ui,sans-serif;color:#efe6d6;opacity:.62;text-shadow:1px 1px 0 #000;pointer-events:none;letter-spacing:.02em;white-space:nowrap';
   document.body.appendChild(el);
+  // A newer build out? build.json sits next to index.html on the web host (written by build-info.js). Then the label
+  // turns into a button: a tap fetches the page past the browser cache and reloads (what Ctrl+Shift+R does).
+  // Not on the dev server or from a single file on disk: there is no build.json, so the check stays quiet.
+  const hardReload = () => {
+    const go = () => { try { location.reload(); } catch { /* nothing to do */ } };
+    try { fetch(location.href.split('#')[0], { cache: 'reload' }).then(go, go); setTimeout(go, 2500); } catch { go(); }
+  };
+  const checkBuild = () => {
+    if (!BUILD_N || el.dataset.upd || !/^https?:$/.test(location.protocol)) return;
+    fetch(`./build.json?t=${Date.now()}`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((j) => {
+      if (!j || !(+j.n > BUILD_N)) return;
+      el.dataset.upd = '1';
+      el.textContent = `build ${BUILD_N} → ${j.n} is out · tap to update`;
+      el.title = 'Reloads the page with the new build (a game in progress ends)';
+      Object.assign(el.style, { pointerEvents: 'auto', cursor: 'pointer', opacity: '1', color: '#fff', background: '#b0401a',
+        padding: '3px 10px', borderRadius: '7px', font: '700 12px/1.2 system-ui,sans-serif', textShadow: 'none' });
+    }).catch(() => { /* offline or no build.json */ });
+  };
+  // keep the tap to itself: the canvas would grab the mouse, the touch zones would start a stick
+  for (const ev of ['pointerdown', 'mousedown', 'touchstart']) el.addEventListener(ev, (e) => e.stopPropagation());
+  el.addEventListener('click', (e) => { e.stopPropagation(); if (el.dataset.upd) { el.textContent = 'updating…'; hardReload(); } });
+  checkBuild();
+  setInterval(checkBuild, 90000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) checkBuild(); });
 }
 const view = new View(document.body);
 const canvas = view.renderer.domElement;

@@ -81,7 +81,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 ## Workflow
 - `npm install`, `npm run dev` (port 5173), `npm run build` must pass before pushing.
 - `npm run build:single` packs the game into one self-contained html file (`dist-single/`): it runs from disk in any browser, so it can be sent to anyone.
-- Every build carries a label at the bottom edge of the screen: `build <number of commits> · <commit> · <time>` (`build-info.js`). Commit first, then build, so the number names the commit; a `+` after the number means uncommitted changes went in.
+- Every build carries a label at the bottom edge of the screen: `build <number of commits> · <commit> · <time>` (`build-info.js`). Commit first, then build, so the number names the commit; a `+` after the number means uncommitted changes went in. The build also writes `build.json` next to `index.html`; a running game checks it every 90 s and when its tab comes back, and if a newer build is out the label turns into a red "tap to update" button that reloads past the browser cache (`checkBuild` in `main.js`).
 - Debug handle on the host: `window.__xiom = { sim, view, look, bots }` — scripted tests drive `sim.step()` / `bots.update()` directly.
 - Branch from `main`, open a PR, one review, merge. Push to `main` auto-deploys via `.github/workflows/deploy.yml`.
 - Keep the page working at phone width; check FPS on a mid-range laptop before merging heavy shaders.
