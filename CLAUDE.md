@@ -42,9 +42,9 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - Text on in-game objects (e.g. headstone names) is drawn into a canvas at runtime — that counts as code-generated.
 
 ## Stack and layout
-- `three`, `cannon-es` (physics), `peerjs` (WebRTC P2P) from npm — no CDN imports. `vite.config.js` uses `base: './'`.
+- `three`, `cannon-es` (physics), `trystero` (WebRTC P2P, Nostr signaling) from npm — no CDN imports. `vite.config.js` uses `base: './'`.
 - `src/main.js` — menu, input, host/guest session wiring, frame loop.
-- `src/net.js` — PeerJS rooms: 4-letter code → peer id `xiombard-gy-<CODE>`.
+- `src/net.js` — co-op rooms over Trystero: the 4-letter code is the room.
 - `src/sim/game.js` — **host-only** simulation: cannon-es world, ragdolls, grabbing/grip, digging, truck, scoring.
 - `src/view/view.js` — renders entities from transform snapshots (same path for host and guests), plots, camera, labels.
 - `src/view/models.js` — every mesh model built from primitives in code (coffins, truck, headstones, trees, the shovel).
@@ -70,8 +70,8 @@ Live: https://gitgeekalban.github.io/xiombard-game/
   Host→guest `welcome`, `ents` (entity list, sent when `sim.version` changes), `snap` (Float32Array of part transforms + small JSON state + events).
 - Every entity is "N parts × (pos, quat)": every character 6 (see `CP` in `shared/crew.js`), coffin 1, truck 1. **Never reorder `CP` or the `ZOMBIES` list** — they are the wire format. A body's look comes from its seed alone (`corpseRig(seed)`), so changing the generator changes every body for host and guests alike.
 - Entity descriptors also carry `outfit`, `tag` (bodies) and `lid` (coffins: 1 closed, 2 nailed); the view rebuilds a model in place when they change. The state snapshot carries `fence` (hp per section), `traps`, `nails`, `boards`, `buried`, and per player `choose` (the outfit choice is open) and `card`. The outfit pick travels in the input as a counter `pk` plus the outfit index `pv`, like the other one-shot actions.
-- Signaling: free PeerJS cloud broker. Networks that never link up directly (mobile data, carrier NAT, office Wi-Fi) need a TURN relay. PeerJS's built-in relays are dead (their host names no longer resolve), so ours goes in `TURN_ENDPOINT` / `TURN_SERVERS` in `net.js` (not set up yet). `?relay` forces every link through a relay, to test one. `?turn=turn:host:3478&tuser=..&tpass=..` adds a relay from the URL. The guest's status line narrates each join step and names the one that failed; the host gets a toast when someone knocks and when they could not get through (30 s). Local testing: run a PeerJS server on
-  port 9000 and open `?peerhost=127.0.0.1&peerport=9000`.
+- Finding each other: **Trystero** over public Nostr relays (`net.js`), the same way the team's car prototype connects: many independent relays, so one being down or blocked does not stop a game. The room is the 4-letter code (app id `gravequota-v1`). Everyone in a room links to everyone, but the game only talks host <-> guest: on a new link the host sends `hi` (with its build number), guests talk only to that peer, and a guest on a different build is told to reload. A snapshot goes as binary (`bin` action, the rest of the message as metadata), everything else as JSON (`msg`). `net.js` wraps each peer as a small connection (`send`, `on('data' | 'close')`) so `main.js` does not care how bytes travel.
+- Networks that never link up directly (mobile data, carrier NAT, office Wi-Fi) need a TURN relay; none is set up (`TURN_SERVERS` in `net.js`). `?relay` forces every link through a relay, to test one; `?turn=turn:host:3478&tuser=..&tpass=..` adds one from the URL. A wrong code is only known after the 30 s wait (Trystero cannot tell an empty room from an unreachable one); the guest's status line says which step it got to.
 - No host migration: if the host leaves, the game ends for guests.
 
 ## Physics gotchas (learned the hard way)

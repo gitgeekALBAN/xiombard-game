@@ -1,53 +1,58 @@
-import { Peer } from 'peerjs';
+import { joinRoom as tryJoin, selfId } from 'trystero';
 
-// Peer-to-peer co-op over WebRTC data channels (PeerJS).
-// The host's browser runs the simulation; guests send input and render snapshots.
-// Signaling uses the free PeerJS cloud broker by default. For local testing pass
-// ?peerhost=localhost&peerport=9000 and run `npx peerjs --port 9000`.
-const PREFIX = 'xiombard-gy-';
+// Peer-to-peer co-op over WebRTC data channels. The host's browser runs the whole simulation; guests send their input
+// and draw the snapshots the host sends back (see main.js). This file only finds the other browsers and carries the
+// messages.
+// Finding each other: Trystero over public Nostr relays (many independent servers, so one being down or blocked does not
+// stop a game), the same way the team's car prototype connects. A room is the 4-letter code. Everyone in a room links
+// to everyone, but the game only talks host <-> guest: the host says who it is ('hi'), guests talk to that peer only.
+const APP = 'gravequota-v1';
 const LETTERS = 'BCDFGHJKLMNPQRSTVWXZ';
+const BUILD_N = typeof __BUILD_N__ === 'number' ? __BUILD_N__ : 0; // a host and a guest on different builds must not mix
 
 // ---------- ICE: how two browsers find a way to each other ----------
-// STUN lets most home networks link up directly. Some networks never do (mobile data, carrier-grade NAT, office and
-// campus Wi-Fi): those need a TURN relay that forwards the traffic. PeerJS's own default relays are gone (their host
-// names no longer resolve), so the relay is ours to set. Fill ONE of these once the team has a TURN account:
-//  - TURN_ENDPOINT: a URL that returns ICE servers as JSON, fetched on Host/Join. Metered:
-//    https://<app>.metered.live/api/v1/turn/credentials?apiKey=<key> (an array). A Cloudflare Worker that mints
-//    short-lived Cloudflare TURN credentials returns { iceServers: {...} }; both shapes are accepted.
-//  - TURN_SERVERS: fixed servers, [{ urls: ['turn:host:3478', ...], username, credential }].
-// Anything here ends up in the public page, so prefer the endpoint with short-lived credentials.
-// Testing: ?turn=turn:host:3478&tuser=..&tpass=.. adds a relay; ?relay sends every link through a relay (to check it).
-export const TURN_ENDPOINT = '';
+// Trystero brings its own STUN servers, which let most home networks link up directly. Some networks never do (mobile
+// data, carrier-grade NAT, office Wi-Fi): those need a TURN relay that forwards the traffic. None is set up yet; fill
+// TURN_SERVERS ([{ urls: ['turn:host:3478', ...], username, credential }]) once the team has a TURN account. Anything
+// here ends up in the public page. Testing: ?turn=turn:host:3478&tuser=..&tpass=.. adds one from the URL; ?relay sends
+// every link through a relay (to check it).
 export const TURN_SERVERS = [];
-const STUN = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }];
-
-let iceCache = null;
-function iceConfig() {
-  if (iceCache) return iceCache;
-  const q = new URLSearchParams(location.search);
-  const servers = [...STUN, ...TURN_SERVERS];
-  if (q.get('turn')) servers.push({ urls: q.get('turn').split(','), username: q.get('tuser') || '', credential: q.get('tpass') || '' });
-  const fetched = !TURN_ENDPOINT ? Promise.resolve([]) : Promise.race([
-    fetch(TURN_ENDPOINT).then((r) => r.json()).then((j) => {
-      const list = Array.isArray(j) ? j : j && j.iceServers ? [].concat(j.iceServers) : [];
-      return list.filter((s) => s && s.urls);
-    }),
-    new Promise((res) => setTimeout(() => res([]), 4000)), // a slow endpoint must not hold the game up
-  ]).catch(() => []);
-  iceCache = fetched.then((turn) => {
-    const all = [...servers, ...turn];
-    return { iceServers: all, iceTransportPolicy: q.has('relay') ? 'relay' : 'all', relays: all.filter((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u))).length };
-  });
-  return iceCache;
+function roomConfig() {
+  const q = new URLSearchParams(location.search), turn = [...TURN_SERVERS];
+  if (q.get('turn')) turn.push({ urls: q.get('turn').split(','), username: q.get('tuser') || '', credential: q.get('tpass') || '' });
+  return { appId: APP, turnConfig: turn, ...(q.has('relay') ? { rtcConfig: { iceTransportPolicy: 'relay' } } : {}), relays: turn.length };
 }
 
-async function peerOptions() {
-  const q = new URLSearchParams(location.search);
-  const host = q.get('peerhost');
-  const { iceServers, iceTransportPolicy } = await iceConfig();
-  const opts = { debug: 1, config: { iceServers, iceTransportPolicy } };
-  if (host) Object.assign(opts, { host, port: +(q.get('peerport') || 9000), path: '/', secure: q.get('peersecure') === '1' });
-  return opts;
+// One peer as the game sees it: a little "connection" with send(msg), on('data' | 'close', fn), open and peerConnection,
+// so main.js does not care how the bytes travel. A message carrying a binary snapshot (msg.buf, an ArrayBuffer) goes as
+// binary with the rest as metadata; everything else goes as JSON.
+function link(room, actions, peerId) {
+  const handlers = { data: [], close: [] };
+  const conn = {
+    peer: peerId, open: true,
+    get peerConnection() { return room.getPeers()[peerId]; },
+    on(ev, fn) { (handlers[ev] || (handlers[ev] = [])).push(fn); return conn; },
+    send(msg) {
+      if (!conn.open) return;
+      const p = msg && msg.buf instanceof ArrayBuffer
+        ? actions.bin.send(msg.buf, { target: peerId, metadata: { ...msg, buf: undefined } })
+        : actions.msg.send(msg, { target: peerId });
+      if (p && p.catch) p.catch(() => {});
+    },
+    _data(msg) { for (const f of handlers.data) f(msg); },
+    _close() { if (!conn.open) return; conn.open = false; for (const f of handlers.close) f(); },
+  };
+  return conn;
+}
+function wire(room) {
+  const actions = { msg: room.makeAction('msg'), bin: room.makeAction('bin'), hi: room.makeAction('hi') };
+  const links = new Map();
+  actions.msg.onMessage = (data, { peerId }) => links.get(peerId)?._data(data);
+  actions.bin.onMessage = (data, { peerId, metadata }) => {
+    const buf = data instanceof ArrayBuffer ? data : ArrayBuffer.isView(data) ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) : null;
+    if (buf) links.get(peerId)?._data({ ...(metadata || {}), buf });
+  };
+  return { actions, links };
 }
 
 // Is a link going directly or through a relay? ('direct' | 'relay' | '?') For the status line and for tests.
@@ -64,50 +69,51 @@ export async function routeOf(conn) {
 
 export const randomCode = () => Array.from({ length: 4 }, () => LETTERS[Math.floor(Math.random() * LETTERS.length)]).join('');
 
-// Resolves with { peer, code } once the room is registered with the broker.
-// onGuest(conn) fires as soon as someone starts knocking, before the link is up (see onGuest in main.js).
-export async function hostRoom(onGuest, tries = 4) {
-  const opts = await peerOptions();
-  return new Promise((resolve, reject) => {
-    const code = randomCode();
-    const peer = new Peer(PREFIX + code, opts);
-    peer.on('open', () => resolve({ peer, code }));
-    peer.on('connection', (conn) => onGuest(conn));
-    // keep the room joinable if the link to the signaling broker drops
-    peer.on('disconnected', () => { if (!peer.destroyed) setTimeout(() => { try { peer.reconnect(); } catch { /* destroyed meanwhile */ } }, 1500); });
-    peer.on('error', (err) => {
-      if (err.type === 'unavailable-id' && tries > 0) { peer.destroy(); hostRoom(onGuest, tries - 1).then(resolve, reject); }
-      else if (err.type !== 'peer-unavailable') reject(err); // after 'open' this only matters for the first call
-    });
-  });
+// Opens a room and resolves with { room, code } right away. onGuest(conn) fires for every guest whose link comes up;
+// conn closes when they leave.
+export async function hostRoom(onGuest) {
+  const code = randomCode(), cfg = roomConfig();
+  const room = tryJoin(cfg, code);
+  const { actions, links } = wire(room);
+  room.onPeerJoin = (peerId) => {
+    actions.hi.send({ host: true, build: BUILD_N }, { target: peerId }).catch(() => {});
+    const conn = link(room, actions, peerId);
+    links.set(peerId, conn);
+    onGuest(conn);
+  };
+  room.onPeerLeave = (peerId) => { links.get(peerId)?._close(); links.delete(peerId); };
+  return { room, code, selfId };
 }
 
-// Resolves with an open DataConnection to the host. onStage(text) narrates the steps for the status line; the
-// error message says which step failed, so a player (or whoever they send a screenshot to) knows what to try.
+// Resolves with { room, conn } once the host of `code` has answered. onStage(text) narrates the steps for the status
+// line; the error says which step failed and what to try.
 export async function joinRoom(code, onStage = () => {}) {
   code = code.toUpperCase();
-  onStage('Finding the matchmaker...');
-  const opts = await peerOptions();
-  const { relays } = await iceConfig();
+  const cfg = roomConfig();
+  onStage(`Looking for game ${code}...`);
+  const room = tryJoin(cfg, code);
+  const { actions, links } = wire(room);
   return new Promise((resolve, reject) => {
-    const peer = new Peer(opts);
-    let stage = 'broker', settled = false;
-    const fail = (msg) => { if (settled) return; settled = true; clearTimeout(timer); try { peer.destroy(); } catch { /* gone */ } reject(new Error(msg)); };
-    const unreachable = () => `Couldn't reach the host of ${code}: your two networks won't link up directly`
-      + (relays ? ' and the relay did not help.' : ' (no relay server is set up yet).') + ' A phone hotspot on one side often works.';
-    const timer = setTimeout(() => fail(stage === 'broker' ? "Can't reach the matchmaking server. Check your connection and try again." : unreachable()), 30000);
-    peer.on('open', () => {
-      stage = 'knock';
-      onStage(`Knocking on the crypt door of ${code}...`);
-      const conn = peer.connect(PREFIX + code, { reliable: true });
-      conn.on('iceStateChanged', (s) => {
-        if (s === 'checking') { stage = 'reach'; onStage(`The host of ${code} answered, finding a way through...`); }
-      });
-      conn.on('open', () => { if (settled) return; settled = true; clearTimeout(timer); onStage('Connected, joining...'); resolve({ peer, conn }); });
-      conn.on('error', (e) => fail(e.type === 'negotiation-failed' ? unreachable() : e.message || String(e)));
-    });
-    peer.on('error', (err) => fail(err.type === 'peer-unavailable' ? `No game with code ${code}. Check the code; the host has to keep the game open.`
-      : err.type === 'network' || err.type === 'server-error' || err.type === 'socket-error' ? "Can't reach the matchmaking server. Check your connection and try again."
-        : err.message || String(err)));
+    let settled = false, seen = 0;
+    const fail = (msg) => { if (settled) return; settled = true; clearTimeout(timer); room.leave().catch(() => {}); reject(new Error(msg)); };
+    const timer = setTimeout(() => fail(seen
+      ? `Found game ${code}, but the host never answered. Ask them to reload and host again.`
+      : `Couldn't find or reach game ${code}. Check the code (the host has to keep the game open). If it is right, your networks won't link up`
+        + (cfg.relays ? ' even through the relay.' : '.') + ' A phone hotspot on one side often works.'), 30000);
+    room.onPeerJoin = () => { seen++; if (!settled) onStage(`Found game ${code}, saying hello...`); };
+    actions.hi.onMessage = (data, { peerId }) => {
+      if (settled || !data || !data.host) return;
+      if (data.build && BUILD_N && data.build !== BUILD_N) {
+        fail(`The host is on build ${data.build}, you are on build ${BUILD_N}. Both of you reload the page (Ctrl+Shift+R).`);
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      const conn = link(room, actions, peerId);
+      links.set(peerId, conn);
+      room.onPeerLeave = (id) => { if (id === peerId) conn._close(); };
+      onStage('Connected, joining...');
+      resolve({ room, conn });
+    };
   });
 }

@@ -176,16 +176,8 @@ async function host() {
   }
 }
 
-// Someone started knocking: say so right away (the link may take a few seconds, or never come up on some networks),
-// and say so again if it fails, so the host isn't left wondering where their friend is.
+// A guest's link is up (net.js): they join the game once they say hello.
 function onGuest(conn) {
-  view.toast('Someone is knocking at the gate...', [0, 3, 8], true);
-  // with no route at all the link never even reports 'failed': give up on the same 30 s the guest waits
-  let told = false;
-  const cantLink = () => { if (told || conn.open) return; told = true; view.toast("A friend couldn't get through: your networks won't link up", [0, 3, 8], true); };
-  const giveUp = setTimeout(cantLink, 31000);
-  conn.on('open', () => clearTimeout(giveUp));
-  conn.on('iceStateChanged', (s) => { if (s === 'failed') { clearTimeout(giveUp); cantLink(); } });
   conn.on('data', (msg) => {
     if (msg.t === 'hello') {
       if ([...guests.values()].length >= 5) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 500); return; }
