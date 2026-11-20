@@ -2,7 +2,7 @@ import { View } from './view/view.js';
 import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom, routeOf } from './net.js';
 import { unlockAudio } from './audio.js';
-import { touch, initTouch, isTouchDevice, goLandscape } from './touch.js';
+import { touch, initTouch, isTouchDevice, canTouch, setTouchMode, goLandscape } from './touch.js';
 import { OUTFITS, RITES, CANDLES, MAX_CANDLES } from './shared/layout.js';
 import { drawCharm } from './view/models/charms.js';
 import { createBots } from './sim/bots.js';
@@ -448,9 +448,23 @@ function whenReady(fn) {
   });
 }
 $('lost').onclick = () => location.reload();
-if (isTouchDevice()) {
+// Touch controls are built wherever a screen can be touched, but shown only on phones and tablets to begin with. On a
+// laptop with a touch screen the controls follow what is used: a mouse click hides them and grabs the pointer (the
+// invisible touch layer would otherwise eat every click, and the mouse never locks), a touch brings them back.
+if (canTouch()) {
   initTouch($('touch'), look, { grab: () => input.g++, throw: () => input.th++, flop: () => input.fl++ });
-  view.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  setTouchMode(isTouchDevice());
+  if (isTouchDevice()) view.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && touch.active) {
+      setTouchMode(false);
+      if (e.target.closest && e.target.closest('#touch')) e.stopPropagation(); // it was meant for the game, not the stick
+      if (playing) lockPointer();
+    } else if (e.pointerType === 'touch' && !touch.active) {
+      setTouchMode(true);
+      document.exitPointerLock?.();
+    }
+  }, { capture: true });
 }
 if (innerHeight < 520) $('help').classList.remove('open'); // keep short screens uncluttered
 const autoJoin = new URLSearchParams(location.search).get('join');

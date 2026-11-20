@@ -26,8 +26,20 @@ export function toggleFullscreen() {
   try { (document.exitFullscreen || document.webkitExitFullscreen).call(document)?.catch?.(() => {}); } catch { /* ignore */ }
 }
 
+// A phone or a tablet: the main pointer is a finger. (A laptop with a touch screen has a mouse or a touchpad as its
+// main pointer: it starts with the mouse controls, see canTouch / setTouchMode.)
 export function isTouchDevice() {
-  return matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  return matchMedia('(pointer: coarse)').matches;
+}
+// Can it be touched at all? Then the touch controls are built, and they come and go with what the player uses.
+export function canTouch() {
+  return isTouchDevice() || 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+}
+// Switch between the touch controls (stick, buttons, drag to look) and the mouse ones (pointer lock), on the fly.
+export function setTouchMode(on) {
+  touch.active = on;
+  document.body.classList.toggle('touch', on);
+  if (!on) { touch.mx = 0; touch.mz = 0; touch.run = false; touch.jump = false; touch.dig = false; }
 }
 
 // actions: { grab(), throw(), flop() } — one-shot callbacks; look: { yaw, pitch } mutated in place.
