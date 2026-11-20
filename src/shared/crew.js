@@ -165,7 +165,8 @@ const HOLD = [0.05, -0.42, 0.62], HOLD_POLE = [0.5, -0.6, -0.6];
 export function shovelHoldDir(rig) { solveArm(rig, 3, HOLD, HOLD_POLE); return _F.clone(); }
 const _lh = [0, 0, 0], _lp = [0, 0, 0], _rh = [0, 0, 0], _rp = [0, 0, 0];
 
-// Procedural digger animation, straight to part transforms. s = { speed, phase, t, carry, hold, dig, air, swing 0..1 }.
+// Procedural digger animation, straight to part transforms. s = { speed, phase, t, carry, hold, dig, air, swing 0..1,
+// charm (a chapel charm in hand), chant (seconds into the blessing, 0 = not humming) }.
 // carry: 'corpse' | 'coffin' (alone) | 'coffin2' (one of two); hold: two world points for the mittens.
 // Writes 7 floats per part (px,py,pz,qx,qy,qz,qw) into `out` from `off`. The legs hang from the root, so a leaning
 // body keeps its feet under it; head and arms ride on the body.
@@ -209,6 +210,11 @@ export function crewPose(rig, root, s, out, off = 0) {
       R[0][0] += -0.22 * up * (1 - down) + 0.5 * down * (1 - back);
       R[0][1] += 0.35 * up * (1 - down) - 0.5 * down * (1 - back); // wind up with the shoulder, follow through
       mix3(_lh, [0.45, -0.55, -0.15], up * (1 - back), _lh);
+    }
+    if (s.charm) { // a chapel charm on its stick held up in front; while the blessing is hummed it waves side to side
+      const wv = s.chant ? Math.sin(s.chant * 6) : 0, lift = s.chant ? 0.22 : 0;
+      mix3([0.05 + 0.32 * wv, 0.18 + lift, 0.82], _rh, 0, _rh); mix3([0.6, -0.6, -0.4], _rp, 0, _rp);
+      if (s.chant) { R[1][0] += 0.12 * Math.sin(s.chant * 3.1); R[0][2] += 0.05 * wv; } // nodding along to the tune
     }
     if (s.air) { mix3([0.75, 0.45, 0.05], _lh, 0, _lh); mix3([0, -1, -0.2], _lp, 0, _lp); }
   }

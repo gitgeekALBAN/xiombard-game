@@ -3,6 +3,7 @@ import { Character } from '../chars/index.js';
 import { CP, NCREW, shovelHoldDir } from '../shared/crew.js';
 import { keyLight } from '../shaders/toon.js';
 import { buildShovel } from './models/shovel.js';
+import { buildCharmStick } from './models/charms.js';
 
 // One character in the game (a digger of the crew, a zombie, a dog, or a body waiting to be buried): six empty
 // groups that follow the snapshot transforms (camera, labels and the shovel hang off them) and one low-poly mesh
@@ -28,6 +29,14 @@ export function buildCrew(rig, opts = {}) {
     shovel.quaternion.copy(mount);
     groups[CP.armR].add(shovel);
     groups[CP.armR].userData.shovel = shovel;
+    // a chapel charm on its stick, in the same mitten, shown instead of the shovel while held (see setState in view.js).
+    // The stick stands along the forearm's forward axis: with the arm held out in front it points up, the disc forward.
+    const charm = buildCharmStick();
+    charm.position.copy(hand);
+    charm.quaternion.setFromUnitVectors(Y, new THREE.Vector3(0, 0, 1));
+    charm.visible = false;
+    groups[CP.armR].add(charm);
+    groups[CP.armR].userData.charm = charm;
   }
 
   const pos = groups.map((g) => g.position), quat = groups.map((g) => g.quaternion);

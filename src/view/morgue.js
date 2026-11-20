@@ -5,7 +5,8 @@ import { spec, P, paintMat, paintAttrs, glowSprites } from '../shaders/paint-env
 import { lampsOn } from '../shaders/toon.js';
 import { PAL } from './palette.js';
 import { rng } from '../shared/rng.js';
-import { MORGUE, OUTFITS, morgueBoxes, TRAPS, FENCE_SECTIONS, FENCE_HP, fenceSectionAt } from '../shared/layout.js';
+import { MORGUE, OUTFITS, RITES, morgueBoxes, TRAPS, FENCE_SECTIONS, FENCE_HP, fenceSectionAt } from '../shared/layout.js';
+import { drawCharm } from './models/charms.js';
 
 // The morgue and what the night does to the yard.
 // The morgue's walls, floor and furniture go into the yard's static Batch (no draw calls of their own). The roof is
@@ -95,6 +96,18 @@ export function buildMorgue(scene, batch) {
   w(paintBox(sdw, 2.1, 0.07), spec('#33243a', { pat: P.door, p1: sdw / 2, p2: 1.05 }), M([Mg.x0 + 0.1, 1.05, sdc], [0, Math.PI / 2, 0]), 0.012);
   for (const z of sd) w(G.box, MAT.board, M([Mg.x0 + 0.12, 1.1, z], [0, 0, 0], [0.1, 2.2, 0.14]), 0.012);
   w(G.box, MAT.board, M([Mg.x0 + 0.12, 2.22, sdc], [0, 0, 0], [0.1, 0.14, sdw + 0.3]), 0.012);
+  // 5 the chapel corner by the south wall: a draped bier, two tall candles at its ends, the charm board on the wall
+  // (the charms themselves are painted on a quad below, with the signs' material)
+  const cp = Mg.chapel, rk = Mg.charmRack;
+  w(G.box, MAT.woodDark, M([cp.x, cp.top - 0.05, cp.z], [0, 0, 0], [cp.hx * 2, 0.1, cp.hz * 2]), 0.016);
+  w(G.box, spec('#4a2a5a', { pat: P.stripes, p1: 3 }), M([cp.x, cp.top - 0.2, cp.z + cp.hz + 0.01], [0, 0, 0], [cp.hx * 2, 0.3, 0.02]), 0);
+  legs(cp, cp.top - 0.1, MAT.woodDark, 0.09);
+  for (const sx of [-1, 1]) {
+    w(G.cyl6, MAT.iron, M([cp.x + sx * (cp.hx + 0.28), 0.55, cp.z + 0.1], [0, 0, 0], [0.03, 1.1, 0.03]), 0.008);
+    w(G.cyl6, spec('#efe6d0'), M([cp.x + sx * (cp.hx + 0.28), 1.2, cp.z + 0.1], [0, 0, 0], [0.05, 0.22, 0.05]), 0.008);
+  }
+  w(G.box, MAT.boardDark, M([rk.x, rk.y, rk.z + 0.03], [0, 0, 0.02], [1.08, 0.38, 0.05]), 0.012);
+
   // the clerk's office in the east end: crate of nails and boards, a desk with a lamp, filing cabinets, a bench
   const cr = Mg.crate;
   w(G.box, MAT.board, M([cr.x, cr.hy, cr.z], [0, 0.1, 0], [cr.hx * 2, cr.hy * 2, cr.hz * 2]), 0.016);
@@ -135,7 +148,7 @@ export function buildMorgue(scene, batch) {
   scene.add(roof);
 
   // lettering: one canvas, one sign per 128-pixel row: the two outside, then one over each station inside
-  const SIGNS = [['MORGUE', 64], ['DELIVERIES', 60], ['INTAKE', 60], ['REGISTRY', 58], ['DRESSING', 58], ['STOCKROOM', 54], ['OFFICE', 60]];
+  const SIGNS = [['MORGUE', 64], ['DELIVERIES', 60], ['INTAKE', 60], ['REGISTRY', 58], ['DRESSING', 58], ['STOCKROOM', 54], ['OFFICE', 60], ['CHAPEL', 60]];
   const CW = 512, CH = 128 * SIGNS.length, canvas = document.createElement('canvas');
   canvas.width = CW; canvas.height = CH;
   const g = canvas.getContext('2d'), tex = new THREE.CanvasTexture(canvas);
@@ -162,6 +175,7 @@ export function buildMorgue(scene, batch) {
   signAt(4, 1.2, north(Mg.dress.x + 1.25, 0.05));
   signAt(5, 1.3, M([Mg.x0 + 0.2, 2.55, sdc], [0, Math.PI / 2, -0.03]));
   signAt(6, 1.1, north(Mg.office[0].c[0], -0.02));
+  signAt(7, 1.2, M([Mg.chapel.x, 2.45, Mg.z0 + 0.2], [0, 0, -0.04])); // on the south wall over the bier, facing into the hall
   const textMat = new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: true });
   const textMesh = new THREE.Mesh(mergeGeometries(quads), textMat);
   textMesh.name = 'morgue-text';
@@ -189,6 +203,24 @@ export function buildMorgue(scene, batch) {
     ctex.needsUpdate = true;
   };
   paintCount('-');
+  // the charms on their board in the chapel: four discs painted on one strip, same material settings as the signs
+  {
+    const rc = document.createElement('canvas');
+    rc.width = 512; rc.height = 128;
+    const rg = rc.getContext('2d');
+    RITES.forEach((r, i) => {
+      const cx = 64 + i * 128;
+      rg.fillStyle = '#efe6d0'; rg.beginPath(); rg.arc(cx, 64, 54, 0, Math.PI * 2); rg.fill();
+      rg.strokeStyle = '#7a5f4a'; rg.lineWidth = 7; rg.beginPath(); rg.arc(cx, 64, 50, 0, Math.PI * 2); rg.stroke();
+      drawCharm(rg, r.id, cx, 66, 78);
+    });
+    const rt = new THREE.CanvasTexture(rc);
+    rt.colorSpace = THREE.SRGBColorSpace;
+    const rack = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 0.25), new THREE.MeshBasicMaterial({ map: rt, alphaTest: 0.5, fog: true }));
+    rack.position.set(Mg.charmRack.x, Mg.charmRack.y, Mg.charmRack.z + 0.065);
+    rack.name = 'charm-rack';
+    scene.add(rack);
+  }
   const plate = new THREE.PlaneGeometry(0.5, 0.5);
   const counters = [
     M([hc + 1.35, 2.5, Mg.z1 + 0.2], [0, 0, -0.05]),               // outside, right of DELIVERIES

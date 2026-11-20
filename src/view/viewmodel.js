@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { toon } from '../shaders/toon.js';
 import { buildShovel } from './models/shovel.js';
 import { part, geo } from './models/common.js';
+import { buildCharmStick } from './models/charms.js';
+import { RITES } from '../shared/layout.js';
 
 // The shovel as you see it in first person: fixed to the camera at the lower right, like a weapon in any
 // first-person game, with a mitten on the grip. It is only for your own eyes (everyone else sees the shovel in
@@ -24,9 +26,25 @@ export function createViewmodel(camera) {
   const y = new THREE.Vector3(-0.3, 0.4, -0.86).normalize(), z = new THREE.Vector3(0, 1, 0.25).addScaledVector(y, -new THREE.Vector3(0, 1, 0.25).dot(y)).normalize();
   const rest = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(y, z), y, z));
   let phase = 0, swingT = 9, wasSwing = false, digK = 0, time = 0;
+  // a chapel charm held up in the lower middle of the view instead of the shovel; it sways while the blessing is hummed
+  const charm = buildCharmStick();
+  charm.scale.setScalar(0.7);
+  charm.visible = false;
+  camera.add(charm);
+  let charmT = 0;
 
   return {
     debugSwing: null,
+    // ch: the charm in hand (index into RITES, -1 none); chant: humming the blessing
+    updateCharm(dt, { fp, ch, chant }) {
+      charm.visible = fp && ch >= 0;
+      if (!charm.visible) return;
+      charmT += dt;
+      charm.userData.setCharm(RITES[ch].id);
+      const w = chant ? Math.sin(charmT * 6) : 0;
+      charm.position.set(0.08 + 0.09 * w, -0.5 + (chant ? 0.06 : 0) + Math.sin(charmT * 1.6) * 0.006, -0.62);
+      charm.rotation.set(-0.12, 0, -0.35 * w);
+    },
     // the mitten takes the color of your digger's mittens
     setColor(hex) {
       if (mitten) tool.remove(mitten);

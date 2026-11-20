@@ -36,7 +36,33 @@ function noise(dur, freq, vol, delay = 0) {
   src.start(t);
 }
 
+// The blessing at the chapel: a hummed "mmm" in a little made-up tune, a low voice through a soft vowel filter, with a
+// slow wobble. Wordless on purpose (no real prayer).
+function hum(vol, len = 3.1) {
+  const t0 = ctx.currentTime, out = ctx.createGain(), f = ctx.createBiquadFilter();
+  f.type = 'bandpass'; f.frequency.value = 520; f.Q.value = 1.4;
+  out.gain.setValueAtTime(0.0001, t0);
+  out.gain.exponentialRampToValueAtTime(vol, t0 + 0.25);
+  out.gain.setValueAtTime(vol, t0 + len - 0.5);
+  out.gain.exponentialRampToValueAtTime(0.0001, t0 + len);
+  f.connect(out).connect(ctx.destination);
+  const tune = [147, 165, 147, 131, 147, 175, 165, 147]; // D E D C D F E D, a note every ~0.39 s
+  for (const [mult, type, g] of [[1, 'sawtooth', 0.35], [1.005, 'triangle', 0.5], [0.5, 'sine', 0.6]]) {
+    const o = ctx.createOscillator(), og = ctx.createGain(), lfo = ctx.createOscillator(), lg = ctx.createGain();
+    o.type = type; og.gain.value = g;
+    tune.forEach((n, i) => o.frequency.setTargetAtTime(n * mult, t0 + (i * len) / tune.length, 0.05));
+    lfo.frequency.value = 5.2; lg.gain.value = 2.2 * mult; lfo.connect(lg).connect(o.frequency); // vibrato
+    o.connect(og).connect(f);
+    o.start(t0); lfo.start(t0); o.stop(t0 + len + 0.1); lfo.stop(t0 + len + 0.1);
+  }
+  f.frequency.setValueAtTime(420, t0);
+  f.frequency.linearRampToValueAtTime(620, t0 + len * 0.5); // the mouth opening and closing a little
+  f.frequency.linearRampToValueAtTime(400, t0 + len);
+}
+
 const SOUNDS = {
+  hum: (v) => hum(0.32 * v),
+  bell: (v) => { [1046, 1568, 2093].forEach((f, i) => tone('sine', f, f * 0.995, 1.2 - i * 0.3, (0.12 - i * 0.03) * v, i * 0.01)); },
   dig: (v) => { noise(0.18, 900, 0.5 * v); tone('sine', 140, 70, 0.12, 0.3 * v); },
   grab: (v) => tone('sine', 300, 420, 0.08, 0.15 * v),
   throw: (v) => tone('triangle', 500, 180, 0.25, 0.2 * v),

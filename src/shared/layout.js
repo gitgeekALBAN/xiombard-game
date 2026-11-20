@@ -55,6 +55,8 @@ export const MORGUE = {
   desk: { x: -3.4, z: 11.35, ...STATION },  // 2 registry desk: a body on it gets its name tag written (E)
   dress: { x: -8.8, z: 11.35, ...STATION }, // 3 dressing table: a body on it is dressed in the outfit you pick (E)
   stock: { x: -10.6, z: 7.9, hx: 0.66, hz: 1.3, top: 0.5 }, // 4 a fresh coffin slides in here from the stockroom
+  chapel: { x: -5.6, z: 7.0, ...STATION }, // the bier in the chapel corner (south wall): a body on it is blessed with a charm
+  charmRack: { x: -7.25, z: 6.16, y: 1.45 }, // the charms hang on the south wall beside the bier
   stockDoor: [7.0, 8.8], // the stockroom door in the west wall (z range), behind the stock table
   rack: { x: -12.86, z0: 9.7, dz: 0.52, y: 1.5 }, // the outfits on show by the dressing table (west wall)
   crate: { x: 11.2, z: 7.0, hx: 0.45, hy: 0.35, hz: 0.35 }, // nails and boards, in the office
@@ -64,7 +66,7 @@ export const MORGUE = {
     { c: [12.5, 0.75, 10.6], h: [0.3, 0.75, 0.45], kind: 'cabinet' },
     { c: [6.4, 0.25, 6.5], h: [0.9, 0.25, 0.25], kind: 'bench' },
   ],
-  lamps: [[-8.8, 9.4], [-3.4, 9.4], [2.3, 9.4], [8.6, 9.4]],
+  lamps: [[-8.8, 9.4], [-3.4, 9.4], [2.3, 9.4], [8.6, 9.4], [-5.6, 7.6]],
 };
 // stations a player works at (registry, dressing) and how near counts as "at it"
 export const atStation = (st, x, z, m = 0.95) => Math.abs(x - st.x) < st.hx + m && Math.abs(z - st.z) < st.hz + m;
@@ -110,7 +112,7 @@ export function morgueBoxes(withFurniture = true) {
   wallX(M.z0, M.x0, M.door[0]); wallX(M.z0, M.door[1], M.x1); wallX(M.z0, M.door[0], M.door[1], 2.2, M.h);
   wallZ(M.x0, M.z0, M.z1); wallZ(M.x1, M.z0, M.z1);
   if (withFurniture) {
-    for (const tb of [M.table, M.desk, M.dress, M.stock]) out.push({ c: [tb.x, tb.top / 2, tb.z], h: [tb.hx, tb.top / 2, tb.hz] });
+    for (const tb of [M.table, M.desk, M.dress, M.stock, M.chapel]) out.push({ c: [tb.x, tb.top / 2, tb.z], h: [tb.hx, tb.top / 2, tb.hz] });
     const c = M.crate;
     out.push({ c: [c.x, c.hy, c.z], h: [c.hx, c.hy, c.hz] });
     for (const o of M.office) out.push({ c: o.c, h: o.h });

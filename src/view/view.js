@@ -4,7 +4,7 @@ import { buildCoffin, buildTruck } from './models.js';
 import { buildNote } from './models/note.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
-import { PLOTS, PLOT_HALF, insideMorgue } from '../shared/layout.js';
+import { PLOTS, PLOT_HALF, insideMorgue, RITES } from '../shared/layout.js';
 import { CP, crewRig } from '../shared/crew.js';
 import { zombieRig } from '../shared/zombies.js';
 import { corpseRig } from '../shared/corpses.js';
@@ -238,6 +238,8 @@ export class View {
         const p = pl.get(e.id);
         const sh = e.groups[CP.armR].userData.shovel;
         if (sh && p) sh.visible = !p.busy && !(e.id === this.myId && this.fpNow); // always in hand, except when both mittens are full (your own is the one at the camera)
+        const ch = e.groups[CP.armR].userData.charm;
+        if (ch && p) { ch.visible = p.ch >= 0 && !(e.id === this.myId && this.fpNow); if (p.ch >= 0) ch.userData.setCharm(RITES[p.ch].id); }
       } else if (e.kind === 'truck') {
         const u = e.groups[0].userData;
         for (const w of u.wheels) w.rotation.z = st.truck[0];
@@ -272,6 +274,10 @@ export class View {
         const own = e === me && fp && !this.debugCam;
         e.crew.mesh.visible = !own;
         e.crew.update(false);
+        // a chapel charm stands upright in the mitten whatever the arm does: its stick follows the body's up, the disc
+        // faces where the digger faces (the arm's frame turns with every pose, the body's does not)
+        const ch = e.kind === 'digger' && e.groups[CP.armR].userData.charm;
+        if (ch && ch.visible) ch.quaternion.copy(e.groups[CP.armR].quaternion).invert().multiply(e.groups[0].quaternion);
       }
       if (e.shadow) {
         const c = e.groups[0].position; // coffin, pelvis or belly
@@ -355,6 +361,7 @@ export class View {
     this.lastEye.copy(this.camTarget);
     this.fpNow = fp && !this.debugCam;
     this.viewmodel.update(dt, { show: this.fpNow && !!meState && !meState.busy, speed: Math.min(moved, 8), dig: !!meState?.dig, swing: !!meState?.sw });
+    this.viewmodel.updateCharm(dt, { fp: this.fpNow && !!meState, ch: meState ? meState.ch ?? -1 : -1, chant: !!meState?.chant });
     this.post.render(this.scene, this.camera, this.time);
     this.updateLabels();
   }

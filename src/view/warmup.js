@@ -6,6 +6,7 @@ import { characterGeometry } from '../chars/index.js';
 import { buildCrew } from './crew.js';
 import { buildCoffin, buildTruck } from './models.js';
 import { buildNote } from './models/note.js';
+import { buildCharmStick } from './models/charms.js';
 
 // Everything the game draws gets made before the first frame, behind a progress bar, instead of live in the middle of
 // play. Two kinds of work, run side by side:
@@ -32,6 +33,7 @@ export async function warmUp(view, onProgress = () => {}) {
   cast.add(...buildTruck());
   cast.add(view.graves.sample());
   cast.add(...buildNote({ name: 'Warm Up', note: ['tux', 'moth', 'bone', 2] }));
+  cast.add(buildCharmStick()); // the charm on its stick (its stick is the only plain colored basic material)
   cast.add(new THREE.Mesh(view.shadowGeo, view.shadowMat));
 
   // start compiling: the scene and the cast into the scene's target, each post pass into its own

@@ -3,7 +3,8 @@ import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom, routeOf } from './net.js';
 import { unlockAudio } from './audio.js';
 import { touch, initTouch, isTouchDevice, goLandscape } from './touch.js';
-import { OUTFITS } from './shared/layout.js';
+import { OUTFITS, RITES } from './shared/layout.js';
+import { drawCharm } from './view/models/charms.js';
 import { createBots } from './sim/bots.js';
 import { warmUp } from './view/warmup.js';
 
@@ -59,9 +60,13 @@ function setFirstPerson(on) {
 }
 setFirstPerson(new URLSearchParams(location.search).get('view') !== 'third');
 // g/th/fl/pk count presses (one-shot actions survive a dropped packet); pv is the outfit picked with the last pk
-const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0 };
+const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0 };
 let choosing = false; // the host says my outfit choice is open (dressing table)
 const pickOutfit = (i) => { input.pv = i; input.pk++; };
+// cw: the chapel charm I want in hand (index into RITES), sent with every input; the host applies it while I hold the charms
+let myCharm = -1; // the charm the host says I hold (-1 none)
+const pickCharm = (i) => { input.cw = ((i % RITES.length) + RITES.length) % RITES.length; };
+addEventListener('wheel', (e) => { if (playing && myCharm >= 0 && e.deltaY) pickCharm(myCharm + Math.sign(e.deltaY)); }, { passive: true });
 let playing = false;
 const SENS = 0.0024;
 
@@ -74,6 +79,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') input.fl++;
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
   if (digit && choosing && +digit[1] <= OUTFITS.length) pickOutfit(+digit[1] - 1);
+  else if (digit && myCharm >= 0 && +digit[1] <= RITES.length) pickCharm(+digit[1] - 1);
   if (e.code === 'KeyH') $('help').classList.toggle('open');
   if (e.code === 'KeyV') setFirstPerson(!view.firstPerson);
   if (e.code === 'Space') e.preventDefault();
@@ -260,6 +266,24 @@ function renderWardrobe(me) {
   for (const b of el.querySelectorAll('button')) b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); pickOutfit(+b.dataset.i); });
 }
 
+// The chapel's charms while I hold them: four buttons along the bottom, the one in hand lit; wheel, keys 1-4 or a tap.
+function renderCharms(me) {
+  const ch = me ? me.ch ?? -1 : -1, el = $('charms');
+  myCharm = ch;
+  el.classList.toggle('show', ch >= 0);
+  if (ch < 0) return;
+  if (!el.childElementCount) {
+    el.innerHTML = RITES.map((r, i) => `<button data-i="${i}"><canvas width="64" height="64"></canvas><span><kbd>${i + 1}</kbd>${escapeHtml(r.label)}</span></button>`).join('')
+      + `<small>${touch.active ? 'GRAB: bless · THROW: put back' : 'wheel or 1-4 · E: bless · Q: put back'}</small>`;
+    el.querySelectorAll('button').forEach((b, i) => {
+      drawCharm(b.querySelector('canvas').getContext('2d'), RITES[i].id, 32, 33, 52, '#efe6d0');
+      b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); pickCharm(i); });
+    });
+  }
+  el.querySelectorAll('button').forEach((b, i) => b.classList.toggle('on', i === ch));
+  el.classList.toggle('chant', !!me.chant);
+}
+
 function applyState(st) {
   view.setState(st);
   $('score').textContent = st.buried ?? st.score;
@@ -268,6 +292,7 @@ function applyState(st) {
   $('boards').textContent = st.boards ?? 0;
   renderCard(st.players.find((p) => p.id === myId));
   renderWardrobe(st.players.find((p) => p.id === myId));
+  renderCharms(st.players.find((p) => p.id === myId));
   if (st.phase) {
     const [night, left, day, light, zombies] = st.phase;
     view.setDay?.(light);

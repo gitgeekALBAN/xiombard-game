@@ -32,6 +32,7 @@ const DAY_LEN = 150, NIGHT_LEN = 80, TWILIGHT = 10; // seconds; the light fades 
 const MAX_ZOMBIES = 10;     // visitors on the yard at once
 const RISE_TIME = 1.6;      // seconds a zombie takes to climb out of the ground
 const SWING_TIME = 0.45;    // a shovel swing; the blow lands a third of the way in
+const CHANT_TIME = 3.2;     // humming the blessing over a body on the bier, waving the charm
 const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it has to be dodged or hit first
 const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
 
@@ -284,6 +285,7 @@ export class Sim {
     const p = this.addEnt({
       kind: 'digger', name: (name || CREW[look].name).slice(0, 16), color, look, seed: n + 1, body, hand, bit,
       yaw: Math.PI, input: { mx: 0, mz: 0, yaw: Math.PI, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 },
+      charm: -1, chant: null, // the chapel's charms in hand (index into RITES) and a blessing under way
       last: null, rag: null, ragT: 0, grab: null, phase: 0, grounded: true, turn: 0, hint: '', digging: false, jumpT: 0, slipT: 0, swingT: -9, swingHit: true, upT: -9,
     });
     return p;
@@ -637,10 +639,11 @@ export class Sim {
   // and a coffin that is not nailed shut is dug up twice as fast.
   bury(plot, coffin) {
     const who = coffin.passenger, named = who.tag === who.name, dressed = who.outfit === who.suit, nailed = coffin.lid === 2;
+    const blessed = !!who.blessed && who.blessed === who.rite;
     const mark = (ok) => (ok ? '✓' : '✗');
     plot.name = who.tag || 'Nobody Knows';
     plot.seed = who.seed;
-    plot.unrest = (named ? 0 : 1) + (dressed ? 0 : 1) + (nailed ? 0 : 1);
+    plot.unrest = (named ? 0 : 1) + (dressed ? 0 : 1) + (nailed ? 0 : 1) + (blessed ? 0 : 1);
     plot.nailed = nailed;
     plot.who = who;
     this.removeEnt(coffin);
@@ -650,11 +653,11 @@ export class Sim {
     plot.fill = 0;
     this.setDepth(plot, 0);
     this.buried++;
-    this.score += 1 + (named ? 1 : 0) + (dressed ? 1 : 0) + (nailed ? 1 : 0);
+    this.score += 1 + (named ? 1 : 0) + (dressed ? 1 : 0) + (nailed ? 1 : 0) + (blessed ? 1 : 0);
     this.emit('sfx', { name: 'bury', pos: [plot.x, 0, plot.z] });
     this.emit('toast', { text: `R.I.P. ${plot.name}`, pos: [plot.x, 2.3, plot.z], big: true });
-    this.emit('toast', { text: `${mark(named)} name  ${mark(dressed)} outfit  ${mark(nailed)} nailed`, pos: [plot.x, 1.7, plot.z] });
-    if (plot.unrest >= 2) this.emit('toast', { text: 'The ground grumbles...', pos: [plot.x, 1.1, plot.z] });
+    this.emit('toast', { text: `${mark(named)} name  ${mark(dressed)} outfit  ${mark(blessed)} blessed  ${mark(nailed)} nailed`, pos: [plot.x, 1.7, plot.z] });
+    if (plot.unrest >= 3) this.emit('toast', { text: 'The ground grumbles...', pos: [plot.x, 1.1, plot.z] });
     if (this.plots.every((pl) => pl.buried)) {
       const old = this.plots.reduce((a, b) => (a.buriedAt < b.buriedAt ? a : b));
       old.buried = false;
@@ -858,7 +861,7 @@ export class Sim {
   }
   // A body let go over a free station table is laid out straight on it (like coffinAssist for coffins).
   tableAssist(body, hand) {
-    for (const st of [MORGUE.desk, MORGUE.dress, MORGUE.table]) {
+    for (const st of [MORGUE.desk, MORGUE.dress, MORGUE.chapel, MORGUE.table]) {
       if (Math.abs(hand.x - st.x) > st.hx + 0.6 || Math.abs(hand.z - st.z) > st.hz + 0.9 || hand.y > st.top + 1.8) continue;
       if (this.bodiesOn(st).some((e) => e !== body)) continue;
       this.layOn(body, st);
@@ -911,6 +914,42 @@ export class Sim {
     const body = this.byId(p.choose);
     if (!body || p.rag || p.grab || !this.nearStation(p, MORGUE.dress) || !this.bodiesOn(MORGUE.dress).includes(body)) p.choose = null;
   }
+  // The chapel: take the charms from the rack (E), pick one (wheel, keys 1-4 or a tap: input cw), then E or a click
+  // over a body on the bier hums the blessing for CHANT_TIME while the digger waves the charm. The body is blessed with
+  // the charm in hand; the note says which one it should be. Walk off and the charms go back on the rack.
+  takeCharms(p) {
+    p.charm = Number.isFinite(p.input.cw) ? ((Math.round(p.input.cw) % RITES.length) + RITES.length) % RITES.length : 0;
+    const q = p.body.position;
+    this.emit('sfx', { name: 'grab', pos: [q.x, 1.2, q.z] });
+  }
+  putCharmsBack(p) { p.charm = -1; p.chant = null; }
+  startChant(p, body) {
+    p.chant = { t0: this.time, body: body.id, charm: p.charm };
+    const q = body.bodies[0].position;
+    this.emit('sfx', { name: 'hum', pos: [q.x, q.y, q.z] });
+  }
+  updateChant(p) {
+    const c = p.chant, body = this.byId(c.body);
+    // stepping away or the body leaving the bier breaks it off
+    if (!body || !this.nearStation(p, MORGUE.chapel) || !this.bodiesOn(MORGUE.chapel).includes(body)) { p.chant = null; return; }
+    if (this.time - c.t0 < CHANT_TIME) return;
+    body.blessed = RITES[c.charm].id;
+    p.chant = null;
+    p.charm = -1; // done: the charms go back on the rack, the hands are free for the body
+    const q = body.bodies[0].position, pos = [q.x, q.y + 0.9, q.z];
+    this.emit('toast', { text: `Blessed with the ${riteLabel(body.blessed)}`, pos });
+    this.emit('sfx', { name: 'bell', pos });
+  }
+  checkCharms(p) { if (p.charm >= 0 && (p.rag || p.grab || !this.nearStation(p, MORGUE.chapel))) this.putCharmsBack(p); }
+  chapelKey(p) {
+    if (!this.nearStation(p, MORGUE.chapel) || p.grab || p.chant) return !!p.chant;
+    const body = this.stationBody(p, MORGUE.chapel);
+    if (p.charm >= 0) { if (body) this.startChant(p, body); return true; } // charms in hand: bless whoever lies there
+    if (body && body.blessed) return false;  // already blessed: the click picks them up
+    this.takeCharms(p);
+    return true;
+  }
+
   // The coffin waiting on the stock table, if any.
   stockCoffin() {
     const S = MORGUE.stock;
@@ -941,10 +980,17 @@ export class Sim {
     if (reg && reg.tag !== reg.name) { this.register(reg); return true; }
     const dr = this.stationBody(p, MORGUE.dress);
     if (dr && dr.outfit === 'shroud' && !p.choose) { this.openWardrobe(p, dr); return true; }
-    return false;
+    return this.chapelKey(p);
   }
   morgueHint(p) {
     if (p.choose) return 'Pick an outfit: keys 1-5 · Q to cancel';
+    if (p.chant) return 'Humming the blessing... stay by the bier';
+    if (this.nearStation(p, MORGUE.chapel) && !p.grab) {
+      const body = this.stationBody(p, MORGUE.chapel), held = p.charm >= 0 ? RITES[p.charm].label : '';
+      if (held) return body ? `${held} · wheel or 1-4 to change · E: bless ${body.name}` : `${held} in hand · lay a body on the bier · Q: put back`;
+      if (body && body.blessed) return `${body.name} is blessed (${riteLabel(body.blessed)}) · E: pick them up`;
+      return body ? `Chapel: E to take the charms and bless ${body.name}` : 'Chapel: lay a body on the bier to bless them';
+    }
     if (this.truck.state === 'wait' && this.atHatch(p) && this.corpsesInBed().length) {
       const on = this.bodiesOn(MORGUE.table)[0];
       return on ? `E: pick up ${on.name} · the next one comes in when the table is clear` : 'E: take the body in through the hatch';
@@ -1398,7 +1444,10 @@ export class Sim {
       else if (!this.morgueKey(p)) { if (this.findGrab(p)) this.grab(p); else this.whack(p); }
     }
     if (!p.swingHit && this.time - p.swingT >= SWING_TIME * 0.35) this.landWhack(p);
-    if (inp.th !== last.th) { last.th = inp.th; if (p.choose) p.choose = null; else this.throwHeld(p); }
+    if (inp.th !== last.th) { last.th = inp.th; if (p.choose) p.choose = null; else if (p.charm >= 0) this.putCharmsBack(p); else this.throwHeld(p); }
+    // the charm in hand: cw is the client's pick (wheel, keys 1-4 or a tap); not while a blessing is under way
+    if (p.charm >= 0 && !p.chant && Number.isFinite(inp.cw)) p.charm = ((Math.round(inp.cw) % RITES.length) + RITES.length) % RITES.length;
+    if (p.chant) this.updateChant(p);
     // a pick from the outfit choice: pk counts the picks, pv is the outfit (index into OUTFITS)
     if (inp.pk !== last.pk) { last.pk = inp.pk; if (p.choose) this.pickOutfit(p, inp.pv); }
 
@@ -1502,7 +1551,7 @@ export class Sim {
     // a fresh coffin comes in from the stockroom whenever the stock table is clear
     if (Math.floor(this.time / 2) !== Math.floor((this.time - h) / 2)) this.restockCoffin();
     if (Math.floor(this.time * 5) !== Math.floor((this.time - h) * 5)) {
-      for (const e of this.ents) if (e.kind === 'digger') { this.checkWardrobe(e); e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
+      for (const e of this.ents) if (e.kind === 'digger') { this.checkWardrobe(e); this.checkCharms(e); e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
     }
   }
 
@@ -1577,6 +1626,7 @@ export class Sim {
     this._pose.hold = p.grab ? this.mittenSpots(p) : null;
     this._pose.dig = p.digging; this._pose.air = !p.grounded;
     this._pose.swing = this.swinging(p) ? (this.time - p.swingT) / SWING_TIME : 0;
+    this._pose.charm = p.charm >= 0; this._pose.chant = p.chant ? this.time - p.chant.t0 : 0;
     return crewPose(crewRig(p.look), this._root, this._pose, out);
   }
   // where the two mittens go on what the digger holds (world space): under a body, on a coffin's side or end
@@ -1633,7 +1683,8 @@ export class Sim {
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
         choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open
-        sw: this.swinging(e) ? 1 : 0, busy: e.grab ? 1 : 0,
+        sw: this.swinging(e) ? 1 : 0, busy: e.grab || e.charm >= 0 ? 1 : 0,
+        ch: e.charm ?? -1, chant: e.chant ? 1 : 0, // the charm in hand (index into RITES, -1 none), humming the blessing
         grip: e.grab && !(e.grab.coffin && this.holders(e.grab.ent) > 1) ? +Math.max(0, e.grab.grip).toFixed(2) : -1, // two on a coffin: nothing to lose
       })),
       ev,

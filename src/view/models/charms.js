@@ -1,3 +1,6 @@
+import * as THREE from 'three';
+import { RITES } from '../../shared/layout.js';
+
 // The graveyard's own charms for the blessing (see RITES in shared/layout.js), drawn with canvas 2D paths: on the
 // delivery notes, on the plaques the crew hold up at the chapel, and in the chapel's charm rack. They are invented for
 // this game on purpose: a moth, a snail, a key and a moon in a teacup. No real religion's symbols.
@@ -38,4 +41,34 @@ export function drawCharm(g, id, cx, cy, s, ink = '#231d33') {
     for (const x of [16, 28]) { path(() => { g.moveTo(x, -6); g.quadraticCurveTo(x + 8, -16, x, -26); g.quadraticCurveTo(x - 8, -36, x + 2, -44); }); g.stroke(); }
   }
   g.restore();
+}
+
+// A charm's face: a bone-white disc with an ink ring and the charm painted on it (one canvas per charm, made once).
+const faces = new Map();
+export function charmTexture(id) {
+  if (faces.has(id)) return faces.get(id);
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  g.fillStyle = '#efe6d0'; g.beginPath(); g.arc(64, 64, 62, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#7a5f4a'; g.lineWidth = 7; g.beginPath(); g.arc(64, 64, 57, 0, Math.PI * 2); g.stroke();
+  drawCharm(g, id, 64, 66, 92);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  faces.set(id, tex);
+  return tex;
+}
+
+// A charm on a stick, as held at the chapel: the stick runs along +y from the origin (the mitten), the disc on top
+// faces +z. Materials: the face uses the signs' settings (map, alpha test, fog); the stick is plain wood.
+const disc = new THREE.CylinderGeometry(0.1, 0.1, 0.018, 20).rotateX(Math.PI / 2).translate(0, 0.42, 0);
+const stick = new THREE.BoxGeometry(0.022, 0.36, 0.022).translate(0, 0.18, 0);
+const wood = new THREE.MeshBasicMaterial({ color: '#5a3a2a', fog: true });
+export function buildCharmStick() {
+  const mat = new THREE.MeshBasicMaterial({ map: charmTexture(RITES[0].id), alphaTest: 0.5, fog: true });
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(stick, wood), new THREE.Mesh(disc, mat));
+  let shown = RITES[0].id;
+  g.userData.setCharm = (id) => { if (id !== shown) { shown = id; mat.map = charmTexture(id); } };
+  return g;
 }
