@@ -108,6 +108,16 @@ export function buildMorgue(scene, batch) {
   }
   w(G.box, MAT.boardDark, M([rk.x, rk.y, rk.z + 0.03], [0, 0, 0.02], [1.08, 0.38, 0.05]), 0.012);
 
+  // the two hand-in windows in the office end of the south wall: a shuttered hatch with a frame, a counter, a bell
+  for (const wd of Object.values(Mg.windows)) {
+    w(G.box, MAT.boardDark, M([wd.x, 1.5, Mg.z0 + Mg.t + 0.02], [0, 0, 0], [1.0, 0.9, 0.03]), 0);                       // the shutter
+    for (const sx of [-1, 1]) w(G.box, MAT.board, M([wd.x + sx * 0.55, 1.45, Mg.z0 + Mg.t + 0.05], [0, 0, 0], [0.1, 1.1, 0.08]), 0.01);
+    w(G.box, MAT.board, M([wd.x, 2.02, Mg.z0 + Mg.t + 0.05], [0, 0, 0], [1.2, 0.1, 0.08]), 0.01);
+    w(G.box, MAT.boardLight, M([wd.x, wd.top - 0.04, wd.z + 0.2], [0, 0, 0], [1.1, 0.08, 0.36]), 0.012);                // the counter
+    w(G.box, MAT.boardDark, M([wd.x, (wd.top - 0.08) / 2, wd.z + 0.34], [0, 0, 0], [1.0, wd.top - 0.08, 0.06]), 0.01);
+    w(G.sph, MAT.iron, M([wd.x + 0.38, wd.top + 0.05, wd.z + 0.25], [0, 0, 0], [0.07, 0.05, 0.07]), 0.008);           // the bell
+  }
+
   // the clerk's office in the east end: crate of nails and boards, a desk with a lamp, filing cabinets, a bench
   const cr = Mg.crate;
   w(G.box, MAT.board, M([cr.x, cr.hy, cr.z], [0, 0.1, 0], [cr.hx * 2, cr.hy * 2, cr.hz * 2]), 0.016);
@@ -148,7 +158,7 @@ export function buildMorgue(scene, batch) {
   scene.add(roof);
 
   // lettering: one canvas, one sign per 128-pixel row: the two outside, then one over each station inside
-  const SIGNS = [['MORGUE', 64], ['DELIVERIES', 60], ['INTAKE', 60], ['REGISTRY', 58], ['DRESSING', 58], ['STOCKROOM', 54], ['OFFICE', 60], ['CHAPEL', 60]];
+  const SIGNS = [['MORGUE', 64], ['DELIVERIES', 60], ['INTAKE', 60], ['REGISTRY', 58], ['DRESSING', 58], ['STOCKROOM', 54], ['OFFICE', 60], ['CHAPEL', 60], ['LOST & FOUND', 52], ['POLICE!', 62]];
   const CW = 512, CH = 128 * SIGNS.length, canvas = document.createElement('canvas');
   canvas.width = CW; canvas.height = CH;
   const g = canvas.getContext('2d'), tex = new THREE.CanvasTexture(canvas);
@@ -176,6 +186,8 @@ export function buildMorgue(scene, batch) {
   signAt(5, 1.3, M([Mg.x0 + 0.2, 2.55, sdc], [0, Math.PI / 2, -0.03]));
   signAt(6, 1.1, north(Mg.office[0].c[0], -0.02));
   signAt(7, 1.2, M([Mg.chapel.x, 2.45, Mg.z0 + 0.2], [0, 0, -0.04])); // on the south wall over the bier, facing into the hall
+  signAt(8, 1.3, M([Mg.windows.lost.x, 2.4, Mg.z0 + 0.2], [0, 0, 0.03]));
+  signAt(9, 1.2, M([Mg.windows.police.x, 2.4, Mg.z0 + 0.2], [0, 0, -0.03]));
   const textMat = new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: true });
   const textMesh = new THREE.Mesh(mergeGeometries(quads), textMat);
   textMesh.name = 'morgue-text';

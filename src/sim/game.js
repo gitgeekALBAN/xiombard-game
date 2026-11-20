@@ -6,7 +6,7 @@ import { ZOMBIES, ZTYPE, Z_WALKERS, Z_DRAGGER, Z_DOGS, Z_ODD, zombieRig, zombieP
 import {
   PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, PLOT_MIN_DEPTH, COFFIN, TRUCK, TRUCK_STOP_X, TRUCK_START_X,
   ROAD_Z, FENCE, ROAD_HALF, SPAWN, staticBoxes,
-  MORGUE, OUTFITS, outfitLabel, RITES, riteLabel, CANDLES, MAX_CANDLES, candleLabel, NOTE, NAIL_COST, insideMorgue, atStation, FENCE_SECTIONS, FENCE_HP, fenceSectionAt, TRAPS, TRAP_DUR,
+  MORGUE, OUTFITS, outfitLabel, RITES, riteLabel, CANDLES, MAX_CANDLES, candleLabel, NOTE, ODDITIES, ODD_CHANCE, WINDOW_LABEL, NAIL_COST, insideMorgue, atStation, FENCE_SECTIONS, FENCE_HP, fenceSectionAt, TRAPS, TRAP_DUR,
 } from '../shared/layout.js';
 import { rng, corpseName } from '../shared/rng.js';
 
@@ -37,7 +37,7 @@ const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it 
 const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
 
 const v3 = (a) => new CANNON.Vec3(a[0], a[1], a[2]);
-const PARTS_OF = { digger: NCREW, zombie: NCREW, corpse: NCREW, coffin: 1, truck: 1, note: 1 };
+const PARTS_OF = { digger: NCREW, zombie: NCREW, corpse: NCREW, coffin: 1, truck: 1, note: 1, item: 1 };
 
 export class Sim {
   // opts: { dayLen, nightLen } in seconds (for tests and tuning)
@@ -71,6 +71,7 @@ export class Sim {
     this.time = 0;
     this.acc = 0;
     this.score = 0;   // peace points
+    this.cash = 0;    // money from odd things buried quietly (for upgrades, later)
     this.buried = 0;  // bodies laid to rest
     this.nails = 12;
     this.boards = 4;
@@ -130,7 +131,7 @@ export class Sim {
   bodiesOf(e) {
     if (e.kind === 'digger' || e.kind === 'zombie') return e.rag ? e.rag.bodies : [];
     if (e.kind === 'corpse') return e.bodies;
-    if (e.kind === 'coffin' || e.kind === 'note') return [e.body];
+    if (e.kind === 'coffin' || e.kind === 'note' || e.kind === 'item') return [e.body];
     return [];
   }
   byId(id) { return this.ents.find((e) => e.id === id); }
@@ -220,6 +221,129 @@ export class Sim {
   }
   notesOf(body) { return this.ents.filter((e) => e.kind === 'note' && e.of === body.id); }
 
+  // ---------- odd deliveries ----------
+  // Something that is not a body (ODDITIES): a rigid box of its own size, carried like anything else. A live crocodile
+  // only turns about its vertical axis (it stays on its feet) and runs its own little brain (updateCroc).
+  spawnItem(look, x, y, z, yaw = 0) {
+    const o = ODDITIES[look];
+    const b = new CANNON.Body({ mass: o.mass, material: this.mProp, linearDamping: 0.1, angularDamping: 0.5, collisionFilterGroup: G_PROP, collisionFilterMask: ALL });
+    b.addShape(new CANNON.Box(v3(o.h)));
+    b.position.set(x, y + o.h[1], z);
+    b.quaternion.setFromEuler(0, yaw, 0);
+    if (o.live) b.angularFactor.set(0, 1, 0);
+    b.grabR = Math.max(o.h[0], o.h[2]) * 0.8;
+    b.sleepSpeedLimit = 0.2;
+    this.world.addBody(b);
+    const e = this.addEnt({ kind: 'item', look, body: b, name: o.label, croc: o.live ? { yaw, turnT: 0, go: true, cool: 0, wriggle: 0 } : null });
+    b.ent = e;
+    return e;
+  }
+  // what the hearse still carries: bodies (not up and walking) and odd things
+  inBed(q) {
+    const tb = this.truck.body.position, lx = q.x - tb.x, lz = q.z - tb.z;
+    return lx > TRUCK.bed.x0 - 0.2 && lx < TRUCK.bed.x1 + 0.3 && Math.abs(lz) < 1.1 && q.y > 0.6;
+  }
+  cargoInBed() {
+    return this.ents.filter((e) => ((e.kind === 'corpse' && !e.z) || e.kind === 'item') && this.inBed(this.bodiesOf(e)[0].position));
+  }
+  // through the hatch onto the intake table, like a body (no note: nobody wrote one for this)
+  acceptItem(e) {
+    const tb = MORGUE.table, o = ODDITIES[e.look], b = e.body;
+    b.position.set(tb.x, tb.top + o.h[1] + 0.02, tb.z);
+    b.quaternion.setFromEuler(0, 0, 0);
+    if (e.croc) e.croc.yaw = 0;
+    b.velocity.setZero(); b.angularVelocity.setZero(); b.wakeUp();
+    e.greeted = true;
+    this.truck.t = this.time;
+    this.emit('sfx', { name: 'thud', pos: [tb.x, tb.top, tb.z] });
+    this.emit('toast', { text: o.live ? 'A LIVE crocodile?! Careful with the tail!' : `${o.label}?! That's no body...`, pos: [tb.x, tb.top + 1.1, tb.z], big: true });
+    return true;
+  }
+  // a hand-in window whose counter this point is at ('lost' | 'police'), or null
+  windowAt(q) {
+    for (const [k, w] of Object.entries(MORGUE.windows)) {
+      if (Math.abs(q.x - w.x) < 0.8 && q.z > w.z - 0.2 && q.z < w.z + 1.3 && q.y > 0.4 && q.y < 2.2) return k;
+    }
+    return null;
+  }
+  // let go at a window: the right one takes it (and thanks you), the wrong one sends you to the other
+  handIn(e, k) {
+    const o = ODDITIES[e.look], w = MORGUE.windows[k], pos = [w.x, 1.9, w.z + 0.6];
+    if (o.window !== k) {
+      this.emit('toast', { text: k === 'lost' ? 'Lost & Found: "That is a matter for the police!"' : 'Police: "Not our department. Try Lost & Found."', pos });
+      this.emit('sfx', { name: 'honk', pos });
+      return false;
+    }
+    this.removeEnt(e);
+    this.score += 2;
+    this.emit('toast', { text: k === 'lost' ? `Lost & Found: "${o.label}! The owner will be so relieved." +2` : `Police: "We'll take it from here. Good citizens!" +2`, pos, big: true });
+    this.emit('sfx', { name: 'bell', pos });
+    return true;
+  }
+  // let go over a dug, empty grave: it is laid in the middle of the hole, long side along the grave
+  itemGraveAssist(e, hand) {
+    const plot = this.plots.find((pl) => !pl.buried && pl.depth >= 0.4 && !this.coffinInPlot(pl) && !this.itemInPlot(pl)
+      && Math.abs(hand.x - pl.x) < PLOT_HALF.x + 0.8 && Math.abs(hand.z - pl.z) < PLOT_HALF.z + 0.8);
+    if (!plot) return false;
+    const o = ODDITIES[e.look], b = e.body;
+    b.position.set(plot.x, -plot.depth + o.h[1] + 0.05, plot.z);
+    b.quaternion.setFromEuler(0, Math.PI / 2, 0);
+    b.velocity.setZero(); b.angularVelocity.setZero(); b.wakeUp();
+    return true;
+  }
+  itemInPlot(plot) {
+    return this.ents.find((e) => e.kind === 'item' && Math.abs(e.body.position.x - plot.x) < PLOT_HALF.x + 0.1
+      && Math.abs(e.body.position.z - plot.z) < PLOT_HALF.z + 0.1 && e.body.position.y < -0.05) || null;
+  }
+  // filled in over an odd thing: no ghost, no name, nobody to rise; the rich ones pay (quietly)
+  buryItem(plot, e) {
+    const o = ODDITIES[e.look];
+    this.cash += o.cash;
+    plot.name = '???';
+    plot.seed = e.id * 31 + 7;
+    plot.unrest = 0; plot.baseUnrest = 0; plot.nailed = true; plot.who = null; plot.candles = null;
+    plot.item = e.look;
+    this.removeEnt(e);
+    plot.buried = true;
+    plot.buriedAt = this.time;
+    plot.fill = 0;
+    this.setDepth(plot, 0);
+    this.emit('sfx', { name: 'bury', pos: [plot.x, 0, plot.z] });
+    this.emit('toast', { text: o.cash ? `The ${o.label.toLowerCase()} is gone. Nobody saw a thing. +$${o.cash}` : `Buried the ${o.label.toLowerCase()}.`, pos: [plot.x, 2.3, plot.z], big: true });
+  }
+  // A live crocodile: waddles about, turns now and then, and lashes out with its tail at anyone close by. Held, it
+  // thrashes and every few seconds may wriggle loose (and lash the one holding it). Still in the hearse: it waits.
+  updateCroc(e, h) {
+    const c = e.croc, b = e.body;
+    if (this.holders(e)) {
+      if (this.time > c.wriggle) {
+        c.wriggle = this.time + 2.5 + this.rand() * 2.5;
+        if (c.wriggle && this.rand() < 0.45) { const p = this.holdersOf(e)[0]; this.drop(p); this.lash(e, p); }
+      }
+      return;
+    }
+    if (this.inBed(b.position)) return;
+    if (this.time > c.turnT) { c.turnT = this.time + 1.5 + this.rand() * 3; c.yaw += (this.rand() - 0.5) * 2.4; c.go = this.rand() < 0.75; }
+    const sp = c.go ? 0.9 : 0, vx = Math.cos(c.yaw) * sp, vz = -Math.sin(c.yaw) * sp; // its snout is its +x
+    b.velocity.x += (vx - b.velocity.x) * Math.min(1, h * 6);
+    b.velocity.z += (vz - b.velocity.z) * Math.min(1, h * 6);
+    b.quaternion.setFromEuler(0, c.yaw + Math.sin(this.time * 7) * 0.08 * (c.go ? 1 : 0), 0); // a waddle
+    b.angularVelocity.setZero();
+    b.wakeUp();
+    for (const p of this.ents) {
+      if (p.kind !== 'digger' || p.rag || this.time < c.cool) continue;
+      const d = Math.hypot(p.body.position.x - b.position.x, p.body.position.z - b.position.z);
+      if (d < 1.25) this.lash(e, p);
+    }
+  }
+  lash(e, p) {
+    e.croc.cool = this.time + 3;
+    const q = p.body.position, c = e.body.position, dx = q.x - c.x, dz = q.z - c.z, d = Math.hypot(dx, dz) || 1;
+    this.toRagdoll(p, new CANNON.Vec3((dx / d) * 5, 3.5, (dz / d) * 5));
+    this.emit('sfx', { name: 'bonk', pos: [q.x, 1, q.z] });
+    this.emit('toast', { text: 'THWACK! The crocodile swings its tail', pos: [q.x, 1.9, q.z] });
+  }
+
   spawnLoad(n) {
     const t = this.truck.body.position;
     for (let i = 0; i < n; i++) {
@@ -228,6 +352,11 @@ export class Sim {
       const m = new THREE.Matrix4().makeTranslation(t.x + 2.75, TRUCK.bed.top + 0.3 + layer * 0.45, t.z + side)
         .multiply(new THREE.Matrix4().makeRotationY(Math.PI / 2))
         .multiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2));
+      if (i > 0 && this.rand() < ODD_CHANCE) { // now and then something that is not a body at all
+        const q = new THREE.Vector3().setFromMatrixPosition(m);
+        this.spawnItem(Math.floor(this.rand() * ODDITIES.length), q.x, q.y - 0.2, q.z, 0);
+        continue;
+      }
       this.spawnCorpse(m, limpRots(rng(seed)), seed);
     }
   }
@@ -349,7 +478,7 @@ export class Sim {
     const tmp = new CANNON.Vec3(), loc = new CANNON.Vec3();
     // a body resting in an upright coffin is left alone: you grab the coffin (tip it over to get them out)
     const boxed = new Set(this.ents.filter((e) => e.kind === 'coffin' && this.coffinUp(e) > 0.5).map((e) => this.coffinContents(e)));
-    const onTruck = new Set(this.corpsesInBed()); // those come in through the hatch
+    const onTruck = new Set(this.cargoInBed()); // those come in through the hatch
     for (const e of this.ents) {
       if (e === p || onTruck.has(e)) continue;
       if (e.z && e.z.mode !== 'down') continue; // on its feet: whack it first
@@ -370,6 +499,10 @@ export class Sim {
         b.pointToWorldFrame(loc, tmp);
         const d = tmp.distanceTo(hand) - 0.1;
         if (d < bestD) { bestD = d; best = { body: b, ent: e, pivot: loc.clone() }; }
+      } else if (e.kind === 'item') {
+        if (this.holders(e)) continue;
+        const d = e.body.position.distanceTo(hand) - e.body.grabR;
+        if (d < bestD) { bestD = d; best = { body: e.body, ent: e, pivot: new CANNON.Vec3() }; }
       } else if (e.kind === 'note') {
         if (this.holders(e)) continue;
         const d = e.body.position.distanceTo(hand) - e.body.grabR + 0.1; // a little less eager than a body: it is small and often lies on one
@@ -420,6 +553,7 @@ export class Sim {
     if (mate) mate.grab.end = 0; // the one left holding it takes it across the chest again
     if (assist && g.ent.kind === 'corpse' && !this.coffinAssist(g.ent, p.hand.position)) this.tableAssist(g.ent, p.hand.position);
     if (assist && g.ent.kind === 'coffin' && !mate) this.graveAssist(g.ent);
+    if (assist && g.ent.kind === 'item') { const k = this.windowAt(p.hand.position); if (!(k && this.handIn(g.ent, k))) this.itemGraveAssist(g.ent, p.hand.position); }
   }
   // ---------- carrying ----------
   holdersOf(ent) { return this.ents.filter((e) => e.kind === 'digger' && e.grab && e.grab.ent === ent); }
@@ -437,6 +571,13 @@ export class Sim {
       q.setFromEuler(0, g.yaw, 0);
       q.mult(tilt.setFromEuler(-1.15, 0, 0), q);
       return { pos, quat: q, firm: 1 };
+    }
+    if (ent.kind === 'item') { // a bag hugged to the chest; a crocodile lies across the arms, snout to the right
+      const long = ODDITIES[ent.look].h[0] > 0.5;
+      const pos = this.handPoint(p, this.carryY(p, false) - (long ? 0 : 0.12) + Math.sin(p.phase * 2) * 0.02, long ? CORPSE_FWD : 0.48, g.yaw);
+      q.setFromEuler(0, g.yaw + (long ? 0 : Math.PI / 2), 0);
+      if (ent.croc) q.mult(tilt.setFromEuler(Math.sin(t * 13) * 0.25, Math.sin(t * 9) * 0.3, 0), q); // it thrashes
+      return { pos, quat: q, firm: long ? 0.4 : 0.7 };
     }
     if (!g.coffin) { // a body lies on its back across the arms, head to the carrier's right
       const pos = this.handPoint(p, this.carryY(p, false) + Math.sin(p.phase * 2) * 0.02, CORPSE_FWD, g.yaw);
@@ -613,6 +754,12 @@ export class Sim {
       if (plot.depth < PLOT_MIN_DEPTH) return { act: null, hint: 'Too shallow. Pull the coffin out and dig deeper.' };
       return { act: 'fill', coffin: c, hint: 'Hold F to fill the grave' };
     }
+    const it = this.itemInPlot(plot);
+    if (it) {
+      if (it.croc) return { act: null, hint: "It's alive! The police want it, not the grave." };
+      if (plot.depth < PLOT_MIN_DEPTH) return { act: null, hint: 'Too shallow to hide it. Dig deeper.' };
+      return { act: 'fill', item: it, hint: 'Hold F to bury it quietly' };
+    }
     if (plot.depth < PLOT_MAX_DEPTH) return { act: 'dig', hint: plot.depth > 0 ? 'Hold F to keep digging' : 'Hold F to dig a grave' };
     return { act: null, hint: 'Grave ready. Drop a coffin in it.' };
   }
@@ -632,7 +779,7 @@ export class Sim {
     } else if (st.act === 'fill') {
       plot.fill += h / 2.5;
       if (this.time - plot.digSfx > 0.45) { plot.digSfx = this.time; this.emit('sfx', { name: 'dig', pos: [plot.x, 0, plot.z] }); }
-      if (plot.fill >= 1) this.bury(plot, st.coffin);
+      if (plot.fill >= 1) { if (st.coffin) this.bury(plot, st.coffin); else this.buryItem(plot, st.item); }
     }
   }
   // The laying-to-rest checklist. Each missed item makes the grave restless: zombies go for restless graves first,
@@ -879,8 +1026,9 @@ export class Sim {
   }
   // Pull the next body off the hearse through the hatch onto the intake table.
   acceptBody() {
-    const body = this.corpsesInBed()[0];
+    const body = this.cargoInBed()[0];
     if (!body) return false;
+    if (body.kind === 'item') return this.acceptItem(body);
     const tb = MORGUE.table;
     this.layOn(body, tb, this.bodiesOn(tb).filter((e) => e !== body).length);
     body.greeted = true;
@@ -962,7 +1110,7 @@ export class Sim {
   // without candles (or with the wrong ones) stays a little restless. They can be changed later.
   stonePlot(p) {
     const q = p.body.position;
-    return this.plots.find((pl) => pl.buried && Math.abs(q.x - pl.x) < PLOT_HALF.x + 0.9 && Math.abs(q.z - pl.z) < PLOT_HALF.z + 0.9) || null;
+    return this.plots.find((pl) => pl.buried && pl.item == null && Math.abs(q.x - pl.x) < PLOT_HALF.x + 0.9 && Math.abs(q.z - pl.z) < PLOT_HALF.z + 0.9) || null;
   }
   readCandleInput(p) {
     const inp = p.input;
@@ -1038,7 +1186,7 @@ export class Sim {
       if (body && body.blessed) return `${body.name} is blessed (${riteLabel(body.blessed)}) · E: pick them up`;
       return body ? `Chapel: E to take the charms and bless ${body.name}` : 'Chapel: lay a body on the bier to bless them';
     }
-    if (this.truck.state === 'wait' && this.atHatch(p) && this.corpsesInBed().length) {
+    if (this.truck.state === 'wait' && this.atHatch(p) && this.cargoInBed().length) {
       const on = this.bodiesOn(MORGUE.table)[0];
       return on ? `E: pick up ${on.name} · the next one comes in when the table is clear` : 'E: take the body in through the hatch';
     }
@@ -1225,7 +1373,7 @@ export class Sim {
     if (near && (dog || nd < 9)) return { p: near }; // dogs chase anyone, the rest only bother with someone close
     let plot = null, pd = Infinity;
     for (const pl of this.plots) {
-      if (!pl.buried) continue;
+      if (!pl.buried || pl.item != null) continue; // a grave with no body in it has nobody to raise
       const dist = Math.hypot(pl.x - q.x, pl.z - q.z) - (pl.unrest || 0) * 8; // restless graves call louder
       if (dist < pd) { pd = dist; plot = pl; }
     }
@@ -1438,6 +1586,7 @@ export class Sim {
     for (const e of this.ents) if (e.kind === 'digger') this.updatePlayer(e, h);
     for (const e of this.ents) if (e.kind === 'digger' && e.grab) this.updateHand(e, h);
     this.driveHeld(h);
+    for (const e of this.ents) if (e.kind === 'item' && e.croc) this.updateCroc(e, h);
     this.world.step(h);
     this.afterStep(h);
   }
@@ -1643,7 +1792,7 @@ export class Sim {
         this.emit('toast', { text: '+6 nails, +2 boards', pos: [MORGUE.crate.x, 1.6, MORGUE.crate.z] });
       }
     } else if (t.state === 'wait') {
-      const empty = this.corpsesInBed().length === 0;
+      const empty = this.cargoInBed().length === 0;
       if ((empty && this.time - t.t > 3) || this.time - t.t > 120) {
         t.state = 'leave'; t.t = this.time;
         this.emit('sfx', { name: 'honk', pos: [x, 1.5, ROAD_Z] });
@@ -1669,6 +1818,8 @@ export class Sim {
 
   hintFor(p) {
     if (p.rag) return this.holders(p) ? 'A friend is carrying you. Enjoy the ride.' : 'Press R to get up';
+    if (p.grab && p.grab.ent.kind === 'item') return p.grab.ent.croc ? "It's thrashing! Hand it in at a window in the office, quick"
+      : 'Hand it in at Lost & Found or Police! (office) · or bury it quietly for cash';
     if (p.grab) {
       if (p.grab.coffin) return this.holders(p.grab.ent) > 1 ? 'Teamwork! Walk in file and drop it into a dug grave.' : 'Heavy! Stand still to rest, or get a friend on the other end.';
       return 'Lay them in a coffin · Click to drop · Right-click to throw';
@@ -1682,7 +1833,7 @@ export class Sim {
     const w = this.workTarget(p);
     if (w && w.hint) return w.hint;
     if (this.findGrab(p)) return 'Click to grab';
-    if (this.truck.state === 'wait' && this.corpsesInBed().length && !insideMorgue(p.body.position.x, p.body.position.z)) return 'The hearse is here: take the bodies in through the hatch inside the morgue';
+    if (this.truck.state === 'wait' && this.cargoInBed().length && !insideMorgue(p.body.position.x, p.body.position.z)) return 'The hearse is here: take the bodies in through the hatch inside the morgue';
     return '';
   }
 
@@ -1739,7 +1890,7 @@ export class Sim {
     const ev = this.events;
     this.events = [];
     return {
-      score: this.score, buried: this.buried, nails: this.nails, boards: this.boards,
+      score: this.score, buried: this.buried, cash: this.cash, nails: this.nails, boards: this.boards,
       fence: this.fence.map((f) => Math.round(f.hp)),              // per section, 0 = down
       traps: this.traps.map((t) => t.dur * 2 + (t.armed ? 1 : 0)), // snaps left * 2 + armed
       // per plot: depth, fill, buried, seed, name, unrest, candles lit (color index, -1 none), how many
@@ -1750,7 +1901,7 @@ export class Sim {
       phase: [this.phase === 'night' ? 1 : 0, Math.ceil((this.phase === 'day' ? this.dayLen : this.nightLen) - this.phaseT), this.dayN, +this.light().toFixed(3),
         this.ents.filter((e) => e.z).length],
       risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
-      bed: this.corpsesInBed().map((e) => e.id), // bodies riding in the hearse: not drawn (the doors stay shut), counted on the hatch sign
+      bed: this.cargoInBed().map((e) => e.id), // bodies riding in the hearse: not drawn (the doors stay shut), counted on the hatch sign
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
         choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open

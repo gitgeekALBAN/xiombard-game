@@ -14,6 +14,14 @@ wheel / keys 1-4 / a tap pick one, E hums the blessing for 3 s (`RITES`: four ma
 symbols) → lay it in the coffin from the stockroom on the stock table → close the lid (F) → optionally nail it shut
 (F, 4 nails) → carry it out the south door to a dug grave → fill it → E at the headstone: **candles** (color 1-3, count
 by wheel, E lights them; `CANDLES`).
+When a grave is filled a **ghost** leaves it (`view/ghost.js`): happy when name tag, outfit, blessing and nails were all
+right, sad when anything was missed.
+**Odd deliveries** (`ODDITIES`, entity kind `item`): now and then the hearse brings a bag of gold, a bag of suspicious
+white powder, a dead crocodile or a live one instead of a body. Each belongs at one of two windows in the office end of
+the morgue (`MORGUE.windows`: Lost & Found, Police!) — let go at the counter; the wrong window sends you to the other.
+Or drop a rich one into a dug grave and fill it: no ghost, a "???" headstone, and `cash` (shown as $ in the HUD; the
+upgrades it buys come later). A live crocodile waddles about, lashes anyone close with its tail (they go limp) and
+wriggles out of your arms now and then.
 A body let go over a free station table is laid out straight on it (`tableAssist`), like a body dropped at a coffin.
 Each missed item (no tag, wrong outfit, wrong or no blessing, not nailed, wrong or no candles) adds 1 `unrest` to the
 grave and scores fewer peace points. A station's first E does its job; the next E picks the body up.

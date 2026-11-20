@@ -57,9 +57,11 @@ export const MORGUE = {
   stock: { x: -10.6, z: 7.9, hx: 0.66, hz: 1.3, top: 0.5 }, // 4 a fresh coffin slides in here from the stockroom
   chapel: { x: -5.6, z: 7.0, ...STATION }, // the bier in the chapel corner (south wall): a body on it is blessed with a charm
   charmRack: { x: -7.25, z: 6.16, y: 1.45 }, // the charms hang on the south wall beside the bier
+  // two hand-in windows in the office end of the south wall: a counter inside under each sign (odd deliveries go here)
+  windows: { lost: { x: 8.0, z: 6.0, top: 1.0 }, police: { x: 11.2, z: 6.0, top: 1.0 } },
   stockDoor: [7.0, 8.8], // the stockroom door in the west wall (z range), behind the stock table
   rack: { x: -12.86, z0: 9.7, dz: 0.52, y: 1.5 }, // the outfits on show by the dressing table (west wall)
-  crate: { x: 11.2, z: 7.0, hx: 0.45, hy: 0.35, hz: 0.35 }, // nails and boards, in the office
+  crate: { x: 12.3, z: 8.2, hx: 0.45, hy: 0.35, hz: 0.35 }, // nails and boards, in the office
   office: [ // clerk's desk and filing cabinets in the east end: furniture you bump into
     { c: [8.6, 0.4, 11.5], h: [0.85, 0.4, 0.4], kind: 'desk' },
     { c: [12.5, 0.75, 9.6], h: [0.3, 0.75, 0.45], kind: 'cabinet' },
@@ -95,6 +97,18 @@ export const CANDLES = [
   { id: 'ember', label: 'Ember', color: '#e0703a' },
 ];
 export const MAX_CANDLES = 4;
+// Odd deliveries: now and then the hearse brings something that is not a body. Each belongs at one of the morgue's two
+// windows ('lost' = Lost & Found, 'police' = Police!); the rich ones can instead be buried quietly for cash (the
+// upgrades it pays for come later). Order matters: an entity's `look` is the index here (wire format).
+// h: physics half sizes; mass in kg; live: it walks about and lashes out with its tail.
+export const ODDITIES = [
+  { id: 'gold', label: 'Bag of gold', window: 'lost', cash: 30, h: [0.22, 0.24, 0.22], mass: 18 },
+  { id: 'powder', label: 'Bag of suspicious white powder', window: 'police', cash: 50, h: [0.26, 0.14, 0.18], mass: 12 },
+  { id: 'crocDead', label: 'Dead crocodile', window: 'lost', cash: 40, h: [0.8, 0.14, 0.2], mass: 45 },
+  { id: 'crocLive', label: 'Live crocodile', window: 'police', cash: 0, h: [0.8, 0.14, 0.2], mass: 45, live: true },
+];
+export const ODD_CHANCE = 0.3; // per slot in a delivery, after the first body
+export const WINDOW_LABEL = { lost: 'Lost & Found', police: 'Police!' };
 // a delivery note: a stiff card, half sizes in meters (physics box and the drawn sheet)
 export const NOTE = { hx: 0.15, hy: 0.006, hz: 0.105 };
 export const candleLabel = (c) => (c ? `${c.n} ${(CANDLES.find((k) => k.id === c.c) || CANDLES[0]).label.toLowerCase()}` : 'none');
@@ -115,6 +129,7 @@ export function morgueBoxes(withFurniture = true) {
     for (const tb of [M.table, M.desk, M.dress, M.stock, M.chapel]) out.push({ c: [tb.x, tb.top / 2, tb.z], h: [tb.hx, tb.top / 2, tb.hz] });
     const c = M.crate;
     out.push({ c: [c.x, c.hy, c.z], h: [c.hx, c.hy, c.hz] });
+    for (const w of Object.values(M.windows)) out.push({ c: [w.x, w.top - 0.04, w.z + 0.2], h: [0.55, 0.04, 0.18] }); // the counters
     for (const o of M.office) out.push({ c: o.c, h: o.h });
   }
   return out;

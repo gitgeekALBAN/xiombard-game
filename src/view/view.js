@@ -3,6 +3,7 @@ import { createSky } from '../shaders/sky.js';
 import { buildCoffin, buildTruck } from './models.js';
 import { buildNote } from './models/note.js';
 import { createGhosts } from './ghost.js';
+import { buildOddity } from './models/oddities.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
 import { PLOTS, PLOT_HALF, insideMorgue, RITES } from '../shared/layout.js';
@@ -182,7 +183,7 @@ export class View {
         // every character is six frames plus one low-poly mesh sculpted from its formulas; coffins and the truck are hand-built meshes
         const crew = d.kind === 'digger' ? buildCrew(crewRig(d.look), { shovel: true }) : d.kind === 'zombie' ? buildCrew(zombieRig(d.look))
           : d.kind === 'corpse' ? buildCrew(corpseRig(d.seed, d.outfit, d.tag), { q: 0.64 }) : null;
-        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed, d.lid) : d.kind === 'note' ? buildNote(d) : buildTruck();
+        const groups = crew ? crew.groups : d.kind === 'coffin' ? buildCoffin(d.seed, d.lid) : d.kind === 'note' ? buildNote(d) : d.kind === 'item' ? buildOddity(d.look) : buildTruck();
         const root = new THREE.Group();
         for (const g of groups) root.add(g);
         if (crew) root.add(crew.mesh);
@@ -238,6 +239,7 @@ export class View {
         const up = risen.has(e.id); if (up !== e.up) { e.up = up; e.crew.setRisen(up); }
         e.root.visible = !bed.has(e.id); // inside the closed hearse: nobody sees them until they come through the hatch
       }
+      if (e.kind === 'item') e.root.visible = !bed.has(e.id); // odd deliveries ride hidden too
       if (e.kind === 'digger') {
         const p = pl.get(e.id);
         const sh = e.groups[CP.armR].userData.shovel;

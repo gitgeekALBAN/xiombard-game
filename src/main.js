@@ -311,6 +311,7 @@ function applyState(st) {
   $('points').textContent = st.score;
   $('nails').textContent = st.nails ?? 0;
   $('boards').textContent = st.boards ?? 0;
+  $('cash').textContent = st.cash ?? 0;
   renderCard(st.players.find((p) => p.id === myId));
   renderWardrobe(st.players.find((p) => p.id === myId));
   renderCharms(st.players.find((p) => p.id === myId));
