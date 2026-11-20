@@ -5,7 +5,7 @@ import { PAL } from './palette.js';
 import { geo, buildHeadstone } from './models.js';
 import { outlineGeo } from './models/common.js';
 import { mat4, noise3 } from './models/propkit.js';
-import { PLOTS, PLOT_HALF, PLOT_MAX_DEPTH } from '../shared/layout.js';
+import { PLOTS, PLOT_HALF, PLOT_MAX_DEPTH, CANDLES } from '../shared/layout.js';
 
 // Grave plot visuals: the moving floor of each hole, the dirt mound beside it, the fill layer,
 // and the fresh headstone with a name plate once someone is buried.
@@ -14,6 +14,12 @@ import { PLOTS, PLOT_HALF, PLOT_MAX_DEPTH } from '../shared/layout.js';
 //   update(time)                                      — per-frame animation
 //   floorTop(i)                                       — world y of the hole's floor (camera and blob shadows use it)
 
+// candles at a headstone (setCandles): plain wax sticks in the note's colors and a little flame; basic materials,
+// the same program as the charm sticks (compiled in warmup.js)
+const CANDLE = new THREE.CylinderGeometry(0.035, 0.04, 0.2, 8);
+const FLAME = new THREE.ConeGeometry(0.022, 0.07, 6);
+const candleMats = CANDLES.map((k) => new THREE.MeshBasicMaterial({ color: k.color, fog: true }));
+const flameMat = new THREE.MeshBasicMaterial({ color: '#ffc04a', fog: true });
 const dirt = toon(PAL.dirtLight, { mottle: 1, gradColor: PAL.dirtDark, gradY: [0.0, 0.45], rim: 0.6 });
 const looseDirt = toon(PAL.dirtLight, { mottle: 1, rim: 0.5 });
 
@@ -178,7 +184,32 @@ export function createGraves(scene, groundMat) {
         v.floor.visible = true;
       }
     },
+    // candles lit at the headstone: color index into CANDLES (-1 none) and how many, a little row on the heap's foot
+    setCandles(i, cc, n) {
+      const v = plots[i], key = cc < 0 || !v.stone ? '' : `${cc}|${n}`;
+      if (key === v.candleKey) return;
+      v.candleKey = key;
+      if (v.candles) { scene.remove(v.candles); v.candles = null; }
+      if (!key) return;
+      const g = new THREE.Group();
+      for (let k = 0; k < n; k++) {
+        const x = (k - (n - 1) / 2) * 0.16, h = 0.16 + ((v.seed + k * 7) % 3) * 0.03;
+        const c = new THREE.Mesh(CANDLE, candleMats[cc]);
+        c.scale.y = h / 0.2; c.position.set(x, h / 2, 0);
+        const fl = new THREE.Mesh(FLAME, flameMat);
+        fl.position.set(x, h + 0.04, 0);
+        fl.userData.flame = k;
+        g.add(c, fl);
+      }
+      g.position.set(v.x, 0.1, v.z - PLOT_HALF.z + 0.5); // on the heap's foot, just in front of the stone
+      v.candles = g;
+      scene.add(g);
+    },
     update(time) {
+      for (const p of plots) if (p.candles) for (const f of p.candles.children) if (f.userData.flame !== undefined) {
+        const s = 1 + 0.18 * Math.sin(time * 9 + f.userData.flame * 2.1) + 0.08 * Math.sin(time * 23 + f.userData.flame);
+        f.scale.set(1 / s, s, 1 / s);
+      }
       for (const p of plots) if (p.stone) {
         const k = Math.min(1, (time - p.stone.userData.born) / 0.5);
         p.stone.position.y = -1.2 * (1 - k) * (1 - k);

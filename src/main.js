@@ -3,7 +3,7 @@ import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom, routeOf } from './net.js';
 import { unlockAudio } from './audio.js';
 import { touch, initTouch, isTouchDevice, goLandscape } from './touch.js';
-import { OUTFITS, RITES } from './shared/layout.js';
+import { OUTFITS, RITES, CANDLES, MAX_CANDLES } from './shared/layout.js';
 import { drawCharm } from './view/models/charms.js';
 import { createBots } from './sim/bots.js';
 import { warmUp } from './view/warmup.js';
@@ -60,13 +60,20 @@ function setFirstPerson(on) {
 }
 setFirstPerson(new URLSearchParams(location.search).get('view') !== 'third');
 // g/th/fl/pk count presses (one-shot actions survive a dropped packet); pv is the outfit picked with the last pk
-const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0 };
+const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0, cc: 0, cn: 1 };
 let choosing = false; // the host says my outfit choice is open (dressing table)
 const pickOutfit = (i) => { input.pv = i; input.pk++; };
 // cw: the chapel charm I want in hand (index into RITES), sent with every input; the host applies it while I hold the charms
 let myCharm = -1; // the charm the host says I hold (-1 none)
 const pickCharm = (i) => { input.cw = ((i % RITES.length) + RITES.length) % RITES.length; };
-addEventListener('wheel', (e) => { if (playing && myCharm >= 0 && e.deltaY) pickCharm(myCharm + Math.sign(e.deltaY)); }, { passive: true });
+// cc/cn: the candles I want at a headstone (color index into CANDLES, how many), applied while the candle choice is open
+let myCandles = null; // [color, count, name] from the host while my candle choice is open
+const setCandles = (c, n) => { input.cc = Math.max(0, Math.min(CANDLES.length - 1, c)); input.cn = Math.max(1, Math.min(MAX_CANDLES, n)); };
+addEventListener('wheel', (e) => {
+  if (!playing || !e.deltaY) return;
+  if (myCharm >= 0) pickCharm(myCharm + Math.sign(e.deltaY));
+  else if (myCandles) setCandles(myCandles[0], myCandles[1] - Math.sign(e.deltaY)); // wheel up: one more
+}, { passive: true });
 let playing = false;
 const SENS = 0.0024;
 
@@ -80,6 +87,7 @@ addEventListener('keydown', (e) => {
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
   if (digit && choosing && +digit[1] <= OUTFITS.length) pickOutfit(+digit[1] - 1);
   else if (digit && myCharm >= 0 && +digit[1] <= RITES.length) pickCharm(+digit[1] - 1);
+  else if (digit && myCandles && +digit[1] <= CANDLES.length) setCandles(+digit[1] - 1, myCandles[1]);
   if (e.code === 'KeyH') $('help').classList.toggle('open');
   if (e.code === 'KeyV') setFirstPerson(!view.firstPerson);
   if (e.code === 'Space') e.preventDefault();
@@ -284,6 +292,27 @@ function renderCharms(me) {
   el.classList.toggle('chant', !!me.chant);
 }
 
+// The candle choice at a headstone: three colors and one to four candles; keys/wheel on a computer, taps on a phone.
+function renderCandles(me) {
+  const c = me ? me.cnd : null, el = $('candles');
+  myCandles = c;
+  el.classList.toggle('show', !!c);
+  if (!c) return;
+  if (!el.childElementCount) {
+    el.innerHTML = '<h3>CANDLES FOR <b></b></h3><div class="row colors">'
+      + CANDLES.map((k, i) => `<button data-c="${i}"><i style="background:${k.color}"></i><span><kbd>${i + 1}</kbd>${escapeHtml(k.label)}</span></button>`).join('')
+      + '</div><div class="row count">' + Array.from({ length: MAX_CANDLES }, (_, i) => `<button data-n="${i + 1}">${i + 1}</button>`).join('')
+      + `</div><button class="light">Light them</button><small>${touch.active ? 'THROW to cancel' : '1-3 color · wheel how many · E light · Q cancel'}</small>`;
+    const tap = (b, fn) => b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
+    el.querySelectorAll('[data-c]').forEach((b) => tap(b, () => setCandles(+b.dataset.c, myCandles ? myCandles[1] : 1)));
+    el.querySelectorAll('[data-n]').forEach((b) => tap(b, () => setCandles(myCandles ? myCandles[0] : 0, +b.dataset.n)));
+    tap(el.querySelector('.light'), () => input.g++);
+  }
+  el.querySelector('h3 b').textContent = c[2];
+  el.querySelectorAll('[data-c]').forEach((b) => b.classList.toggle('on', +b.dataset.c === c[0]));
+  el.querySelectorAll('[data-n]').forEach((b) => b.classList.toggle('on', +b.dataset.n <= c[1]));
+}
+
 function applyState(st) {
   view.setState(st);
   $('score').textContent = st.buried ?? st.score;
@@ -293,6 +322,7 @@ function applyState(st) {
   renderCard(st.players.find((p) => p.id === myId));
   renderWardrobe(st.players.find((p) => p.id === myId));
   renderCharms(st.players.find((p) => p.id === myId));
+  renderCandles(st.players.find((p) => p.id === myId));
   if (st.phase) {
     const [night, left, day, light, zombies] = st.phase;
     view.setDay?.(light);

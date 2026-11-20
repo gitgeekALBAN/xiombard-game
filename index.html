@@ -110,6 +110,21 @@
       @keyframes sway { from { transform: translateY(-6px) rotate(-6deg); } to { transform: translateY(-6px) rotate(6deg); } }
       #charms canvas { width: 44px; height: 44px; }
       #charms kbd { margin-right: 5px; color: inherit; border-color: currentColor; }
+      /* the candle choice at a headstone: same paper as the wardrobe */
+      #candles { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(0.6deg); z-index: 4; display: none; pointer-events: auto;
+        background: #e9dcbc; color: #231d33; border-radius: 10px 4px 12px 4px; padding: 10px 14px 10px; box-shadow: 4px 4px 0 #000; min-width: 250px; }
+      #candles.show { display: block; }
+      #candles h3 { margin: 0 0 6px; font-size: 12px; letter-spacing: .2em; color: #7a6650; font-weight: normal; }
+      #candles h3 b { color: #231d33; letter-spacing: .05em; }
+      #candles .row { display: flex; gap: 6px; margin-top: 6px; }
+      #candles button { font-size: 14px; padding: 6px 8px; box-shadow: 2px 2px 0 #000; background: #d8c8a6; color: #231d33; }
+      #candles button.on { background: var(--accent); }
+      #candles .colors button { display: flex; align-items: center; gap: 6px; flex: 1; }
+      #candles .colors i { display: inline-block; width: 10px; height: 26px; border: 2px solid #231d33; border-radius: 3px 3px 1px 1px; }
+      #candles .count button { flex: 1; font-weight: bold; }
+      #candles .light { display: block; width: 100%; margin-top: 8px; background: #8fd0c4; }
+      #candles kbd { margin-right: 4px; color: inherit; border-color: currentColor; }
+      #candles small { display: block; margin-top: 6px; font-size: 12px; color: #7a6650; }
       #charms small { display: block; margin-top: 6px; font-size: 12px; color: var(--muted); text-shadow: 1px 1px 0 #000; }
       body.touch #card { top: 112px; width: 190px; font-size: 12px; right: calc(12px + env(safe-area-inset-right)); }
       @media (max-height: 520px) { #card { top: 56px; padding: 6px 9px; } #card .who { font-size: 15px; } }
@@ -193,6 +208,7 @@
       <div id="card"></div>
       <div id="wardrobe"></div>
       <div id="charms"></div>
+      <div id="candles"></div>
       <div id="phase"></div>
       <ul id="players"></ul>
       <div id="room"></div>

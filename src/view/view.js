@@ -224,8 +224,9 @@ export class View {
       else if (ev.type === 'puff') this.puff(ev.pos, ev.kind);
     }
     this.world.setYard(st);
-    st.plots.forEach(([d, f, b, seed, name], i) => {
+    st.plots.forEach(([d, f, b, seed, name, , cc = -1, cn = 0], i) => {
       this.graves.setPlot(i, d, f, b, seed, name, this.time);
+      this.graves.setCandles(i, cc, cn);
       this.groundMat.uniforms.uPlotState.value[i] = b;
     });
     const pl = new Map(st.players.map((p) => [p.id, p])), risen = new Set(st.risen || []), bed = new Set(st.bed || []);

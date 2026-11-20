@@ -285,7 +285,7 @@ export class Sim {
     const p = this.addEnt({
       kind: 'digger', name: (name || CREW[look].name).slice(0, 16), color, look, seed: n + 1, body, hand, bit,
       yaw: Math.PI, input: { mx: 0, mz: 0, yaw: Math.PI, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0 },
-      charm: -1, chant: null, // the chapel's charms in hand (index into RITES) and a blessing under way
+      charm: -1, chant: null, candle: null, cc: 0, cn: 1, // candle: the plot whose candles are being chosen // the chapel's charms in hand (index into RITES) and a blessing under way
       last: null, rag: null, ragT: 0, grab: null, phase: 0, grounded: true, turn: 0, hint: '', digging: false, jumpT: 0, slipT: 0, swingT: -9, swingHit: true, upT: -9,
     });
     return p;
@@ -646,6 +646,8 @@ export class Sim {
     plot.unrest = (named ? 0 : 1) + (dressed ? 0 : 1) + (nailed ? 0 : 1) + (blessed ? 0 : 1);
     plot.nailed = nailed;
     plot.who = who;
+    plot.cand = who.cand; plot.candles = null; plot.candleScored = false;
+    plot.baseUnrest = plot.unrest; plot.unrest += 1; // no candles yet (see candleKey)
     this.removeEnt(coffin);
     for (const n of this.ents.filter((e) => e.kind === 'note' && e.of === who.id)) this.removeEnt(n); // laid to rest: the paperwork goes with them
     plot.buried = true;
@@ -658,6 +660,7 @@ export class Sim {
     this.emit('toast', { text: `R.I.P. ${plot.name}`, pos: [plot.x, 2.3, plot.z], big: true });
     this.emit('toast', { text: `${mark(named)} name  ${mark(dressed)} outfit  ${mark(blessed)} blessed  ${mark(nailed)} nailed`, pos: [plot.x, 1.7, plot.z] });
     if (plot.unrest >= 3) this.emit('toast', { text: 'The ground grumbles...', pos: [plot.x, 1.1, plot.z] });
+    else this.emit('toast', { text: 'Now light their candles at the headstone (E)', pos: [plot.x, 1.1, plot.z] });
     if (this.plots.every((pl) => pl.buried)) {
       const old = this.plots.reduce((a, b) => (a.buriedAt < b.buriedAt ? a : b));
       old.buried = false;
@@ -948,6 +951,46 @@ export class Sim {
     if (body && body.blessed) return false;  // already blessed: the click picks them up
     this.takeCharms(p);
     return true;
+  }
+
+  // Candles at the headstone. At a filled grave E opens the choice (a color: input cc, how many: input cn) and E again
+  // lights them. The note says what the dead want; the right candles take one unrest off the grave, so a grave
+  // without candles (or with the wrong ones) stays a little restless. They can be changed later.
+  stonePlot(p) {
+    const q = p.body.position;
+    return this.plots.find((pl) => pl.buried && Math.abs(q.x - pl.x) < PLOT_HALF.x + 0.9 && Math.abs(q.z - pl.z) < PLOT_HALF.z + 0.9) || null;
+  }
+  readCandleInput(p) {
+    const inp = p.input;
+    if (Number.isFinite(inp.cc)) p.cc = Math.max(0, Math.min(CANDLES.length - 1, Math.round(inp.cc)));
+    if (Number.isFinite(inp.cn)) p.cn = Math.max(1, Math.min(MAX_CANDLES, Math.round(inp.cn)));
+  }
+  candleKey(p) {
+    if (p.candle != null) { // the choice is open: light them
+      const plot = this.plots[p.candle];
+      p.candle = null;
+      if (!plot || !plot.buried) return true;
+      plot.candles = { c: CANDLES[p.cc].id, n: p.cn };
+      const ok = !!plot.cand && plot.candles.c === plot.cand.c && plot.candles.n === plot.cand.n;
+      plot.unrest = (plot.baseUnrest || 0) + (ok ? 0 : 1);
+      if (ok && !plot.candleScored) { plot.candleScored = true; this.score += 1; }
+      const pos = [plot.x, 1.3, plot.z - PLOT_HALF.z + 0.5];
+      this.emit('sfx', { name: ok ? 'bell' : 'grab', pos });
+      this.emit('toast', { text: ok ? `${candleLabel(plot.candles)} candles: just as they wished` : `${candleLabel(plot.candles)} candles... not what the note said`, pos });
+      return true;
+    }
+    if (p.grab || p.charm >= 0) return false;
+    const plot = this.stonePlot(p);
+    if (!plot) return false;
+    p.candle = this.plots.indexOf(plot);
+    p.cc = 0; p.cn = 1;
+    this.readCandleInput(p);
+    return true;
+  }
+  checkCandles(p) {
+    if (p.candle == null) return;
+    const plot = this.plots[p.candle];
+    if (p.rag || p.grab || !plot || !plot.buried || this.stonePlot(p) !== plot) p.candle = null;
   }
 
   // The coffin waiting on the stock table, if any.
@@ -1311,7 +1354,7 @@ export class Sim {
     const e = this.spawnCorpse(m, REST_ROTS, plot.seed);
     if (plot.who) { e.outfit = plot.who.outfit; e.tag = plot.who.tag; e.blessed = plot.who.blessed || null; plot.who = null; } // dug up as they were buried
     this.buried = Math.max(0, this.buried - 1);
-    plot.unrest = 0;
+    plot.unrest = 0; plot.baseUnrest = 0; plot.candles = null;
     plot.nailed = false;
     e.greeted = true;
     this.emit('toast', { text: `${plot.name} is back!`, pos: [plot.x, 2, plot.z], big: true });
@@ -1440,11 +1483,13 @@ export class Sim {
     if (inp.g !== last.g) {
       last.g = inp.g;
       if (p.grab) this.drop(p, true);
+      else if (p.candle != null) this.candleKey(p); // the candle choice is open: light them
       else if (this.whackable(p).length || this.threatened(p)) this.whack(p);
-      else if (!this.morgueKey(p)) { if (this.findGrab(p)) this.grab(p); else this.whack(p); }
+      else if (!this.morgueKey(p)) { if (this.findGrab(p)) this.grab(p); else if (!this.candleKey(p)) this.whack(p); }
     }
     if (!p.swingHit && this.time - p.swingT >= SWING_TIME * 0.35) this.landWhack(p);
-    if (inp.th !== last.th) { last.th = inp.th; if (p.choose) p.choose = null; else if (p.charm >= 0) this.putCharmsBack(p); else this.throwHeld(p); }
+    if (inp.th !== last.th) { last.th = inp.th; if (p.choose) p.choose = null; else if (p.candle != null) p.candle = null; else if (p.charm >= 0) this.putCharmsBack(p); else this.throwHeld(p); }
+    if (p.candle != null) this.readCandleInput(p);
     // the charm in hand: cw is the client's pick (wheel, keys 1-4 or a tap); not while a blessing is under way
     if (p.charm >= 0 && !p.chant && Number.isFinite(inp.cw)) p.charm = ((Math.round(inp.cw) % RITES.length) + RITES.length) % RITES.length;
     if (p.chant) this.updateChant(p);
@@ -1551,7 +1596,7 @@ export class Sim {
     // a fresh coffin comes in from the stockroom whenever the stock table is clear
     if (Math.floor(this.time / 2) !== Math.floor((this.time - h) / 2)) this.restockCoffin();
     if (Math.floor(this.time * 5) !== Math.floor((this.time - h) * 5)) {
-      for (const e of this.ents) if (e.kind === 'digger') { this.checkWardrobe(e); this.checkCharms(e); e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
+      for (const e of this.ents) if (e.kind === 'digger') { this.checkWardrobe(e); this.checkCharms(e); this.checkCandles(e); e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
     }
   }
 
@@ -1610,6 +1655,9 @@ export class Sim {
     if (this.whackable(p).length) return 'Click to whack!';
     const m = this.morgueHint(p);
     if (m) return m;
+    if (p.candle != null) return 'Candles: 1-3 color · wheel: how many · E: light them · Q: cancel';
+    const sp = !p.grab && this.stonePlot(p);
+    if (sp && !this.findGrab(p)) return sp.candles ? `Candles burn for ${sp.name} · E to change them` : `E: light candles for ${sp.name}`;
     const w = this.workTarget(p);
     if (w && w.hint) return w.hint;
     if (this.findGrab(p)) return 'Click to grab';
@@ -1673,7 +1721,9 @@ export class Sim {
       score: this.score, buried: this.buried, nails: this.nails, boards: this.boards,
       fence: this.fence.map((f) => Math.round(f.hp)),              // per section, 0 = down
       traps: this.traps.map((t) => t.dur * 2 + (t.armed ? 1 : 0)), // snaps left * 2 + armed
-      plots: this.plots.map((p) => [+p.depth.toFixed(3), +p.fill.toFixed(3), p.buried ? 1 : 0, p.seed, p.name, p.unrest || 0]),
+      // per plot: depth, fill, buried, seed, name, unrest, candles lit (color index, -1 none), how many
+      plots: this.plots.map((p) => [+p.depth.toFixed(3), +p.fill.toFixed(3), p.buried ? 1 : 0, p.seed, p.name, p.unrest || 0,
+        p.buried && p.candles ? CANDLES.findIndex((k) => k.id === p.candles.c) : -1, p.buried && p.candles ? p.candles.n : 0]),
       truck: [+this.truck.wheel.toFixed(3), this.truck.state === 'wait' ? 1 : 0],
       // night flag, seconds left in this half, day number, light (1 day .. 0 night), zombies on their feet
       phase: [this.phase === 'night' ? 1 : 0, Math.ceil((this.phase === 'day' ? this.dayLen : this.nightLen) - this.phaseT), this.dayN, +this.light().toFixed(3),
@@ -1684,6 +1734,7 @@ export class Sim {
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
         choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open
         sw: this.swinging(e) ? 1 : 0, busy: e.grab || e.charm >= 0 ? 1 : 0,
+        cnd: e.candle != null ? [e.cc, e.cn, this.plots[e.candle].name] : null, // the candle choice: color index, count, whose grave
         ch: e.charm ?? -1, chant: e.chant ? 1 : 0, // the charm in hand (index into RITES, -1 none), humming the blessing
         grip: e.grab && !(e.grab.coffin && this.holders(e.grab.ent) > 1) ? +Math.max(0, e.grab.grip).toFixed(2) : -1, // two on a coffin: nothing to lose
       })),
