@@ -1,6 +1,6 @@
 import { View } from './view/view.js';
 import { Sim } from './sim/game.js';
-import { hostRoom, joinRoom } from './net.js';
+import { hostRoom, joinRoom, routeOf } from './net.js';
 import { unlockAudio } from './audio.js';
 import { touch, initTouch, isTouchDevice, goLandscape } from './touch.js';
 import { OUTFITS } from './shared/layout.js';
@@ -162,7 +162,16 @@ async function host() {
   }
 }
 
+// Someone started knocking: say so right away (the link may take a few seconds, or never come up on some networks),
+// and say so again if it fails, so the host isn't left wondering where their friend is.
 function onGuest(conn) {
+  view.toast('Someone is knocking at the gate...', [0, 3, 8], true);
+  // with no route at all the link never even reports 'failed': give up on the same 30 s the guest waits
+  let told = false;
+  const cantLink = () => { if (told || conn.open) return; told = true; view.toast("A friend couldn't get through: your networks won't link up", [0, 3, 8], true); };
+  const giveUp = setTimeout(cantLink, 31000);
+  conn.on('open', () => clearTimeout(giveUp));
+  conn.on('iceStateChanged', (s) => { if (s === 'failed') { clearTimeout(giveUp); cantLink(); } });
   conn.on('data', (msg) => {
     if (msg.t === 'hello') {
       if ([...guests.values()].length >= 5) { conn.send({ t: 'full' }); setTimeout(() => conn.close(), 500); return; }
@@ -172,6 +181,7 @@ function onGuest(conn) {
       guests.set(conn, { id: p.id, ver: -1 });
       conn.send({ t: 'welcome', id: p.id });
       view.toast(`${p.name} joined the night shift`, [0, 3, 8], true);
+      routeOf(conn).then((r) => { console.info(`[net] ${p.name} linked ${r}`); (window.__net ||= { routes: [] }).routes.push(r); });
     } else if (msg.t === 'in') {
       const g = guests.get(conn);
       if (g) sim.setInput(g.id, msg);
@@ -192,11 +202,12 @@ async function join(code) {
   unlockAudio();
   setStatus('Knocking on the crypt door...');
   try {
-    const { conn } = await joinRoom(code);
+    const { conn } = await joinRoom(code, setStatus);
     hostConn = conn;
+    routeOf(conn).then((r) => { console.info(`[net] linked to the host ${r}`); (window.__net ||= { routes: [] }).routes.push(r); });
     conn.send({ t: 'hello', name: playerName() });
     conn.on('data', (msg) => {
-      if (msg.t === 'welcome') { myId = msg.id; view.myId = myId; startPlaying(); showRoom(code.toUpperCase()); }
+      if (msg.t === 'welcome') { myId = msg.id; view.myId = myId; setStatus(''); startPlaying(); showRoom(code.toUpperCase()); }
       else if (msg.t === 'ents') view.setEntities(msg.list, msg.v);
       else if (msg.t === 'snap') { view.setTransforms(new Float32Array(msg.buf), msg.v, false); applyState(msg.st); }
       else if (msg.t === 'full') setStatus('That graveyard is full (6 diggers max).');
