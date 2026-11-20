@@ -12,8 +12,9 @@ const BUILD_N = typeof __BUILD_N__ === 'number' ? __BUILD_N__ : 0; // a host and
 
 // ---------- ICE: how two browsers find a way to each other ----------
 // Trystero brings its own STUN servers, which let most home networks link up directly. Some networks never do (mobile
-// data, carrier-grade NAT, office Wi-Fi): those need a TURN relay that forwards the traffic. None is set up yet; fill
-// TURN_SERVERS ([{ urls: ['turn:host:3478', ...], username, credential }]) once the team has a TURN account. Anything
+// data, carrier-grade NAT, office Wi-Fi) would need a TURN relay that forwards the traffic. Not needed so far (decided):
+// the team's car prototype runs the same way without one on the team's networks. Only if some player can never join
+// (and the car prototype fails for them too) fill TURN_SERVERS ([{ urls: ['turn:host:3478', ...], username, credential }]). Anything
 // here ends up in the public page. Testing: ?turn=turn:host:3478&tuser=..&tpass=.. adds one from the URL; ?relay sends
 // every link through a relay (to check it).
 export const TURN_SERVERS = [];
