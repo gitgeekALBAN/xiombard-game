@@ -173,6 +173,16 @@ export class Post {
     this.final.uniforms.uAspect.value = w / h;
   }
 
+  // For warmUp (warmup.js): the target the scene is drawn into, and each pass with the target it draws into, so their
+  // programs can be compiled ahead against the same output (render targets are linear, the canvas is sRGB).
+  prepare() {
+    const r = this.renderer;
+    if (this.quality === 'off') return { sceneTarget: null, passes: [] };
+    const v = r.getDrawingBufferSize(new THREE.Vector2());
+    if (!v.equals(this.size)) { this.size.copy(v); this.build(v.x, v.y); }
+    return { sceneTarget: this.sceneRT, passes: [[this.prefilter, this.down_[0]], [this.down, this.down_[1]], [this.up, this.up_[0]], [this.final, null]] };
+  }
+
   pass(material, target) {
     this.quad.material = material;
     this.renderer.setRenderTarget(target);

@@ -53,6 +53,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
 - `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard.
 - Custom shaders use `ShaderMaterial`; they write linear color and include `colorspace_fragment` + fog chunks.
+- `src/view/warmup.js` — before the first frame, behind the menu's progress bar: compiles every shader program (the scene, one of everything that appears later, the post passes, each against the render target it draws into) in parallel via `KHR_parallel_shader_compile`, and sculpts every digger and zombie mesh. Nothing is drawn until it is done (`ready` in `main.js`); Host/Join pressed early wait for it. A new kind of object that appears mid-game must get a sample in its `cast`, or its shader compiles live and freezes the frame (on Windows a big painted shader takes seconds). Check with a headless run that wraps the WebGL calls: no `getProgramInfoLog` stall after the menu.
 
 ## Multiplayer architecture (decided)
 - **Host-authoritative P2P.** The host's browser runs `Sim`; guests only send input (30 Hz) and render snapshots (20 Hz).

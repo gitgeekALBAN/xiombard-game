@@ -151,6 +151,8 @@ export function createGraves(scene, groundMat) {
   }
 
   return {
+    // a headstone like the ones put up at a burial, for warmUp to compile its materials before the first one is needed
+    sample: () => freshGrave(1, 'R.I.P.'),
     setPlot(i, d, f, buried, seed, name, time) {
       const v = plots[i];
       v.floor.position.y = -d - 1;

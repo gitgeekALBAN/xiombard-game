@@ -5,6 +5,7 @@ import { unlockAudio } from './audio.js';
 import { touch, initTouch, isTouchDevice, goLandscape } from './touch.js';
 import { OUTFITS } from './shared/layout.js';
 import { createBots } from './sim/bots.js';
+import { warmUp } from './view/warmup.js';
 
 const $ = (id) => document.getElementById(id);
 // which build is this? Shown at the bottom edge, on the menu and in the game (see build-info.js); the middle of the
@@ -120,6 +121,8 @@ let myId = 0;
 let hostConn = null; // guest only
 const guests = new Map(); // conn -> { id, ver }
 let netAcc = 0, inAcc = 0;
+let ready = false;   // warmUp is done: the scene may be drawn and a game may start
+let queued = null;   // a Host / Join pressed before that, run when it is
 
 function startPlaying() {
   playing = true;
@@ -333,7 +336,7 @@ function frame(now) {
   const dt = Math.min(0.05, raw);
   last = now;
   tick(dt);
-  view.frame(dt, look);
+  if (ready) view.frame(dt, look); // nothing is drawn until warmUp has compiled the shaders: a draw would compile them on the spot
   measure(now, raw);
   requestAnimationFrame(frame);
 }
@@ -357,9 +360,28 @@ try {
 try { $('name').value = localStorage.getItem('xiombard-name') || ''; } catch {}
 // on a phone the game goes fullscreen and sideways on the tap that starts it (the tap is the gesture both need)
 const sideways = () => { if (touch.active) goLandscape(); };
-$('host').onclick = () => { sideways(); host(); };
-$('join').onclick = () => { sideways(); join($('code').value.trim()); };
-$('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { sideways(); join($('code').value.trim()); } });
+$('host').onclick = () => { sideways(); whenReady(host); };
+$('join').onclick = () => { sideways(); const c = $('code').value.trim(); whenReady(() => join(c)); };
+$('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { sideways(); const c = $('code').value.trim(); whenReady(() => join(c)); } });
+
+// ---------- warm-up: shaders and meshes made behind a progress bar (view/warmup.js) ----------
+// The menu works meanwhile: you can type your name, and Host / Join pressed early start the moment it is done.
+function whenReady(fn) {
+  if (ready) { fn(); return; }
+  queued = fn;
+  setStatus('Starting as soon as the graveyard is ready...');
+}
+{
+  const bar = $('loadbar'), note = $('loadnote');
+  warmUp(view, ({ done, total, stage }) => {
+    bar.style.width = `${((100 * done) / Math.max(1, total)).toFixed(1)}%`;
+    note.textContent = `${stage}... ${Math.floor((100 * done) / Math.max(1, total))}%`;
+  }).catch((err) => console.error('warm-up failed, compiling on the fly instead', err)).finally(() => {
+    ready = true;
+    document.body.classList.add('ready');
+    if (queued) { const fn = queued; queued = null; setStatus(''); fn(); }
+  });
+}
 $('lost').onclick = () => location.reload();
 if (isTouchDevice()) {
   initTouch($('touch'), look, { grab: () => input.g++, throw: () => input.th++, flop: () => input.fl++ });

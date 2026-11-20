@@ -38,6 +38,12 @@
       button.alt { background: #8fd0c4; }
       button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #000; }
       #status { min-height: 1.4em; margin-top: 12px; color: #ff9b8a; font-size: 14px; }
+      /* warm-up progress (view/warmup.js): shaders and meshes are made before the first frame */
+      #loading { margin: -4px 0 16px; font-size: 13px; color: var(--muted); }
+      #loading .bar { height: 10px; margin-bottom: 6px; background: #0f0b16; border: 2px solid #3a2f4a; border-radius: 8px 3px 8px 3px; overflow: hidden; }
+      #loading i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #f0c060, #9fd66a); transition: width .25s ease; }
+      body.ready #loading { display: none; }
+      body:not(.ready) #host, body:not(.ready) #join { opacity: .8; }
       .divider { margin: 16px 0 6px; color: var(--muted); font-size: 13px; letter-spacing: .2em; }
       #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .6s; }
       #hud.visible { opacity: 1; }
@@ -162,6 +168,7 @@
         <h1>XIOMBARD</h1>
         <h2>Night Shift at the Graveyard</h2>
         <p>The truck keeps bringing bodies. Unload it, put everyone in a coffin, dig a grave and bury them before they wander off. Floppy co-op for up to 6 friends, right in the browser.</p>
+        <div id="loading"><div class="bar"><i id="loadbar"></i></div><span id="loadnote">Opening the gates...</span></div>
         <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" />
         <div class="row"><button id="host">Host a game</button></div>
         <div class="divider">— OR JOIN FRIENDS —</div>
