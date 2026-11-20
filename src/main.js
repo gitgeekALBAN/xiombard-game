@@ -1,6 +1,6 @@
 import { View } from './view/view.js';
 import { Sim } from './sim/game.js';
-import { hostRoom, joinRoom, routeOf } from './net.js';
+import { hostRoom, joinRoom, routeOf, joinLobby } from './net.js';
 import { unlockAudio } from './audio.js';
 import { touch, initTouch, isTouchDevice, canTouch, setTouchMode, goLandscape } from './touch.js';
 import { OUTFITS, RITES, CANDLES, MAX_CANDLES } from './shared/layout.js';
@@ -173,6 +173,8 @@ async function host() {
   try {
     const { code } = await hostRoom(onGuest);
     showRoom(code);
+    hosting = code;
+    advertise();
   } catch (err) {
     showRoom(null, `Playing solo — couldn't open a co-op room (${err.type || err.message}).`);
   }
@@ -189,6 +191,7 @@ function onGuest(conn) {
       guests.set(conn, { id: p.id, ver: -1 });
       conn.send({ t: 'welcome', id: p.id });
       view.toast(`${p.name} joined the night shift`, [0, 3, 8], true);
+      advertise();
       routeOf(conn).then((r) => { console.info(`[net] ${p.name} linked ${r}`); (window.__net ||= { routes: [] }).routes.push(r); });
     } else if (msg.t === 'in') {
       const g = guests.get(conn);
@@ -200,6 +203,7 @@ function onGuest(conn) {
     if (!g) return;
     guests.delete(conn);
     sim.removePlayer(g.id);
+    advertise();
   };
   conn.on('close', bye);
   conn.on('error', bye);
@@ -215,7 +219,7 @@ async function join(code) {
     routeOf(conn).then((r) => { console.info(`[net] linked to the host ${r}`); (window.__net ||= { routes: [] }).routes.push(r); });
     conn.send({ t: 'hello', name: playerName() });
     conn.on('data', (msg) => {
-      if (msg.t === 'welcome') { myId = msg.id; view.myId = myId; setStatus(''); startPlaying(); showRoom(code.toUpperCase()); }
+      if (msg.t === 'welcome') { myId = msg.id; view.myId = myId; setStatus(''); startPlaying(); showRoom(code.toUpperCase()); lobby.leave(); }
       else if (msg.t === 'ents') view.setEntities(msg.list, msg.v);
       else if (msg.t === 'snap') { view.setTransforms(new Float32Array(msg.buf), msg.v, false); applyState(msg.st); }
       else if (msg.t === 'full') setStatus('That graveyard is full (6 diggers max).');
@@ -428,6 +432,26 @@ const sideways = () => { if (touch.active) goLandscape(); };
 $('host').onclick = () => { sideways(); whenReady(host); };
 $('join').onclick = () => { sideways(); const c = $('code').value.trim(); whenReady(() => join(c)); };
 $('code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { sideways(); const c = $('code').value.trim(); whenReady(() => join(c)); } });
+
+// ---------- the lobby: open games in the menu, one click to join (net.js joinLobby) ----------
+let hosting = null; // our room code while we host
+const lobby = joinLobby(renderGames);
+setTimeout(() => { if (!$('games').querySelector('button')) renderGames([]); }, 4000); // nobody announced: say so
+// tell the lobby about our game: who hosts it and how many diggers are in (bots do not count)
+function advertise() { if (hosting) lobby.announce({ code: hosting, name: playerName(), n: 1 + guests.size, max: 6 }); }
+function renderGames(list) {
+  const el = $('games');
+  el.innerHTML = '';
+  if (!list.length) { el.innerHTML = '<small>No open games yet. Host one, and friends will see it here.</small>'; return; }
+  for (const g of list) {
+    const b = document.createElement('button');
+    b.innerHTML = `<b>${escapeHtml(g.name)}'s graveyard</b><span>${g.n}/${g.max} ${g.old ? '· other version' : '· Join'}</span>`;
+    b.disabled = g.old || g.n >= g.max;
+    if (g.old) b.title = 'They run another build of the game: everyone reload the page';
+    b.onclick = () => { sideways(); whenReady(() => join(g.code)); };
+    el.appendChild(b);
+  }
+}
 
 // ---------- warm-up: shaders and meshes made behind a progress bar (view/warmup.js) ----------
 // The menu works meanwhile: you can type your name, and Host / Join pressed early start the moment it is done.

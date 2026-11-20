@@ -118,3 +118,36 @@ export async function joinRoom(code, onStage = () => {}) {
     };
   });
 }
+
+// ---------- the lobby ----------
+// Everyone with the menu open sits in one shared room, 'lobby' (like the car prototype). A host keeps announcing its
+// game there ({ code, name, n players, max }, plus our build), so the menu lists open games to join with one click
+// instead of a code to pass around. A game that stops announcing (closed tab) drops off the list after a few seconds.
+// onChange(list) gets [{ code, name, n, max, old }] (old: another build, cannot be joined until everyone reloads).
+export function joinLobby(onChange) {
+  const room = tryJoin(roomConfig(), 'lobby');
+  const ad = room.makeAction('game');
+  const games = new Map(); // peerId -> announcement
+  let mine = null;        // our own game's announcement while we host
+  const changed = () => onChange([...games.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)));
+  ad.onMessage = (data, { peerId }) => {
+    if (!data || !data.code) { if (games.delete(peerId)) changed(); return; } // { code: null }: that game closed
+    games.set(peerId, { code: String(data.code).slice(0, 4), name: String(data.name || 'Someone').slice(0, 16), n: +data.n || 1, max: +data.max || 6,
+      old: !!(data.build && BUILD_N && data.build !== BUILD_N), t: Date.now() });
+    changed();
+  };
+  room.onPeerJoin = (peerId) => { if (mine) ad.send(mine, { target: peerId }).catch(() => {}); };
+  room.onPeerLeave = (peerId) => { if (games.delete(peerId)) changed(); };
+  const sweep = setInterval(() => {
+    const now = Date.now();
+    let gone = false;
+    for (const [k, g] of games) if (now - g.t > 9000) { games.delete(k); gone = true; }
+    if (gone) changed();
+  }, 3000);
+  const beat = setInterval(() => { if (mine) ad.send(mine).catch(() => {}); }, 3000);
+  return {
+    // g: { code, name, n, max } while hosting, null to take the game off the list
+    announce(g) { mine = g ? { ...g, build: BUILD_N } : null; ad.send(mine || { code: null }).catch(() => {}); },
+    leave() { clearInterval(sweep); clearInterval(beat); room.leave().catch(() => {}); },
+  };
+}

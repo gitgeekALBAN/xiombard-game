@@ -38,6 +38,15 @@
       button.alt { background: #8fd0c4; }
       button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #000; }
       #status { min-height: 1.4em; margin-top: 12px; color: #ff9b8a; font-size: 14px; }
+      /* the lobby: open games, one click to join (like the car prototype); the code is the fallback below */
+      #games { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 168px; overflow-y: auto; }
+      #games button { font-size: 16px; padding: 9px 14px; background: #8fd0c4; text-align: left; display: flex; justify-content: space-between; gap: 10px; }
+      #games button b { font-weight: normal; }
+      #games button span { color: #2c2236; opacity: .75; white-space: nowrap; }
+      #games button:disabled { background: #5a5262; color: #c9c0d4; cursor: default; box-shadow: none; }
+      #games small { color: var(--muted); font-size: 13px; padding: 6px 0; }
+      .row.bycode { margin-top: 10px; opacity: .85; }
+      .row.bycode input, .row.bycode button { font-size: 14px; padding: 8px 12px; }
       /* warm-up progress (view/warmup.js): shaders and meshes are made before the first frame */
       #loading { margin: -4px 0 16px; font-size: 13px; color: var(--muted); }
       #loading .bar { height: 10px; margin-bottom: 6px; background: #0f0b16; border: 2px solid #3a2f4a; border-radius: 8px 3px 8px 3px; overflow: hidden; }
@@ -212,7 +221,8 @@
         <input id="name" maxlength="16" placeholder="Your name" autocomplete="off" />
         <div class="row"><button id="host">Host a game</button></div>
         <div class="divider">— OR JOIN FRIENDS —</div>
-        <div class="row"><input id="code" maxlength="4" placeholder="CODE" autocomplete="off" /><button id="join" class="alt">Join</button></div>
+        <div id="games"><small>Looking for open games...</small></div>
+        <div class="row bycode"><input id="code" maxlength="4" placeholder="CODE" autocomplete="off" /><button id="join" class="alt">Join by code</button></div>
         <div id="status"></div>
       </div>
     </div>
