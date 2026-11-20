@@ -94,6 +94,7 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 
 ## Product thinking
 Product, segment and value decisions follow Advanced Jobs To Be Done / Next Move Theory (Ivan Zamesin). Treat new features as value hypotheses with a named riskiest assumption and the cheapest test before building.
+`docs/concept-grave-quota.md` is a concept pitch kept on file (quota, rest meter, hidden infection, trap pits). It is not decided: do not build from it unless asked.
 
 ## Language
 All code, comments, docs and in-game text are in English.
