@@ -30,6 +30,8 @@ void main() {
 const frag = /* glsl */ `
 uniform vec3 uLightDir, uLightCol, uShadeCol, uRimCol, uInk;
 uniform float uFace;     // 0 happy crew, 1 zombie, 2 zombie dog, 3 at rest
+uniform float uMood;     // a crew face's mood: 0 calm, 1 focused, 2 straining, 3 angry (see crewMood)
+uniform float uFaceT;    // seconds, shared by all characters: animates the moods
 uniform vec4 uTint;      // skin goes toward rgb by a (a body that got up)
 uniform vec4 uHeadC;     // face center in rest space (xyz) and head radius
 uniform vec4 uHeadC2;    // a second face (two zombies in one coat); radius 0 = none
@@ -80,6 +82,71 @@ void sewn(inout vec3 col, inout float ink, vec3 p, float around, float R, vec4 p
   if (abs(d) < 0.011) ink = max(ink, 0.9 * stroke(abs(fract(along / 0.022) - 0.5) * 0.022, 0.0028));
 }
 
+// A crew face changes with what the digger is doing (uMood, from the host): 0 calm, 1 focused (working, carrying: one
+// eye squinted, brows knitted, the tip of the tongue out), 2 straining (a heavy load alone: flushed, eyes popping, teeth
+// gritted, sweat flying), 3 angry (swinging the shovel at someone). uFaceT animates the tongue, sweat and pupils.
+float gTongue, gSweat; // filled by faceAt next to its result: pink tongue, light blue sweat
+float ellipse(vec2 q, vec2 r) { return length(q / r) - 1.0; }
+vec4 crewMood(vec2 f, float s, float lw) {
+  float ink = 0.0, white = 0.0, blush = 0.0, t = uFaceT;
+  vec2 cheekL = vec2(-0.6, -0.02) * s, cheekR = vec2(0.6, -0.02) * s;
+  float cheeks = max(smoothstep(0.17 * s, 0.06 * s, length(f - cheekL)), smoothstep(0.17 * s, 0.06 * s, length(f - cheekR)));
+  if (uMood < 1.5) { // focused
+    ink = max(ink, stroke(seg(f, vec2(-0.56, 0.34) * s, vec2(-0.26, 0.26) * s), lw));        // the squinted eye: a > shape
+    ink = max(ink, stroke(seg(f, vec2(-0.56, 0.18) * s, vec2(-0.26, 0.26) * s), lw));
+    ink = max(ink, smoothstep(0.075 * s, 0.05 * s, length(f - vec2(0.42, 0.26) * s)));        // the other: a small dot
+    ink = max(ink, stroke(seg(f, vec2(-0.62, 0.48) * s, vec2(-0.24, 0.41) * s), lw));          // knitted brows
+    ink = max(ink, stroke(seg(f, vec2(0.62, 0.52) * s, vec2(0.26, 0.44) * s), lw));
+    ink = max(ink, stroke(seg(f, vec2(-0.12, -0.2) * s, vec2(0.28, -0.14) * s), lw));         // a tight little mouth
+    vec2 tq = f - vec2(0.3 + 0.025 * sin(t * 5.0), -0.24) * s;                               // the tongue, wiggling
+    float td = ellipse(tq, vec2(0.11, 0.09) * s);
+    gTongue = smoothstep(0.08, -0.05, td);
+    ink = max(ink, stroke(abs(td) * 0.1 * s, lw * 0.9) * step(tq.y, 0.03 * s));
+    blush = 0.42 * cheeks;
+  } else if (uMood < 2.5) { // straining
+    for (int i = 0; i < 2; i++) {
+      vec2 c = vec2(i == 0 ? -0.42 : 0.42, 0.25) * s, q = f - c;
+      float r = 0.2 * s, d = length(q);
+      white = max(white, smoothstep(r, r - lw, d));
+      ink = max(ink, stroke(abs(d - r), lw));
+      vec2 jig = vec2(sin(t * 37.0 + float(i)), cos(t * 31.0)) * 0.025 * s;                   // tiny pupils, trembling
+      ink = max(ink, smoothstep(0.065 * s, 0.045 * s, length(q - jig)));
+    }
+    vec2 m = f - vec2(0.03, -0.34) * s, mh = vec2(0.36, 0.13) * s, dd = abs(m) - mh + 0.06 * s;
+    float box = length(max(dd, 0.0)) + min(max(dd.x, dd.y), 0.0) - 0.06 * s;                 // a gritted-teeth grimace
+    white = max(white, smoothstep(0.0, -lw, box));
+    ink = max(ink, stroke(abs(box), lw));
+    if (box < 0.0) ink = max(ink, max(stroke(abs(m.y), lw * 0.6), stroke(abs(fract(m.x / (0.13 * s) + 0.5) - 0.5) * 0.13 * s, lw * 0.6)));
+    blush = 0.7 * smoothstep(1.15 * s, 0.45 * s, length(f - vec2(0.0, 0.05) * s)) + 0.25 * cheeks; // flushed red
+    for (int i = 0; i < 3; i++) {                                                             // sweat drops running off
+      float k = fract(t * 0.8 + float(i) * 0.37), side = i == 1 ? 1.0 : -1.0;
+      vec2 c = vec2(side * (0.62 + 0.18 * k), 0.7 - 0.6 * k - float(i) * 0.05) * s, q = f - c;
+      float d = length(vec2(q.x, max(q.y, 0.0) * 0.5 + min(q.y, 0.0))) - 0.075 * s;          // a teardrop, pointed up
+      gSweat = max(gSweat, smoothstep(0.012 * s, -0.012 * s, d) * (1.0 - k * 0.5));
+      ink = max(ink, stroke(abs(d), lw * 0.7) * (1.0 - k * 0.5));
+    }
+  } else { // angry
+    ink = max(ink, stroke(seg(f, vec2(-0.64, 0.47) * s, vec2(-0.18, 0.33) * s), lw * 1.5));    // V brows
+    ink = max(ink, stroke(seg(f, vec2(0.64, 0.47) * s, vec2(0.18, 0.33) * s), lw * 1.5));
+    for (int i = 0; i < 2; i++) {                                                             // narrow fierce eyes
+      vec2 q = f - vec2(i == 0 ? -0.4 : 0.4, 0.21) * s;
+      ink = max(ink, smoothstep(0.012, -0.012, ellipse(q, vec2(0.13, 0.05) * s)));
+    }
+    vec2 m = f - vec2(0.05, -0.34) * s;
+    float mo = ellipse(m, vec2(0.2 + 0.02 * sin(t * 18.0), 0.16) * s);                        // shouting
+    gTongue = smoothstep(0.03, -0.03, ellipse(m - vec2(0.0, -0.08) * s, vec2(0.13, 0.065) * s)) * step(mo, -0.12);
+    ink = max(ink, smoothstep(0.02, -0.02, mo) * (1.0 - gTongue));                           // the open mouth, tongue inside
+    vec2 a = f - vec2(0.72, 0.18) * s;                                                        // the little anger mark, on the temple
+    for (int i = 0; i < 4; i++) {
+      vec2 dir = vec2(i < 2 ? 1.0 : -1.0, mod(float(i), 2.0) < 0.5 ? 1.0 : -1.0);
+      vec2 c = dir * 0.1 * s; // four arcs curving in toward the middle, like a popping vein
+      ink = max(ink, stroke(abs(length(a - c) - 0.075 * s), lw * 0.8) * step(dot(a - c, dir), -0.02 * s));
+    }
+    blush = 0.3 * cheeks;
+  }
+  return vec4(ink, white, 0.0, blush);
+}
+
 // The face is painted onto the front of the head. Returns ink (x), eye white (y), shade (z), blush (w).
 vec4 faceAt(vec3 p, vec4 uHeadC) {
   float s = uHeadC.w; vec2 f = p.xy - uHeadC.xy;
@@ -93,7 +160,8 @@ vec4 faceAt(vec3 p, vec4 uHeadC) {
     return vec4(ink, white, shade, 0.0);
   }
   if (p.z < uHeadC.z) return vec4(0.0);
-  if (uFace < 0.5) { // closed happy eyes, a lopsided smile, rosy cheeks
+  if (uFace < 0.5 && uMood > 0.5) return crewMood(f, s, lw); // working, straining or fighting (see crewMood)
+  if (uFace < 0.5) { // calm: closed happy eyes, a lopsided smile, rosy cheeks
     for (int i = 0; i < 2; i++) {
       vec2 q = f - vec2(i == 0 ? -0.4 : 0.4, 0.36) * s;
       if (q.y < -0.12 * s) ink = max(ink, stroke(abs(length(q) - 0.2 * s), lw));
@@ -137,10 +205,13 @@ void main() {
       col *= 1.0 - 0.22 * uGrime * smoothstep(0.74, 0.8, vnoise(p * 34.0 + 5.0));
     }
     for (int i = 0; i < 4; i++) if (uPatch[i].z > 0.0) sewn(col, ink, p, around, uBellyR, uPatch[i], uPatchCol[i]);
+    gTongue = 0.0; gSweat = 0.0;
     vec4 fc = faceAt(p, uHeadC);
     if (uHeadC2.w > 0.0) fc = max(fc, faceAt(p, uHeadC2));
     col = mix(col, vec3(0.86, 0.5, 0.55), fc.w) * (1.0 - fc.z);
     col = mix(col, vec3(0.93, 0.92, 0.84), fc.y);
+    col = mix(col, vec3(0.9, 0.36, 0.45), gTongue);
+    col = mix(col, vec3(0.6, 0.82, 0.96), gSweat);
     ink = max(ink, fc.x);
   } else if (id == 2) col *= knit(around * 0.16 + p.x * 0.3, p.y, 46.0, 62.0);                     // scarf: chunky stitches
   else if (id == 3) col *= knit(around * 0.16, p.y, 60.0, 74.0);                                    // knitted hat
@@ -262,6 +333,9 @@ void main() {
   #endif
 }`;
 
+// the clock every face's mood animation runs on (the view sets it each frame)
+export const FACE_T = { value: 0 };
+
 // Two materials sharing one set of uniforms: the paint and the ink hull.
 export function characterMaterials(opts = {}) {
   const uniforms = {
@@ -269,7 +343,7 @@ export function characterMaterials(opts = {}) {
     uPart: { value: Array.from({ length: 8 }, () => new THREE.Matrix4()) }, uNoHead: { value: 0 },
     uLightDir: { value: new THREE.Vector3(-0.4, 0.7, 0.5).normalize() }, uLightCol: { value: new THREE.Color(1, 1, 1) }, uShadeCol: { value: new THREE.Color(0.5, 0.45, 0.66) },
     uRimCol: { value: new THREE.Color(0, 0, 0) }, uInk: { value: new THREE.Color(INK) },
-    uFace: { value: 0 }, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uHeadC2: { value: new THREE.Vector4(0, 0, 0, 0) }, uBellyR: { value: 0.25 },
+    uFace: { value: 0 }, uMood: { value: 0 }, uFaceT: FACE_T, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uHeadC2: { value: new THREE.Vector4(0, 0, 0, 0) }, uBellyR: { value: 0.25 },
     uPatch: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uPatchCol: { value: Array.from({ length: 4 }, () => new THREE.Color()) },
     uHatPatch: { value: new THREE.Vector4(0, 0, 0, 0) }, uHatPatchCol: { value: new THREE.Color() }, uHatR: { value: 0.15 },
     uWrap: { value: new THREE.Vector4(0, 0, 0, 0) }, uWrapCol: { value: new THREE.Color() }, uHair: { value: new THREE.Vector4(0, 0, 0, 0) }, uHairCol: { value: new THREE.Color() },

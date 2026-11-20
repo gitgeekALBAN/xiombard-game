@@ -14,6 +14,9 @@ wheel / keys 1-4 / a tap pick one, E hums the blessing for 3 s (`RITES`: four ma
 symbols) → lay it in the coffin from the stockroom on the stock table → close the lid (F) → optionally nail it shut
 (F, 4 nails) → carry it out the south door to a dug grave → fill it → E at the headstone: **candles** (color 1-3, count
 by wheel, E lights them; `CANDLES`).
+A digger's painted face follows what they do (`moodOf` in the sim, `crewMood` in `chars/material.js`): calm walking
+about; focused (a squint, the tip of the tongue out) carrying or working; straining (flushed, eyes popping, teeth
+gritted, sweat flying) under a coffin or a crocodile alone; angry while swinging the shovel. `?mood=0..3` forces one.
 When a grave is filled a **ghost** leaves it (`view/ghost.js`): happy when name tag, outfit, blessing and nails were all
 right, sad when anything was missed.
 **Odd deliveries** (`ODDITIES`, entity kind `item`): now and then the hearse brings a bag of gold, a bag of suspicious

@@ -58,5 +58,7 @@ export function buildCrew(rig, opts = {}) {
     u.uTint.value.set(0.33, 0.47, 0.27, on ? 0.75 : 0);
     u.uGrime.value = on ? 0.7 : grime;
   }
-  return { groups, mesh: ch.group, rig, update, setRisen };
+  // a digger's mood shows on the face (0 calm, 1 focused, 2 straining, 3 angry; see crewMood in chars/material.js)
+  const setMood = (m) => { u.uMood.value = m; };
+  return { groups, mesh: ch.group, rig, update, setRisen, setMood };
 }

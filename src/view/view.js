@@ -3,6 +3,9 @@ import { createSky } from '../shaders/sky.js';
 import { buildCoffin, buildTruck } from './models.js';
 import { buildNote } from './models/note.js';
 import { createGhosts } from './ghost.js';
+import { FACE_T } from '../chars/material.js';
+// ?mood=0..3 shows every digger with that face (screenshots, tuning)
+const MOOD_FORCED = (() => { const m = new URLSearchParams(location.search).get('mood'); return m === null ? null : +m; })();
 import { buildOddity } from './models/oddities.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
@@ -244,6 +247,7 @@ export class View {
         const p = pl.get(e.id);
         const sh = e.groups[CP.armR].userData.shovel;
         if (sh && p) sh.visible = !p.busy && !(e.id === this.myId && this.fpNow); // always in hand, except when both mittens are full (your own is the one at the camera)
+        if (p) e.crew.setMood(MOOD_FORCED ?? p.mood ?? 0); // the face they pull
         const ch = e.groups[CP.armR].userData.charm;
         if (ch && p) { ch.visible = p.ch >= 0 && !(e.id === this.myId && this.fpNow); if (p.ch >= 0) ch.userData.setCharm(RITES[p.ch].id); }
       } else if (e.kind === 'truck') {
@@ -260,6 +264,7 @@ export class View {
     this.renderer.info.reset();
     this.sky.material.uniforms.uTime.value = this.time;
     this.ghosts.update(dt, this.camera);
+    FACE_T.value = this.time; // the faces' mood animations (tongue, sweat, trembling pupils)
     const a = 1 - Math.exp(-dt * 16);
     const me = this.ents.get(this.myId);
     const meState = me && this.state ? this.state.players.find((p) => p.id === this.myId) : null;

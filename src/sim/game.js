@@ -1494,6 +1494,20 @@ export class Sim {
     z.slow = sp > 0.5 && z.speed < 0.3 ? z.slow + h : 0;
     if ((z.slow > 0.7 || q.y < -0.3) && this.time > z.hop) { z.hop = this.time + 1; z.slow = 0; b.velocity.y = 5.8; b.velocity.x += Math.cos(z.yaw) * 1.5; b.velocity.z -= Math.sin(z.yaw) * 1.5; }
   }
+  // The face a digger pulls (shown by the crew shader, see crewMood in chars/material.js): 3 angry while swinging the
+  // shovel (and a moment after), 2 straining under a heavy load alone (a coffin, a crocodile), 1 focused while carrying
+  // or working (digging, nailing, a station's choice, the blessing), 0 calm otherwise.
+  moodOf(p) {
+    if (p.rag) return 0;
+    if (this.time - p.swingT < SWING_TIME + 0.5) return 3;
+    if (p.grab) {
+      if (p.grab.coffin) return this.holders(p.grab.ent) > 1 ? 1 : 2;
+      if (p.grab.ent.kind === 'item' && ODDITIES[p.grab.ent.look].h[0] > 0.5) return 2;
+      return 1;
+    }
+    if (p.digging || p.choose || p.chant || p.charm >= 0 || p.candle != null) return 1;
+    return 0;
+  }
   // A bite may infect (BITE_INFECT). Only the one bitten is told (their own HUD: the state carries `inf`, the screen
   // shows it only for yourself); what the infection does next is to come (stages each night, serum, turning: see
   // docs/concept-grave-quota.md).
@@ -1973,6 +1987,7 @@ export class Sim {
         sw: this.swinging(e) ? 1 : 0, busy: e.grab || e.charm >= 0 ? 1 : 0,
         cnd: e.candle != null ? [e.cc, e.cn, this.plots[e.candle].name] : null, // the candle choice: color index, count, whose grave
         inf: e.infected ? 1 : 0, // bitten and infected (shown only on that player's own screen)
+        mood: this.moodOf(e),   // the face they pull: 0 calm, 1 focused, 2 straining, 3 angry
         ch: e.charm ?? -1, chant: e.chant ? 1 : 0, // the charm in hand (index into RITES, -1 none), humming the blessing
         grip: e.grab && !(e.grab.coffin && this.holders(e.grab.ent) > 1) ? +Math.max(0, e.grab.grip).toFixed(2) : -1, // two on a coffin: nothing to lose
       })),
