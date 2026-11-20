@@ -110,6 +110,13 @@
       @keyframes sway { from { transform: translateY(-6px) rotate(-6deg); } to { transform: translateY(-6px) rotate(6deg); } }
       #charms canvas { width: 44px; height: 44px; }
       #charms kbd { margin-right: 5px; color: inherit; border-color: currentColor; }
+      /* bitten and infected: a sickly green edge and a line of text, on the bitten player's screen only */
+      #infected { position: fixed; left: 50%; top: 66px; transform: translateX(-50%); z-index: 3; display: none; pointer-events: none;
+        color: #b9e08a; font-size: 14px; font-style: italic; text-shadow: 1px 1px 0 #000; white-space: nowrap; }
+      body.infected.playing #infected { display: block; }
+      body.infected.playing::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 1;
+        box-shadow: inset 0 0 120px 30px rgba(110, 170, 60, .35); animation: fever 2.4s ease-in-out infinite alternate; }
+      @keyframes fever { from { opacity: .55; } to { opacity: 1; } }
       /* the candle choice at a headstone: same paper as the wardrobe */
       #candles { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(0.6deg); z-index: 4; display: none; pointer-events: auto;
         background: #e9dcbc; color: #231d33; border-radius: 10px 4px 12px 4px; padding: 10px 14px 10px; box-shadow: 4px 4px 0 #000; min-width: 250px; }
@@ -209,6 +216,7 @@
       <div id="wardrobe"></div>
       <div id="charms"></div>
       <div id="candles"></div>
+      <div id="infected">You were bitten... something feels wrong.</div>
       <div id="phase"></div>
       <ul id="players"></ul>
       <div id="room"></div>
@@ -221,7 +229,7 @@
           <kbd>Right-click</kbd>/<kbd>Q</kbd> throw / cancel · <kbd>R</kbd> go limp (ragdoll)<br />
           <kbd>F</kbd> hold to work: dig, close a lid, nail it shut, fill a grave, repair the fence or a trap<br />
         </div>
-        <kbd>V</kbd> first / third person · <kbd>H</kbd> toggle help
+        <kbd>V</kbd> first / third person · <kbd>U</kbd> stuck? wriggle free · <kbd>H</kbd> toggle help
       </div>
     </div>
     <div id="touch">

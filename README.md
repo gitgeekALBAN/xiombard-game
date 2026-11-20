@@ -32,6 +32,7 @@ Host a game, share the 4-letter room code (or the invite link) with friends, the
 | Right-click or Q | throw what you hold / cancel the outfit or candle choice / put the charms back |
 | F (hold) | work: dig, close a coffin lid, nail it shut, fill a grave, repair the fence or a trap, change a body's clothes |
 | R | go limp (ragdoll) / get up |
+| U | stuck in something? wriggle free to the nearest open spot |
 | V | first-person / third-person view |
 
 On phones and tablets on-screen controls appear automatically: stick on the left, drag on the right to look, buttons for grab, work, jump, throw and limp.

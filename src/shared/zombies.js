@@ -142,8 +142,12 @@ function write(rig, i, m, out, off) {
   out[o + 3] = _q.x; out[o + 4] = _q.y; out[o + 5] = _q.z; out[o + 6] = _q.w;
 }
 const ease = (x) => x * x * (3 - 2 * x);
+// digging at a grave with bare hands: each mitten reaches down and forward, then rakes back, the two out of step
+const _scr = [0, 0, 0];
+const scratch = (t, ph) => { const c = Math.sin(t * 9 + ph); _scr[0] = 0.05; _scr[1] = -0.62 - 0.22 * c; _scr[2] = 0.62 + 0.25 * c; return _scr.slice(); };
 
-// s = { speed, phase, t, attack }  attack: 0 = none, otherwise 0..1 progress of the swing (the hit lands near 0.6).
+// s = { speed, phase, t, attack, dig }  attack: 0 = none, otherwise 0..1 progress of the swing (the hit lands near 0.6);
+// dig: digging up a grave with bare hands (paws).
 // Writes 7 floats per part into `out` from `off`, like crewPose.
 export function zombiePose(rig, root, s, out, off = 0) {
   const type = rig.def.type;
@@ -153,7 +157,7 @@ export function zombiePose(rig, root, s, out, off = 0) {
   // a lurching body, a head hanging to one side, stiff little steps
   // the same hop and side-to-side rock as the crew's walk, heavier and slower (see crewPose)
   const wad = Math.min(k, 1.2) * (drag ? 0.5 : 1) * (a ? 0.3 : 1), bounce = Math.abs(Math.cos(s.phase));
-  set(R[0], (drag ? 0.2 : 0.14) + Math.sin(t * 1.3) * 0.03 - wind * 0.25 + slam * 0.5, sw * 0.12 * k, -sw * 0.2 * wad + Math.sin(t * 0.8) * 0.03);
+  set(R[0], (drag ? 0.2 : 0.14) + Math.sin(t * 1.3) * 0.03 - wind * 0.25 + slam * 0.5 + (s.dig ? 0.6 + Math.sin(t * 9) * 0.06 : 0), sw * 0.12 * k, -sw * 0.2 * wad + Math.sin(t * 0.8) * 0.03); // bent right over a grave it digs
   set(R[1], drag ? -0.3 : 0.05, Math.sin(t * 0.6) * 0.15, 0.38 + Math.sin(t * 1.1) * 0.06);
   set(R[4], sw * 0.5 * k, 0, 0.04);
   set(R[5], -sw * 0.5 * k, 0, -0.04);
@@ -182,8 +186,10 @@ export function zombiePose(rig, root, s, out, off = 0) {
       _v.copy(rig.rest[1]).sub(rig.rest[2]).applyQuaternion(q); // the head goes wherever that forearm goes
       out[o] = out[a] + _v.x; out[o + 1] = out[a + 1] + _v.y; out[o + 2] = out[a + 2] + _v.z;
       out[o + 3] = q.x; out[o + 4] = q.y; out[o + 5] = q.z; out[o + 6] = q.w;
-    } else reach(2, [-0.05, 0.03, 0.93], [0.4, -0.9, 0], [0.1, 0.75, 0.3], [-0.05, -0.45, 0.85]);
-    if (look.prop) reach(3, [0.1, -0.05, 0.6], [0.4, -1, -0.2], [0.2, 0.65, -0.05], [-0.05, -0.4, 0.9]); // a club, held up at the ready
+    } else if (s.dig) reach(2, scratch(t, 0), [0.4, -0.9, 0], [0.1, 0.75, 0.3], [-0.05, -0.45, 0.85]);
+    else reach(2, [-0.05, 0.03, 0.93], [0.4, -0.9, 0], [0.1, 0.75, 0.3], [-0.05, -0.45, 0.85]);
+    if (s.dig && !look.prop) reach(3, scratch(t, Math.PI), [0.4, -0.9, 0], [0.1, 0.75, 0.3], [-0.05, -0.45, 0.85]);
+    else if (look.prop) reach(3, [0.1, -0.05, 0.6], [0.4, -1, -0.2], [0.2, 0.65, -0.05], [-0.05, -0.4, 0.9]); // a club, held up at the ready
     else reach(3, [-0.05, 0.03, 0.93], [0.4, -0.9, 0], [0.1, 0.75, 0.3], [-0.05, -0.45, 0.85]);
     return out;
   }
@@ -227,6 +233,10 @@ function dogPose(rig, root, s, out, off) {
   const am = 0.8 * k;
   set(R[2], sw * am, 0, 0); set(R[5], sw * am * 0.9, 0, 0);
   set(R[3], -sw * am, 0, 0); set(R[4], -sw * am * 0.9, 0, 0);
+  if (s.dig) { // digging like a dog: nose down, the front paws going like mad
+    const c = Math.sin(t * 14);
+    set(R[0], 0.3, 0, 0); set(R[1], 0.35, 0, 0); set(R[2], -0.6 + c * 0.7, 0, 0); set(R[3], -0.6 - c * 0.7, 0, 0);
+  }
   _a.makeTranslation(0, Math.abs(cw) * 0.07 * k + lunge * 0.12, 0);
   _m.copy(root).multiply(_a);
   about(_body, _m, rig.pivot[0], R[0]);

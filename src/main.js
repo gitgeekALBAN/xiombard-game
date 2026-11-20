@@ -60,7 +60,7 @@ function setFirstPerson(on) {
 }
 setFirstPerson(new URLSearchParams(location.search).get('view') !== 'third');
 // g/th/fl/pk count presses (one-shot actions survive a dropped packet); pv is the outfit picked with the last pk
-const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0, cc: 0, cn: 1 };
+const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0, cc: 0, cn: 1, us: 0 };
 let choosing = false; // the host says my outfit choice is open (dressing table)
 const pickOutfit = (i) => { input.pv = i; input.pk++; };
 // cw: the chapel charm I want in hand (index into RITES), sent with every input; the host applies it while I hold the charms
@@ -84,6 +84,7 @@ addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') input.g++;
   if (e.code === 'KeyQ') input.th++;
   if (e.code === 'KeyR') input.fl++;
+  if (e.code === 'KeyU') input.us++; // unstick: wriggle out of whatever you got wedged in
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
   if (digit && choosing && +digit[1] <= OUTFITS.length) pickOutfit(+digit[1] - 1);
   else if (digit && myCharm >= 0 && +digit[1] <= RITES.length) pickCharm(+digit[1] - 1);
@@ -316,6 +317,7 @@ function applyState(st) {
   renderWardrobe(st.players.find((p) => p.id === myId));
   renderCharms(st.players.find((p) => p.id === myId));
   renderCandles(st.players.find((p) => p.id === myId));
+  { const me = st.players.find((p) => p.id === myId); document.body.classList.toggle('infected', !!(me && me.inf)); } // only my own bite shows
   if (st.phase) {
     const [night, left, day, light, zombies] = st.phase;
     view.setDay?.(light);

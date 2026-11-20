@@ -57,6 +57,7 @@ export const MORGUE = {
   stock: { x: -10.6, z: 7.9, hx: 0.66, hz: 1.3, top: 0.5 }, // 4 a fresh coffin slides in here from the stockroom
   chapel: { x: -5.6, z: 7.0, ...STATION }, // the bier in the chapel corner (south wall): a body on it is blessed with a charm
   charmRack: { x: -7.25, z: 6.16, y: 1.45 }, // the charms hang on the south wall beside the bier
+  noDelivery: { x: -0.6, y: 1.35 }, // the big red button on the north wall: no more hearse today (tomorrow's comes double)
   // two hand-in windows in the office end of the south wall: a counter inside under each sign (odd deliveries go here)
   windows: { lost: { x: 8.0, z: 6.0, top: 1.0 }, police: { x: 11.2, z: 6.0, top: 1.0 } },
   stockDoor: [7.0, 8.8], // the stockroom door in the west wall (z range), behind the stock table

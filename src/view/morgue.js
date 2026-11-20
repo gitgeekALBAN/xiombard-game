@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Batch, MAT, G, M, paintBox } from './models/environment.js';
 import { spec, P, paintMat, paintAttrs, glowSprites } from '../shaders/paint-env.js';
-import { lampsOn } from '../shaders/toon.js';
+import { lampsOn, toon } from '../shaders/toon.js';
+import { part } from './models/common.js';
 import { PAL } from './palette.js';
 import { rng } from '../shared/rng.js';
 import { MORGUE, OUTFITS, RITES, morgueBoxes, TRAPS, FENCE_SECTIONS, FENCE_HP, fenceSectionAt } from '../shared/layout.js';
@@ -108,6 +109,11 @@ export function buildMorgue(scene, batch) {
   }
   w(G.box, MAT.boardDark, M([rk.x, rk.y, rk.z + 0.03], [0, 0, 0.02], [1.08, 0.38, 0.05]), 0.012);
 
+  // the NO DELIVERY button: a striped plate on the north wall; its big red cap is a mesh of its own (setNoDelivery)
+  const nb = Mg.noDelivery, wallIn = Mg.z1 - Mg.t;
+  w(G.box, spec('#e0b83a', { pat: P.stripes, p1: 7 }), M([nb.x, nb.y, wallIn - 0.025], [0, 0, 0.785], [0.6, 0.6, 0.05]), 0.012);
+  w(G.box, MAT.boardDark, M([nb.x, nb.y, wallIn - 0.055], [0, 0, 0], [0.5, 0.5, 0.02]), 0);
+
   // the two hand-in windows in the office end of the south wall: a shuttered hatch with a frame, a counter, a bell
   for (const wd of Object.values(Mg.windows)) {
     w(G.box, MAT.boardDark, M([wd.x, 1.5, Mg.z0 + Mg.t + 0.02], [0, 0, 0], [1.0, 0.9, 0.03]), 0);                       // the shutter
@@ -158,7 +164,7 @@ export function buildMorgue(scene, batch) {
   scene.add(roof);
 
   // lettering: one canvas, one sign per 128-pixel row: the two outside, then one over each station inside
-  const SIGNS = [['MORGUE', 64], ['DELIVERIES', 60], ['INTAKE', 60], ['REGISTRY', 58], ['DRESSING', 58], ['STOCKROOM', 54], ['OFFICE', 60], ['CHAPEL', 60], ['LOST & FOUND', 52], ['POLICE!', 62]];
+  const SIGNS = [['MORGUE', 64], ['DELIVERIES', 60], ['INTAKE', 60], ['REGISTRY', 58], ['DRESSING', 58], ['STOCKROOM', 54], ['OFFICE', 60], ['CHAPEL', 60], ['LOST & FOUND', 52], ['POLICE!', 62], ['NO DELIVERY', 50]];
   const CW = 512, CH = 128 * SIGNS.length, canvas = document.createElement('canvas');
   canvas.width = CW; canvas.height = CH;
   const g = canvas.getContext('2d'), tex = new THREE.CanvasTexture(canvas);
@@ -188,6 +194,7 @@ export function buildMorgue(scene, batch) {
   signAt(7, 1.2, M([Mg.chapel.x, 2.45, Mg.z0 + 0.2], [0, 0, -0.04])); // on the south wall over the bier, facing into the hall
   signAt(8, 1.3, M([Mg.windows.lost.x, 2.4, Mg.z0 + 0.2], [0, 0, 0.03]));
   signAt(9, 1.2, M([Mg.windows.police.x, 2.4, Mg.z0 + 0.2], [0, 0, -0.03]));
+  signAt(10, 1.2, M([Mg.noDelivery.x, Mg.noDelivery.y + 0.62, Mg.z1 - 0.2], [0, Math.PI, 0.03]));
   const textMat = new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: true });
   const textMesh = new THREE.Mesh(mergeGeometries(quads), textMat);
   textMesh.name = 'morgue-text';
@@ -233,6 +240,13 @@ export function buildMorgue(scene, batch) {
     rack.name = 'charm-rack';
     scene.add(rack);
   }
+  // the button's cap: pushed in and gone dark red while today's deliveries are off
+  const capOn = toon('#7a1e1a', { mottle: 0.3 }), capOff = toon('#e0402e', { mottle: 0.3, rim: 1.3 });
+  const cap = part(new THREE.CylinderGeometry(0.17, 0.2, 0.12, 20).rotateX(Math.PI / 2), capOff, { outline: 0.012 });
+  const capZ = Mg.z1 - Mg.t - 0.12;
+  cap.position.set(Mg.noDelivery.x, Mg.noDelivery.y, capZ);
+  cap.name = 'no-delivery-button';
+  scene.add(cap);
   const plate = new THREE.PlaneGeometry(0.5, 0.5);
   const counters = [
     M([hc + 1.35, 2.5, Mg.z1 + 0.2], [0, 0, -0.05]),               // outside, right of DELIVERIES
@@ -253,6 +267,7 @@ export function buildMorgue(scene, batch) {
       if (text !== shown) { shown = text; paintCount(text); }
     },
     counters,
+    setNoDelivery(on) { cap.material = on ? capOn : capOff; cap.position.z = capZ + (on ? 0.05 : 0); },
   };
 }
 

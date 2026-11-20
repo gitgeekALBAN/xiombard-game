@@ -26,8 +26,14 @@ A body let go over a free station table is laid out straight on it (`tableAssist
 Each missed item (no tag, wrong outfit, wrong or no blessing, not nailed, wrong or no candles) adds 1 `unrest` to the
 grave and scores fewer peace points. A station's first E does its job; the next E picks the body up.
 Corpses slip out of your arms when you run, a coffin is too heavy for one, players can go limp and carry each other.
+The hearse **always** comes back by day (decided: no throttle on bodies lying about). The only way to stop it is the
+big red NO DELIVERY button on the morgue's north wall (E, by day): no more loads today, and tomorrow's first load
+brings the held-back ones too (the coach holds 6; the rest ride with the next). Between deliveries it waits far down
+the road, out of sight (`TRUCK_PARK_X`).
 By **night** zombies come — mostly from outside the fence. They wear fence sections down until they break, step in bear
-traps, chase diggers and dig up graves (restless graves first; nailed coffins take twice as long): the body rises, and
+traps and dig up graves with their hands (restless graves first; nailed coffins take twice as long). They fight only a
+digger who comes close (3.5 m, dogs 6 m) and give up on one who gets away; a hit infects with a 20% chance (only the
+bitten player sees it; what infection does next is to come, see the concept doc). When a grave is dug up the body rises, and
 a fresh copy of its note lies by the grave. Unburied bodies rise at nightfall (not those still in the hearse).
 The crew whacks them with shovels (a click with empty hands). A visitor beaten for good leaves a stranger's body with
 its own note (`remains`): bury it properly or it gets up the next night (dogs just crumble). At dawn visitors crumble;

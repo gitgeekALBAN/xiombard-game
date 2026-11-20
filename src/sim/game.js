@@ -18,7 +18,7 @@ const PLAYER_BITS = 0x3f0;
 const ALL = G_GROUND | G_PROP | G_TRUCK | PLAYER_BITS | G_ZOMBIE;
 const STEP = 1 / 60;
 const CORPSE_MASS = 30, DIGGER_RAG_MASS = 45;
-const MAX_CORPSES = 9;
+const TRUCK_PARK_X = 300; // where the hearse waits between deliveries: far down the road, out of sight
 const TRUCK_SPAWN_X = TRUCK_START_X - 25; // where a load appears on the road: inside the |x| < 45 cleanup bounds
 // Whatever a digger picks up jumps into the mittens and rides there (no rubber band): the sim steers the load to a
 // spot in front of the carrier every step. A body lies across the arms. A coffin is a two-digger job: alone it is
@@ -32,6 +32,7 @@ const DAY_LEN = 150, NIGHT_LEN = 80, TWILIGHT = 10; // seconds; the light fades 
 const MAX_ZOMBIES = 10;     // visitors on the yard at once
 const RISE_TIME = 1.6;      // seconds a zombie takes to climb out of the ground
 const SWING_TIME = 0.45;    // a shovel swing; the blow lands a third of the way in
+const BITE_INFECT = 0.2;    // chance that a zombie's hit infects the digger
 const CHANT_TIME = 3.2;     // humming the blessing over a body on the bier, waving the charm
 const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it has to be dodged or hit first
 const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
@@ -56,9 +57,10 @@ export class Sim {
     this.mGround = new CANNON.Material('ground');
     this.mPlayer = new CANNON.Material('player');
     this.mProp = new CANNON.Material('prop');
-    const cm = (a, b, friction, restitution) => w.addContactMaterial(new CANNON.ContactMaterial(a, b, { friction, restitution }));
-    cm(this.mPlayer, this.mGround, 0, 0);
-    cm(this.mPlayer, this.mProp, 0, 0);
+    const cm = (a, b, friction, restitution, soft) => w.addContactMaterial(new CANNON.ContactMaterial(a, b, { friction, restitution, ...(soft ? { contactEquationStiffness: 1e6, contactEquationRelaxation: 6 } : {}) }));
+    // a digger who ends up inside something is eased out of it, not flung away (U is the deliberate way out: unstick)
+    cm(this.mPlayer, this.mGround, 0, 0, true);
+    cm(this.mPlayer, this.mProp, 0, 0, true);
     cm(this.mPlayer, this.mPlayer, 0, 0);
     cm(this.mProp, this.mGround, 0.55, 0.05);
     cm(this.mProp, this.mProp, 0.45, 0.02);
@@ -72,6 +74,7 @@ export class Sim {
     this.acc = 0;
     this.score = 0;   // peace points
     this.cash = 0;    // money from odd things buried quietly (for upgrades, later)
+    this.noDelivery = false; // the big button: no more hearse today (tomorrow's first load comes double)
     this.buried = 0;  // bodies laid to rest
     this.nails = 12;
     this.boards = 4;
@@ -423,7 +426,7 @@ export class Sim {
   setInput(id, inp) {
     const p = this.byId(id);
     if (!p) return;
-    if (!p.last) p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk };
+    if (!p.last) p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk, us: inp.us };
     p.input = inp;
   }
 
@@ -450,6 +453,26 @@ export class Sim {
     p.rag.bodies[0].angularVelocity.set(Math.cos(tip) * 4.5, (this.rand() - 0.5) * 2, Math.sin(tip) * 4.5);
     this.world.removeBody(p.body);
     p.ragT = this.time;
+  }
+  // U: wriggle free. Stands the digger on the nearest spot around that no solid static thing covers (morgue walls and
+  // furniture, headstones, trees, sheds...). The physics only eases a digger out of overlaps now, so this is the way out
+  // when they really are stuck.
+  unstick(p) {
+    if (p.rag) this.getUp(p);
+    const q = p.body.position, y = q.y > 1.2 ? 0.05 : Math.max(q.y, -PLOT_MAX_DEPTH);
+    const blocked = (x, z) => this.obstacles.some((b) => Math.abs(x - b.c[0]) < b.h[0] + 0.42 && Math.abs(z - b.c[2]) < b.h[2] + 0.42 && b.c[1] - b.h[1] < y + 1.8);
+    for (const r of [0, 0.5, 0.9, 1.4, 2, 2.8, 3.8, 5]) {
+      for (let i = 0, n = r ? 16 : 1; i < n; i++) {
+        const a = (i / n) * Math.PI * 2, x = q.x + Math.cos(a) * r, z = q.z + Math.sin(a) * r;
+        if (blocked(x, z)) continue;
+        p.body.position.set(x, y + (r ? 0.05 : 0.15), z);
+        p.body.velocity.setZero();
+        if (p.grab) this.drop(p);
+        this.emit('sfx', { name: 'flop', pos: [x, 1, z] });
+        return true;
+      }
+    }
+    return false;
   }
   getUp(p) {
     if (!p.rag) return;
@@ -1145,6 +1168,20 @@ export class Sim {
     if (p.rag || p.grab || !plot || !plot.buried || this.stonePlot(p) !== plot) p.candle = null;
   }
 
+  // The big red NO DELIVERY button on the morgue's north wall: by day E switches today's remaining deliveries off (the
+  // load at the hatch stays) and back on. Held back, they arrive with tomorrow's first load (see startDay, updateTruck).
+  atNoDelivery(p) {
+    const q = p.body.position, nb = MORGUE.noDelivery;
+    return !p.rag && !p.grab && insideMorgue(q.x, q.z) && Math.abs(q.x - nb.x) < 0.9 && q.z > MORGUE.z1 - 1.7;
+  }
+  toggleNoDelivery(p) {
+    const nb = MORGUE.noDelivery, pos = [nb.x, nb.y + 0.6, MORGUE.z1 - 0.4];
+    if (this.phase !== 'day') { this.emit('toast', { text: 'No hearse comes at night anyway', pos }); return; }
+    this.noDelivery = !this.noDelivery;
+    this.emit('sfx', { name: this.noDelivery ? 'honk' : 'bell', pos });
+    this.emit('toast', { text: this.noDelivery ? 'NO MORE DELIVERIES TODAY. Tomorrow brings twice as many!' : 'Deliveries are back on for today', pos, big: true });
+  }
+
   // The coffin waiting on the stock table, if any.
   stockCoffin() {
     const S = MORGUE.stock;
@@ -1175,10 +1212,12 @@ export class Sim {
     if (reg && reg.tag !== reg.name) { this.register(reg); return true; }
     const dr = this.stationBody(p, MORGUE.dress);
     if (dr && dr.outfit === 'shroud' && !p.choose) { this.openWardrobe(p, dr); return true; }
+    if (this.atNoDelivery(p)) { this.toggleNoDelivery(p); return true; }
     return this.chapelKey(p);
   }
   morgueHint(p) {
     if (p.choose) return 'Pick an outfit: keys 1-5 · Q to cancel';
+    if (this.atNoDelivery(p) && this.phase === 'day') return this.noDelivery ? 'E: take deliveries again today' : 'E: NO MORE DELIVERIES today (tomorrow brings twice as many)';
     if (p.chant) return 'Humming the blessing... stay by the bier';
     if (this.nearStation(p, MORGUE.chapel) && !p.grab) {
       const body = this.stationBody(p, MORGUE.chapel), held = p.charm >= 0 ? RITES[p.charm].label : '';
@@ -1267,6 +1306,11 @@ export class Sim {
     this.spawns = [];
     this.emit('toast', { text: `Morning! Day ${this.dayN}`, pos: [0, 3.5, 4], big: true });
     this.emit('sfx', { name: 'rooster' });
+    if (this.noDelivery) { // yesterday's deliveries were held back: today's first load brings them too
+      this.truck.owed = (this.truck.owed || 0) + Math.min(5, 2 + Math.ceil((this.truck.loads + 1) / 2));
+      this.noDelivery = false;
+    }
+    if (this.truck.state === 'away') this.truck.t = this.time - 14; // the morning's first hearse sets off at once
     { // what the night broke
       const down = this.fence.filter((f) => f.hp <= 0).length, worn = this.fence.filter((f) => f.hp > 0 && f.hp < FENCE_HP).length;
       const traps = this.traps.filter((t) => t.dur <= 0).length;
@@ -1352,33 +1396,36 @@ export class Sim {
   }
   zombieXf(e, out) {
     const z = e.z, s = this._pose;
-    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z);
+    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z); s.dig = z.digging ? 1 : 0;
     return zombiePose(zombieRig(e.look), this.walkerRoot(e), s, out);
   }
   // a risen body walks like any zombie; the pose is written straight into its ghost bodies
   poseRisen(e) {
     const z = e.z, s = this._pose;
-    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z);
+    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z); s.dig = z.digging ? 1 : 0;
     const xf = zombiePose(corpseRig(e.seed), this.walkerRoot(e), s, e.xf);
     e.bodies.forEach((b, i) => this.bodyFromXf(b, xf, i * 7));
   }
+  // What a zombie is after. The night's work is the graves: they head for the buried (restless ones call louder) and
+  // dig them up with their hands. They only fight a digger who comes close (AGGRO; dogs notice from further), and give
+  // up on one who gets away (KEEP). With no grave to go for they shamble about the yard and meet whoever is there.
   pickTarget(e) {
     const z = e.z, q = z.body.position, dog = z.def.type === ZTYPE.dog;
+    const aggro = dog ? 6 : 3.5, keep = aggro + 2.5, foe = z.target && z.target.p;
     let near = null, nd = Infinity;
     for (const d of this.ents) {
       if (d.kind !== 'digger' || d.rag) continue;
       const dist = Math.hypot(d.body.position.x - q.x, d.body.position.z - q.z);
-      if (dist < nd) { nd = dist; near = d; }
+      if (dist < (d === foe ? keep : aggro) && dist < nd) { nd = dist; near = d; }
     }
-    if (near && (dog || nd < 9)) return { p: near }; // dogs chase anyone, the rest only bother with someone close
+    if (near) return { p: near };
     let plot = null, pd = Infinity;
     for (const pl of this.plots) {
       if (!pl.buried || pl.item != null) continue; // a grave with no body in it has nobody to raise
-      const dist = Math.hypot(pl.x - q.x, pl.z - q.z) - (pl.unrest || 0) * 8; // restless graves call louder
+      const dist = Math.hypot(pl.x - q.x, pl.z - q.z) - (pl.unrest || 0) * 8;
       if (dist < pd) { pd = dist; plot = pl; }
     }
-    if (plot && !dog) return { plot }; // otherwise: dig up the crew's work
-    return near ? { p: near } : null;
+    return plot ? { plot } : null;
   }
   updateWalker(e, h) {
     const z = e.z, b = z.body, def = z.def, dog = def.type === ZTYPE.dog;
@@ -1417,6 +1464,7 @@ export class Sim {
         if (p && !p.rag && dist < def.reach + 0.6) {
           const [k, up] = def.push || (dog ? [2.5, 2] : def.type === ZTYPE.dragger ? [8, 5.5] : [3.8, 3.2]), n = Math.max(dist, 0.01);
           this.toRagdoll(p, new CANNON.Vec3((dx / n) * k, up, (dz / n) * k));
+          if (this.rand() < BITE_INFECT) this.infect(p);
           this.emit('sfx', { name: dog ? 'bark' : 'bonk', pos: [tx, 1, tz] });
           this.emit('toast', { text: dog ? 'Chomp!' : k > 6 ? 'WHAM!' : 'Oof!', pos: [tx, 1.9, tz] });
         }
@@ -1426,7 +1474,8 @@ export class Sim {
     } else if (tg && tg.p && dist < def.reach && this.time > z.cool && Math.abs(dy) < 0.6 && this.time - tg.p.upT > 1.5) {
       z.mode = 'attack'; z.t = this.time; z.hit = false;
     }
-    if (tg && tg.plot && dist < stop + 0.2) { // scratching at a grave until its tenant comes back out
+    z.digging = !!(tg && tg.plot && dist < stop + 0.2) && z.mode === 'walk';
+    if (z.digging) { // scratching at a grave with both hands until its tenant comes back out
       z.digT += h;
       if (Math.floor(z.digT / 0.6) !== Math.floor((z.digT - h) / 0.6)) this.emit('sfx', { name: 'dig', pos: [tx, 0, tz] });
       if (z.digT > (tg.plot.nailed ? 12 : 6)) { z.digT = 0; this.unbury(tg.plot); z.target = null; z.think = 0; } // nails hold twice as long
@@ -1445,6 +1494,10 @@ export class Sim {
     z.slow = sp > 0.5 && z.speed < 0.3 ? z.slow + h : 0;
     if ((z.slow > 0.7 || q.y < -0.3) && this.time > z.hop) { z.hop = this.time + 1; z.slow = 0; b.velocity.y = 5.8; b.velocity.x += Math.cos(z.yaw) * 1.5; b.velocity.z -= Math.sin(z.yaw) * 1.5; }
   }
+  // A bite may infect (BITE_INFECT). Only the one bitten is told (their own HUD: the state carries `inf`, the screen
+  // shows it only for yourself); what the infection does next is to come (stages each night, serum, turning: see
+  // docs/concept-grave-quota.md).
+  infect(p) { if (!p.infected) p.infected = { t: this.time, night: this.nightN }; }
   // knocked off its feet: back to a ragdoll, flying
   knock(e, vx, vy, vz) {
     const z = e.z;
@@ -1592,7 +1645,8 @@ export class Sim {
   }
 
   updatePlayer(p, h) {
-    const inp = p.input, last = p.last || (p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk });
+    const inp = p.input, last = p.last || (p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk, us: inp.us });
+    if (inp.us !== last.us) { last.us = inp.us; this.unstick(p); }
     if (inp.fl !== last.fl) {
       last.fl = inp.fl;
       if (!p.rag) { this.toRagdoll(p); this.emit('sfx', { name: 'flop', pos: [p.body.position.x, 1, p.body.position.z] }); }
@@ -1741,16 +1795,22 @@ export class Sim {
       } else if (e.kind === 'zombie') {
         const pos = e.rag ? e.rag.bodies[0].position : e.z.body.position;
         if (pos.y < -8 || Math.abs(pos.x) > 45 || Math.abs(pos.z) > 45) this.removeEnt(e);
-      } else if (e.kind === 'corpse' || e.kind === 'coffin') {
+      } else if (e.kind === 'corpse' || e.kind === 'coffin' || e.kind === 'item' || e.kind === 'note') {
         const pos = e.kind === 'corpse' ? e.bodies[0].position : e.body.position;
         if (pos.y < -8 || Math.abs(pos.x) > 45 || Math.abs(pos.z) > 45) {
-          this.emit('toast', { text: e.kind === 'corpse' ? `${e.name} got away...` : 'A coffin got away', pos: [0, 3, ROAD_Z] });
+          if (e.kind !== 'note') this.emit('toast', { text: e.kind === 'corpse' ? `${e.name} got away...` : e.kind === 'item' ? `The ${e.name.toLowerCase()} got away...` : 'A coffin got away', pos: [0, 3, ROAD_Z] });
           this.removeEnt(e);
         }
       }
     }
     for (const pl of this.plots) {
       if (pl.fill > 0 && !this.coffinInPlot(pl)) pl.fill = Math.max(0, pl.fill - h);
+    }
+    // a digger on its feet never shoots off: running is 6.2 m/s, a jump 5.8 up (a shove out of an overlap stays gentle)
+    for (const e of this.ents) if (e.kind === 'digger' && !e.rag) {
+      const v = e.body.velocity, hs = Math.hypot(v.x, v.z);
+      if (hs > 8) { v.x *= 8 / hs; v.z *= 8 / hs; }
+      if (v.y > 6.5) v.y = 6.5;
     }
     // safety net: no prop may ever move faster than a hard throw (stops physics blow-ups)
     for (const e of this.ents) for (const b of this.bodiesOf(e)) {
@@ -1799,12 +1859,17 @@ export class Sim {
       }
     } else if (t.state === 'leave') {
       vx = -Math.min(8, 0.5 + (this.time - t.t) * 2);
-      if (x < -TRUCK_START_X) { t.state = 'away'; t.t = this.time; b.position.x = TRUCK_SPAWN_X; b.aabbNeedsUpdate = true; }
+      if (x < -TRUCK_START_X) { t.state = 'away'; t.t = this.time; b.position.x = TRUCK_PARK_X; b.aabbNeedsUpdate = true; }
     } else if (t.state === 'away') {
-      const corpses = this.ents.filter((e) => e.kind === 'corpse').length;
-      if (this.time - t.t > 14 && corpses < MAX_CORPSES - 2 && this.phase === 'day' && this.phaseT < this.dayLen - 35) {
+      // it always comes back by day, however many bodies lie about; only the NO DELIVERY button keeps it away today
+      if (this.time - t.t > 14 && !this.noDelivery && this.phase === 'day' && this.phaseT < this.dayLen - 35) {
+        b.position.x = TRUCK_SPAWN_X; b.aabbNeedsUpdate = true; // back at the end of the road, the load on board
+        t.cage.position.copy(b.position);
         t.loads++;
-        this.spawnLoad(Math.min(5, 2 + Math.ceil(t.loads / 2)));
+        // a day skipped with the button comes back double: what is owed rides along, as much as the coach holds (6)
+        const base = Math.min(5, 2 + Math.ceil(t.loads / 2)), extra = Math.min(t.owed || 0, 6 - base);
+        t.owed = (t.owed || 0) - extra;
+        this.spawnLoad(base + extra);
         t.state = 'arrive';
       }
     }
@@ -1890,7 +1955,7 @@ export class Sim {
     const ev = this.events;
     this.events = [];
     return {
-      score: this.score, buried: this.buried, cash: this.cash, nails: this.nails, boards: this.boards,
+      score: this.score, buried: this.buried, cash: this.cash, nodel: this.noDelivery ? 1 : 0, nails: this.nails, boards: this.boards,
       fence: this.fence.map((f) => Math.round(f.hp)),              // per section, 0 = down
       traps: this.traps.map((t) => t.dur * 2 + (t.armed ? 1 : 0)), // snaps left * 2 + armed
       // per plot: depth, fill, buried, seed, name, unrest, candles lit (color index, -1 none), how many
@@ -1907,6 +1972,7 @@ export class Sim {
         choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open
         sw: this.swinging(e) ? 1 : 0, busy: e.grab || e.charm >= 0 ? 1 : 0,
         cnd: e.candle != null ? [e.cc, e.cn, this.plots[e.candle].name] : null, // the candle choice: color index, count, whose grave
+        inf: e.infected ? 1 : 0, // bitten and infected (shown only on that player's own screen)
         ch: e.charm ?? -1, chant: e.chant ? 1 : 0, // the charm in hand (index into RITES, -1 none), humming the blessing
         grip: e.grab && !(e.grab.coffin && this.holders(e.grab.ent) > 1) ? +Math.max(0, e.grab.grip).toFixed(2) : -1, // two on a coffin: nothing to lose
       })),
