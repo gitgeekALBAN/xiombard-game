@@ -288,6 +288,7 @@ export class Sim {
   ringBell(k) {
     const win = this.windows[k], w = MORGUE.windows[k], pos = [w.x + 0.38, w.top + 0.1, w.z + 0.25];
     this.emit('sfx', { name: 'bell', pos });
+    if (this.phase === 'night') { this.emit('toast', { text: `${WINDOW_LABEL[k]}: closed for the night. Come back at dawn.`, pos: [w.x, 2.0, w.z + 0.6] }); return; }
     if (win.state !== 'closed') return;
     win.state = 'ringing'; win.t = this.time;
     this.emit('toast', { text: k === 'lost' ? 'Ding! Lost & Found is coming...' : 'Ding! The police are coming...', pos: [w.x, 2.0, w.z + 0.6] });
@@ -295,6 +296,12 @@ export class Sim {
   updateWindows() {
     for (const [k, win] of Object.entries(this.windows)) {
       if (win.react && this.time > win.reactT) win.react = 0;
+      if (this.phase === 'night' && win.state !== 'closed') { // the clerks go home at dusk
+        win.state = 'closed';
+        const w = MORGUE.windows[k];
+        this.emit('sfx', { name: 'shutter', pos: [w.x, 1.5, w.z + 0.3] });
+        continue;
+      }
       if (win.state === 'ringing' && this.time - win.t > WINDOW_WAIT) {
         win.state = 'open'; win.t = this.time;
         const w = MORGUE.windows[k];
@@ -1270,6 +1277,7 @@ export class Sim {
     const wk = this.windowNear(p);
     if (wk) {
       const s = this.windows[wk].state, name = WINDOW_LABEL[wk];
+      if (this.phase === 'night') return `${name}: closed for the night`;
       if (s === 'closed') return `E: ring the ${name} bell`;
       if (s === 'ringing') return `${name}: someone is coming to the window...`;
       return p.grab && p.grab.ent.kind === 'item' ? `E: hand it over to ${name}` : `${name} is open: hand things over here`;
@@ -2084,8 +2092,10 @@ export class Sim {
     this.events = [];
     return {
       score: this.score, buried: this.buried, cash: this.cash, nodel: this.noDelivery ? 1 : 0,
-      // the hand-in windows: [0 shut, 1 the bell rang, 2 open; the clerk's face: 0 waiting, 1 pleased, 2 cross]
-      win: Object.fromEntries(Object.entries(this.windows).map(([k, w]) => [k, [w.state === 'open' ? 2 : w.state === 'ringing' ? 1 : 0, w.react || 0]])), nails: this.nails, boards: this.boards,
+      // the hand-in windows: [0 shut, 1 the bell rang, 2 open, 3 shut for the night; the clerk's face: 0 waiting,
+      // 1 pleased, 2 cross; seconds to go: until it opens (1) or closes (2)]
+      win: Object.fromEntries(Object.entries(this.windows).map(([k, w]) => [k, [this.phase === 'night' ? 3 : w.state === 'open' ? 2 : w.state === 'ringing' ? 1 : 0, w.react || 0,
+        Math.max(0, Math.ceil(w.state === 'ringing' ? WINDOW_WAIT - (this.time - w.t) : w.state === 'open' ? WINDOW_OPEN - (this.time - w.t) : 0))]])), nails: this.nails, boards: this.boards,
       fence: this.fence.map((f) => Math.round(f.hp)),              // per section, 0 = down
       traps: this.traps.map((t) => t.dur * 2 + (t.armed ? 1 : 0)), // snaps left * 2 + armed
       // per plot: depth, fill, buried, seed, name, unrest, candles lit (color index, -1 none), how many

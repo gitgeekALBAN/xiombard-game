@@ -8,6 +8,7 @@ import { PAL } from './palette.js';
 import { rng } from '../shared/rng.js';
 import { MORGUE, OUTFITS, RITES, morgueBoxes, TRAPS, FENCE_SECTIONS, FENCE_HP, fenceSectionAt } from '../shared/layout.js';
 import { drawCharm } from './models/charms.js';
+import { buildClerk } from './clerks.js';
 
 // The morgue and what the night does to the yard.
 // The morgue's walls, floor and furniture go into the yard's static Batch (no draw calls of their own). The roof is
@@ -242,47 +243,42 @@ export function buildMorgue(scene, batch) {
   }
   // The hand-in windows (see ringBell in game.js): a plank shutter that rolls up once the clerk has come, and behind it
   // a "portal" into their office (a swirl painted by portalMaterial: violet and teal for Lost & Found, flashing red and
-  // blue for the police) with the clerk in front, a canvas cutout whose face shows what they think of what they got.
-  const clerkFace = (police, mood) => { // mood: 0 waiting, 1 pleased, 2 cross
-    const c = document.createElement('canvas'); c.width = 256; c.height = 224;
-    const g = c.getContext('2d'), ink = '#231d33';
-    g.fillStyle = police ? '#3a4a7a' : '#7a6a8a'; g.beginPath(); g.ellipse(128, 214, 74, 64, 0, Math.PI, 0); g.fill(); // shoulders
-    g.fillStyle = '#e2dcd2'; g.beginPath(); g.ellipse(128, 122, 54, 64, 0, 0, Math.PI * 2); g.fill();                  // head
-    g.lineWidth = 4; g.strokeStyle = ink; g.stroke();
-    g.fillStyle = ink; g.lineCap = 'round';
-    if (mood === 1) { for (const x of [106, 150]) { g.beginPath(); g.arc(x, 116, 9, Math.PI * 1.1, Math.PI * 1.9); g.stroke(); } } // happy eyes
-    else for (const x of [106, 150]) { g.beginPath(); g.arc(x, 114, 6.5, 0, Math.PI * 2); g.fill(); }
-    if (mood === 2) { g.lineWidth = 5; g.beginPath(); g.moveTo(92, 96); g.lineTo(118, 104); g.moveTo(164, 96); g.lineTo(138, 104); g.stroke(); } // cross brows
-    g.lineWidth = 4; g.beginPath();
-    if (mood === 1) g.arc(128, 138, 20, 0.12 * Math.PI, 0.88 * Math.PI);        // a big smile
-    else if (mood === 2) g.arc(128, 162, 18, 1.15 * Math.PI, 1.85 * Math.PI);  // a frown
-    else { g.moveTo(116, 148); g.lineTo(140, 148); }                           // waiting, flat
-    g.stroke();
-    if (mood === 1) { g.fillStyle = 'rgba(230,120,140,0.5)'; for (const x of [92, 164]) { g.beginPath(); g.arc(x, 136, 9, 0, Math.PI * 2); g.fill(); } }
-    if (police) { // a peaked cap with a badge
-      g.fillStyle = '#26305a'; g.fillRect(72, 50, 112, 34); g.fillRect(62, 80, 132, 11);
-      g.fillStyle = '#f0c060'; g.beginPath(); g.arc(128, 66, 8, 0, Math.PI * 2); g.fill();
-    } else { // round glasses and a grey tuft
-      g.strokeStyle = ink; g.lineWidth = 3; for (const x of [106, 150]) { g.beginPath(); g.arc(x, 114, 16, 0, Math.PI * 2); g.stroke(); }
-      g.beginPath(); g.moveTo(122, 114); g.lineTo(134, 114); g.stroke();
-      g.fillStyle = '#8a8490'; g.beginPath(); g.ellipse(128, 64, 40, 16, 0, Math.PI, 0); g.fill();
-    }
-    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-    return new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: true, transparent: false });
-  };
+  // blue for the police) with the clerk standing at the counter: one of our own kind, dressed for the job (clerks.js).
+  // Beside each window a little card counts down: until it opens after the bell, until it shuts, or says ring / night.
   const slats = toon('#6a4a3a', { mottle: 0.6, color2: '#55392c', stripes: 9, axis: 0, stripeDuty: 0.2 });
+  const card = () => {
+    const c = document.createElement('canvas'); c.width = 256; c.height = 176;
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    let shown = '';
+    return {
+      mat: new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: true }),
+      paint(top, big) {
+        const key = top + '|' + big;
+        if (key === shown) return;
+        shown = key;
+        const g = c.getContext('2d');
+        g.fillStyle = '#e9dcbc'; g.fillRect(0, 0, 256, 176);
+        g.strokeStyle = '#6a4a52'; g.lineWidth = 10; g.strokeRect(5, 5, 246, 166);
+        g.fillStyle = '#231d33'; g.textAlign = 'center';
+        g.font = 'bold 22px Georgia, serif'; g.fillText(top, 128, big ? 50 : 96, 226);
+        if (big) { g.font = 'bold 84px Georgia, serif'; g.fillText(big, 128, 148); }
+        tex.needsUpdate = true;
+      },
+    };
+  };
   const windows = Object.entries(Mg.windows).map(([k, wd]) => {
     const police = k === 'police';
     const portal = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.79), portalMaterial(police));
     portal.position.set(wd.x, 1.5, Mg.z0 + Mg.t + 0.022);
-    const faces = [0, 1, 2].map((m) => clerkFace(police, m));
-    const clerk = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.54), faces[0]);
-    clerk.position.set(wd.x, 1.36, Mg.z0 + Mg.t + 0.03);
+    const clerk = buildClerk(k, scene, wd.x, Mg.z0 + 0.04, 1.6); // back against the wall: feet behind the counter's front
     const shutter = part(new THREE.BoxGeometry(0.98, 0.88, 0.03), slats, { outline: 0.008 });
     shutter.position.set(wd.x, 1.5, Mg.z0 + Mg.t + 0.05);
-    portal.name = clerk.name = shutter.name = `window-${k}`;
-    scene.add(portal, clerk, shutter);
-    return { k, portal, clerk, faces, shutter, open: 0, state: 0, mood: 0 };
+    const cd = card(), plate = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.275), cd.mat);
+    plate.position.set(wd.x - 0.9, 1.62, Mg.z0 + Mg.t + 0.03); // clear of the window's frame
+    cd.paint('RING THE BELL', '');
+    portal.name = shutter.name = plate.name = `window-${k}`;
+    scene.add(portal, shutter, plate);
+    return { k, portal, clerk, shutter, card: cd, open: 0, state: 0, mood: -1 };
   });
   // the button's cap: pushed in and gone dark red while today's deliveries are off
   const capOn = toon('#7a1e1a', { mottle: 0.3 }), capOff = toon('#e0402e', { mottle: 0.3, rim: 1.3 });
@@ -312,23 +308,30 @@ export function buildMorgue(scene, batch) {
     },
     counters,
     setNoDelivery(on) { cap.material = on ? capOn : capOff; cap.position.z = capZ + (on ? 0.05 : 0); },
-    // from the host's state: win = { lost: [0 shut | 1 bell rung | 2 open, clerk's face 0 | 1 | 2], police: [...] }
+    // from the host's state: win = { lost: [0 shut | 1 bell rung | 2 open | 3 night, clerk 0 waiting | 1 pleased | 2 cross,
+    // seconds to go], police: [...] }
     setWindows(win) {
       if (!win) return;
       for (const w of windows) {
-        const [s, m] = win[w.k] || [0, 0];
+        const [s, m, left] = win[w.k] || [0, 0, 0];
         w.state = s;
-        if (m !== w.mood) { w.mood = m; w.clerk.material = w.faces[m]; }
+        if (m !== w.mood) { w.mood = m; w.clerk.setMood(m); }
+        if (s === 3) w.card.paint('CLOSED TILL DAWN', '');
+        else if (s === 1) w.card.paint('OPENS IN', String(left));
+        else if (s === 2) w.card.paint('OPEN · CLOSES IN', String(left));
+        else w.card.paint('RING THE BELL', '');
       }
     },
-    // per frame: the shutter rolls up when open (and rattles while the clerk is on the way), the portal swirls
+    // per frame: the shutter rolls up when open (and rattles while the clerk is on the way), the clerk steps up to the
+    // counter, the portal swirls
     updateWindows(dt, time) {
       for (const w of windows) {
         w.open += ((w.state === 2 ? 1 : 0) - w.open) * Math.min(1, dt * 3);
         const rattle = w.state === 1 ? Math.sin(time * 40) * 0.006 : 0;
         w.shutter.position.y = 1.5 + w.open * 0.86 + rattle;
         w.portal.material.uniforms.uT.value = time;
-        w.portal.visible = w.clerk.visible = w.open > 0.02;
+        w.portal.visible = w.open > 0.02;
+        w.clerk.update(dt, time, Math.max(0, (w.open - 0.4) / 0.6)); // hidden while the shutter is down
       }
     },
 

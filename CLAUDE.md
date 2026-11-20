@@ -25,8 +25,11 @@ too) and stuns a zombie or a crocodile for a few seconds — stars over the head
 **Odd deliveries** (`ODDITIES`, entity kind `item`): now and then the hearse brings a bag of gold, a bag of suspicious
 white powder, a dead crocodile or a live one instead of a body. Each belongs at one of two windows in the office end of
 the morgue (`MORGUE.windows`: Lost & Found, Police!). The windows are shut: E at the counter rings the bell, the clerk
-comes in 6 s, the shutter rolls up on a swirling "portal" into their office (`portalMaterial`) and the clerk, a canvas
-cutout, beams at the right thing (+2) or frowns and pushes the wrong one back out. A live crocodile must be knocked out
+comes in 6 s, the shutter rolls up on a swirling "portal" into their office (`portalMaterial`) and the clerk beams at
+the right thing (+2) or gets cross and pushes the wrong one back out. The clerks are crew-style characters dressed for
+the job (`view/clerks.js`: the police in a navy peaked cap with a gold badge, Lost & Found in a felt hat, patched all
+over). A card beside each window counts down (opens in / closes in) or says ring the bell / closed till dawn: the
+windows do not work at night. A live crocodile must be knocked out
 with the shovel first (5 s out cold: spiral eyes, tongue out, stars), or it lashes you with its tail and wriggles free.
 Or drop a rich one into a dug grave and fill it: no ghost, a "???" headstone, and `cash` (shown as $ in the HUD; the
 upgrades it buys come later). A live crocodile waddles about, lashes anyone close with its tail (they go limp) and
