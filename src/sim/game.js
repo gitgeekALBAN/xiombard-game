@@ -33,6 +33,10 @@ const MAX_ZOMBIES = 10;     // visitors on the yard at once
 const RISE_TIME = 1.6;      // seconds a zombie takes to climb out of the ground
 const SWING_TIME = 0.45;    // a shovel swing; the blow lands a third of the way in
 const BITE_INFECT = 0.2;    // chance that a zombie's hit infects the digger
+const CROC_STUN = 5;        // seconds a crocodile stays out cold after a whack (or a hit with something thrown)
+const WINDOW_WAIT = 6;      // seconds from the bell to the shutter going up
+const WINDOW_OPEN = 20;     // seconds a hand-in window stays open (counted again from each hand-in)
+const ZOMBIE_STUN = 4;      // seconds a zombie sees stars after being hit with something thrown
 const CHANT_TIME = 3.2;     // humming the blessing over a body on the bier, waving the charm
 const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it has to be dodged or hit first
 const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
@@ -74,6 +78,7 @@ export class Sim {
     this.acc = 0;
     this.score = 0;   // peace points
     this.cash = 0;    // money from odd things buried quietly (for upgrades, later)
+    this.windows = { lost: { state: 'closed', t: 0, react: 0, reactT: 0 }, police: { state: 'closed', t: 0, react: 0, reactT: 0 } }; // see ringBell
     this.noDelivery = false; // the big button: no more hearse today (tomorrow's first load comes double)
     this.buried = 0;  // bodies laid to rest
     this.nails = 12;
@@ -270,13 +275,51 @@ export class Sim {
     return null;
   }
   // let go at a window: the right one takes it (and thanks you), the wrong one sends you to the other
+  // The windows are shut until someone rings: E at the counter rings the bell, the clerk takes WINDOW_WAIT to come, the
+  // shutter goes up on a "portal" into their office and stays up WINDOW_OPEN (longer while things are handed in). An
+  // open window takes what is let go at its counter, or what was left lying there: the right thing makes the clerk
+  // beam (+2), the wrong one makes them cross and they push it back out.
+  windowNear(p) {
+    const q = p.body.position;
+    if (p.rag || !insideMorgue(q.x, q.z)) return null;
+    for (const [k, w] of Object.entries(MORGUE.windows)) if (Math.abs(q.x - w.x) < 0.9 && q.z > w.z + 0.1 && q.z < w.z + 1.7) return k;
+    return null;
+  }
+  ringBell(k) {
+    const win = this.windows[k], w = MORGUE.windows[k], pos = [w.x + 0.38, w.top + 0.1, w.z + 0.25];
+    this.emit('sfx', { name: 'bell', pos });
+    if (win.state !== 'closed') return;
+    win.state = 'ringing'; win.t = this.time;
+    this.emit('toast', { text: k === 'lost' ? 'Ding! Lost & Found is coming...' : 'Ding! The police are coming...', pos: [w.x, 2.0, w.z + 0.6] });
+  }
+  updateWindows() {
+    for (const [k, win] of Object.entries(this.windows)) {
+      if (win.react && this.time > win.reactT) win.react = 0;
+      if (win.state === 'ringing' && this.time - win.t > WINDOW_WAIT) {
+        win.state = 'open'; win.t = this.time;
+        const w = MORGUE.windows[k];
+        this.emit('sfx', { name: 'shutter', pos: [w.x, 1.5, w.z + 0.3] });
+        for (const e of this.ents.filter((o) => o.kind === 'item' && !this.holders(o) && this.windowAt(o.body.position) === k)) { this.handIn(e, k); break; } // left on the counter
+      } else if (win.state === 'open' && this.time - win.t > WINDOW_OPEN) {
+        win.state = 'closed';
+        const w = MORGUE.windows[k];
+        this.emit('sfx', { name: 'shutter', pos: [w.x, 1.5, w.z + 0.3] });
+      }
+    }
+  }
   handIn(e, k) {
-    const o = ODDITIES[e.look], w = MORGUE.windows[k], pos = [w.x, 1.9, w.z + 0.6];
+    const o = ODDITIES[e.look], w = MORGUE.windows[k], win = this.windows[k], pos = [w.x, 1.9, w.z + 0.6];
+    if (win.state !== 'open') return false; // shut: it just lies on the counter until someone rings
+    win.t = this.time; // a clerk who is busy stays at the window
+    win.reactT = this.time + 3;
     if (o.window !== k) {
+      win.react = 2;
       this.emit('toast', { text: k === 'lost' ? 'Lost & Found: "That is a matter for the police!"' : 'Police: "Not our department. Try Lost & Found."', pos });
       this.emit('sfx', { name: 'honk', pos });
+      const b = e.body; b.velocity.set(0, 2.5, 3); b.wakeUp(); // pushed back across the counter
       return false;
     }
+    win.react = 1;
     this.removeEnt(e);
     this.score += 2;
     this.emit('toast', { text: k === 'lost' ? `Lost & Found: "${o.label}! The owner will be so relieved." +2` : `Police: "We'll take it from here. Good citizens!" +2`, pos, big: true });
@@ -318,6 +361,11 @@ export class Sim {
   // thrashes and every few seconds may wriggle loose (and lash the one holding it). Still in the hearse: it waits.
   updateCroc(e, h) {
     const c = e.croc, b = e.body;
+    if (c.stunT > this.time) { // out cold: no tail, no wriggling, just a limp crocodile to carry
+      if (!this.holders(e)) { b.velocity.x *= 0.9; b.velocity.z *= 0.9; }
+      c.wriggle = Math.max(c.wriggle, c.stunT + 1); // it comes round in your arms before it starts thrashing again
+      return;
+    }
     if (this.holders(e)) {
       if (this.time > c.wriggle) {
         c.wriggle = this.time + 2.5 + this.rand() * 2.5;
@@ -426,7 +474,7 @@ export class Sim {
   setInput(id, inp) {
     const p = this.byId(id);
     if (!p) return;
-    if (!p.last) p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk, us: inp.us };
+    if (!p.last) p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk, us: inp.us, wk: inp.wk };
     p.input = inp;
   }
 
@@ -726,6 +774,7 @@ export class Sim {
     const g = p.grab;
     if (!g) return;
     this.drop(p);
+    g.ent.thrown = { by: p, t: this.time, until: this.time + 1.5 }; // a hit knocks someone over (see checkThrown)
     const f = this.fwd(p);
     const k = g.coffin ? 2.5 : 6;
     for (const b of this.bodiesOf(g.ent)) {
@@ -1218,6 +1267,13 @@ export class Sim {
   }
   morgueHint(p) {
     if (p.choose) return 'Pick an outfit: keys 1-5 · Q to cancel';
+    const wk = this.windowNear(p);
+    if (wk) {
+      const s = this.windows[wk].state, name = WINDOW_LABEL[wk];
+      if (s === 'closed') return `E: ring the ${name} bell`;
+      if (s === 'ringing') return `${name}: someone is coming to the window...`;
+      return p.grab && p.grab.ent.kind === 'item' ? `E: hand it over to ${name}` : `${name} is open: hand things over here`;
+    }
     if (this.atNoDelivery(p) && this.phase === 'day') return this.noDelivery ? 'E: take deliveries again today' : 'E: NO MORE DELIVERIES today (tomorrow brings twice as many)';
     if (p.chant) return 'Humming the blessing... stay by the bier';
     if (this.nearStation(p, MORGUE.chapel) && !p.grab) {
@@ -1397,13 +1453,13 @@ export class Sim {
   }
   zombieXf(e, out) {
     const z = e.z, s = this._pose;
-    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z); s.dig = z.digging ? 1 : 0;
+    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z); s.dig = z.digging ? 1 : 0; s.dizzy = z.stunT > this.time ? 1 : 0;
     return zombiePose(zombieRig(e.look), this.walkerRoot(e), s, out);
   }
   // a risen body walks like any zombie; the pose is written straight into its ghost bodies
   poseRisen(e) {
     const z = e.z, s = this._pose;
-    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z); s.dig = z.digging ? 1 : 0;
+    s.speed = z.speed; s.phase = z.phase; s.t = this.time + e.id; s.attack = this.attackOf(z); s.dig = z.digging ? 1 : 0; s.dizzy = z.stunT > this.time ? 1 : 0;
     const xf = zombiePose(corpseRig(e.seed), this.walkerRoot(e), s, e.xf);
     e.bodies.forEach((b, i) => this.bodyFromXf(b, xf, i * 7));
   }
@@ -1439,6 +1495,12 @@ export class Sim {
     if (z.mode === 'rise') {
       b.velocity.x = b.velocity.z = 0;
       if (this.time - z.t > (e.kind === 'zombie' ? RISE_TIME : 1)) z.mode = 'walk';
+      return;
+    }
+    if (z.stunT > this.time) { // seeing stars: stands swaying, does nothing
+      b.velocity.x = b.velocity.z = 0;
+      z.speed = 0; z.digging = false;
+      if (z.mode === 'attack') z.mode = 'walk';
       return;
     }
     if (this.time > z.think) { z.think = this.time + 0.4 + this.rand() * 0.3; z.target = this.pickTarget(e); }
@@ -1635,7 +1697,51 @@ export class Sim {
       this.emit('toast', { text: this.rand() < 0.5 ? 'BONK!' : 'THWACK!', pos: [q.x, 1.8, q.z] });
       this.emit('puff', { pos: [q.x, q.y + 1.0, q.z], kind: 1 });
     }
-    if (hit.length) this.emit('sfx', { name: 'bonk', pos: [p.body.position.x, 1.2, p.body.position.z] });
+    // a crocodile in reach is knocked out cold for a while: stars, a dizzy face, no tail, no wriggling (then carry it)
+    const b = p.body.position;
+    for (const e of this.ents) {
+      if (e.kind !== 'item' || !e.croc || this.holders(e)) continue;
+      const q = e.body.position, dx = q.x - b.x, dz = q.z - b.z, d = Math.hypot(dx, dz);
+      if (d < SHOVEL_REACH + 0.5 && (d < 0.8 || (dx * f.x + dz * f.z) / d > 0.2)) { this.stunCroc(e); hit.push(e); }
+    }
+    if (hit.length) this.emit('sfx', { name: 'bonk', pos: [b.x, 1.2, b.z] });
+  }
+  stunCroc(e, secs = CROC_STUN) {
+    e.croc.stunT = this.time + secs;
+    const q = e.body.position;
+    this.emit('toast', { text: 'Out cold! Quick, carry it', pos: [q.x, 1.2, q.z] });
+    this.emit('puff', { pos: [q.x, q.y + 0.4, q.z], kind: 1 });
+  }
+  stunned(e) { return e.z ? e.z.stunT > this.time : e.croc ? e.croc.stunT > this.time : false; }
+  // A thrown thing that hits someone: a digger (anyone but the thrower, just after the throw) is knocked off their feet;
+  // a zombie or a crocodile is stunned for a few seconds (stars) but not hurt. One hit per throw.
+  checkThrown() {
+    for (const e of this.ents) {
+      const th = e.thrown;
+      if (!th) continue;
+      if (this.time > th.until || this.holders(e)) { e.thrown = null; continue; }
+      const bs = this.bodiesOf(e);
+      if (!bs.length) { e.thrown = null; continue; }
+      const c = bs[0].position, v = bs[0].velocity, speed = v.length();
+      if (speed < 2.5) continue;
+      for (const o of this.ents) {
+        if (o === e) continue;
+        let q = null, r = 0;
+        if (o.kind === 'digger' && !o.rag && !(o === th.by && this.time - th.t < 0.5)) { q = o.body.position; r = 0.55; }
+        else if (o.z && o.z.mode !== 'down') { q = o.z.body.position; r = 0.55; }
+        else if (o.kind === 'item' && o.croc) { q = o.body.position; r = 0.6; }
+        if (!q || Math.abs(c.x - q.x) > 1.5 || Math.abs(c.z - q.z) > 1.5) continue;
+        if (Math.hypot(c.x - q.x, c.z - q.z) > r + 0.25 || c.y < q.y - 0.3 || c.y > q.y + 2.0) continue;
+        const pos = [q.x, 1.8, q.z];
+        if (o.kind === 'digger') { this.toRagdoll(o, new CANNON.Vec3(v.x * 0.5, 2.5, v.z * 0.5)); this.emit('toast', { text: 'BONK! Down you go', pos }); }
+        else if (o.z) { o.z.stunT = this.time + ZOMBIE_STUN; this.emit('toast', { text: 'Seeing stars!', pos }); }
+        else this.stunCroc(o);
+        this.emit('sfx', { name: 'bonk', pos });
+        v.scale(0.3, v); // it drops off whoever it hit
+        e.thrown = null;
+        break;
+      }
+    }
   }
 
   // ---------- main loop ----------
@@ -1654,13 +1760,15 @@ export class Sim {
     for (const e of this.ents) if (e.kind === 'digger') this.updatePlayer(e, h);
     for (const e of this.ents) if (e.kind === 'digger' && e.grab) this.updateHand(e, h);
     this.driveHeld(h);
+    this.checkThrown();
+    this.updateWindows();
     for (const e of this.ents) if (e.kind === 'item' && e.croc) this.updateCroc(e, h);
     this.world.step(h);
     this.afterStep(h);
   }
 
   updatePlayer(p, h) {
-    const inp = p.input, last = p.last || (p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk, us: inp.us });
+    const inp = p.input, last = p.last || (p.last = { g: inp.g, th: inp.th, fl: inp.fl, pk: inp.pk, us: inp.us, wk: inp.wk });
     if (inp.us !== last.us) { last.us = inp.us; this.unstick(p); }
     if (inp.fl !== last.fl) {
       last.fl = inp.fl;
@@ -1721,11 +1829,15 @@ export class Sim {
     // or outfit in hand, take a body in at the hatch, take a tag or an outfit), grab what is there, or swing at the air
     if (inp.g !== last.g) {
       last.g = inp.g;
-      if (p.grab) this.drop(p, true);
+      const wk = this.windowNear(p);
+      if (wk && this.windows[wk].state === 'closed') this.ringBell(wk); // a shut window: E rings its bell (even with your hands full)
+      else if (p.grab) this.drop(p, true);
       else if (p.candle != null) this.candleKey(p); // the candle choice is open: light them
       else if (this.whackable(p).length || this.threatened(p)) this.whack(p);
-      else if (!this.morgueKey(p)) { if (this.findGrab(p)) this.grab(p); else if (!this.candleKey(p)) this.whack(p); }
+      else if (!this.morgueKey(p)) { if (this.findGrab(p)) this.grab(p); else if (!this.candleKey(p) && inp.tc) this.whack(p); } // on a touch screen GRAB swings too
     }
+    // the mouse's left button only swings the shovel (picking up and putting down is E's: no more grabbing by mistake)
+    if (inp.wk !== last.wk) { last.wk = inp.wk; if (!p.grab && !p.choose && p.candle == null && p.charm < 0) this.whack(p); }
     if (!p.swingHit && this.time - p.swingT >= SWING_TIME * 0.35) this.landWhack(p);
     if (inp.th !== last.th) { last.th = inp.th; if (p.choose) p.choose = null; else if (p.candle != null) p.candle = null; else if (p.charm >= 0) this.putCharmsBack(p); else this.throwHeld(p); }
     if (p.candle != null) this.readCandleInput(p);
@@ -1898,11 +2010,12 @@ export class Sim {
 
   hintFor(p) {
     if (p.rag) return this.holders(p) ? 'A friend is carrying you. Enjoy the ride.' : 'Press R to get up';
+    if (p.grab && p.grab.ent.kind === 'item' && this.windowNear(p)) return this.morgueHint(p); // at a window: ring, wait, hand over
     if (p.grab && p.grab.ent.kind === 'item') return p.grab.ent.croc ? "It's thrashing! Hand it in at a window in the office, quick"
       : 'Hand it in at Lost & Found or Police! (office) · or bury it quietly for cash';
     if (p.grab) {
       if (p.grab.coffin) return this.holders(p.grab.ent) > 1 ? 'Teamwork! Walk in file and drop it into a dug grave.' : 'Heavy! Stand still to rest, or get a friend on the other end.';
-      return 'Lay them in a coffin · Click to drop · Right-click to throw';
+      return 'Lay them in a coffin · E to drop · Right-click to throw';
     }
     if (this.whackable(p).length) return 'Click to whack!';
     const m = this.morgueHint(p);
@@ -1912,7 +2025,7 @@ export class Sim {
     if (sp && !this.findGrab(p)) return sp.candles ? `Candles burn for ${sp.name} · E to change them` : `E: light candles for ${sp.name}`;
     const w = this.workTarget(p);
     if (w && w.hint) return w.hint;
-    if (this.findGrab(p)) return 'Click to grab';
+    if (this.findGrab(p)) return 'E to pick up';
     if (this.truck.state === 'wait' && this.cargoInBed().length && !insideMorgue(p.body.position.x, p.body.position.z)) return 'The hearse is here: take the bodies in through the hatch inside the morgue';
     return '';
   }
@@ -1970,7 +2083,9 @@ export class Sim {
     const ev = this.events;
     this.events = [];
     return {
-      score: this.score, buried: this.buried, cash: this.cash, nodel: this.noDelivery ? 1 : 0, nails: this.nails, boards: this.boards,
+      score: this.score, buried: this.buried, cash: this.cash, nodel: this.noDelivery ? 1 : 0,
+      // the hand-in windows: [0 shut, 1 the bell rang, 2 open; the clerk's face: 0 waiting, 1 pleased, 2 cross]
+      win: Object.fromEntries(Object.entries(this.windows).map(([k, w]) => [k, [w.state === 'open' ? 2 : w.state === 'ringing' ? 1 : 0, w.react || 0]])), nails: this.nails, boards: this.boards,
       fence: this.fence.map((f) => Math.round(f.hp)),              // per section, 0 = down
       traps: this.traps.map((t) => t.dur * 2 + (t.armed ? 1 : 0)), // snaps left * 2 + armed
       // per plot: depth, fill, buried, seed, name, unrest, candles lit (color index, -1 none), how many
@@ -1981,6 +2096,7 @@ export class Sim {
       phase: [this.phase === 'night' ? 1 : 0, Math.ceil((this.phase === 'day' ? this.dayLen : this.nightLen) - this.phaseT), this.dayN, +this.light().toFixed(3),
         this.ents.filter((e) => e.z).length],
       risen: this.ents.filter((e) => e.kind === 'corpse' && e.z).map((e) => e.id), // bodies that got up: drawn as zombies
+      stun: this.ents.filter((e) => this.stunned(e)).map((e) => e.id), // out cold or seeing stars: stars over the head
       bed: this.cargoInBed().map((e) => e.id), // bodies riding in the hearse: not drawn (the doors stay shut), counted on the hatch sign
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),

@@ -147,7 +147,7 @@ const _scr = [0, 0, 0];
 const scratch = (t, ph) => { const c = Math.sin(t * 9 + ph); _scr[0] = 0.05; _scr[1] = -0.62 - 0.22 * c; _scr[2] = 0.62 + 0.25 * c; return _scr.slice(); };
 
 // s = { speed, phase, t, attack, dig }  attack: 0 = none, otherwise 0..1 progress of the swing (the hit lands near 0.6);
-// dig: digging up a grave with bare hands (paws).
+// dig: digging up a grave with bare hands (paws); dizzy: stunned, swaying with its head lolling.
 // Writes 7 floats per part into `out` from `off`, like crewPose.
 export function zombiePose(rig, root, s, out, off = 0) {
   const type = rig.def.type;
@@ -159,6 +159,7 @@ export function zombiePose(rig, root, s, out, off = 0) {
   const wad = Math.min(k, 1.2) * (drag ? 0.5 : 1) * (a ? 0.3 : 1), bounce = Math.abs(Math.cos(s.phase));
   set(R[0], (drag ? 0.2 : 0.14) + Math.sin(t * 1.3) * 0.03 - wind * 0.25 + slam * 0.5 + (s.dig ? 0.6 + Math.sin(t * 9) * 0.06 : 0), sw * 0.12 * k, -sw * 0.2 * wad + Math.sin(t * 0.8) * 0.03); // bent right over a grave it digs
   set(R[1], drag ? -0.3 : 0.05, Math.sin(t * 0.6) * 0.15, 0.38 + Math.sin(t * 1.1) * 0.06);
+  if (s.dizzy) { R[0][2] += Math.sin(t * 3.3) * 0.18; R[1][2] += Math.sin(t * 4.1) * 0.35; R[1][1] += Math.cos(t * 3.7) * 0.3; } // seeing stars: swaying, head lolling
   set(R[4], sw * 0.5 * k, 0, 0.04);
   set(R[5], -sw * 0.5 * k, 0, -0.04);
   const look = rig.def.look;

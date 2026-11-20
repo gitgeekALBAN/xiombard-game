@@ -19,9 +19,15 @@ about; focused (a squint, the tip of the tongue out) carrying or working; strain
 gritted, sweat flying) under a coffin or a crocodile alone; angry while swinging the shovel. `?mood=0..3` forces one.
 When a grave is filled a **ghost** leaves it (`view/ghost.js`): happy when name tag, outfit, blessing and nails were all
 right, sad when anything was missed.
+**Controls (decided):** only E picks things up and puts them down (stations too); the left mouse button only swings the
+shovel (on a touch screen GRAB does both). Anything thrown that hits someone knocks a digger off their feet (friends
+too) and stuns a zombie or a crocodile for a few seconds — stars over the head — without hurting it (`checkThrown`).
 **Odd deliveries** (`ODDITIES`, entity kind `item`): now and then the hearse brings a bag of gold, a bag of suspicious
 white powder, a dead crocodile or a live one instead of a body. Each belongs at one of two windows in the office end of
-the morgue (`MORGUE.windows`: Lost & Found, Police!) — let go at the counter; the wrong window sends you to the other.
+the morgue (`MORGUE.windows`: Lost & Found, Police!). The windows are shut: E at the counter rings the bell, the clerk
+comes in 6 s, the shutter rolls up on a swirling "portal" into their office (`portalMaterial`) and the clerk, a canvas
+cutout, beams at the right thing (+2) or frowns and pushes the wrong one back out. A live crocodile must be knocked out
+with the shovel first (5 s out cold: spiral eyes, tongue out, stars), or it lashes you with its tail and wriggles free.
 Or drop a rich one into a dug grave and fill it: no ghost, a "???" headstone, and `cash` (shown as $ in the HUD; the
 upgrades it buys come later). A live crocodile waddles about, lashes anyone close with its tail (they go limp) and
 wriggles out of your arms now and then.
@@ -116,6 +122,10 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 ## How graphics are made (decided)
 - **One rule.** Hard, simple shapes are plain primitives (boxes, solids of revolution, tubes, ribbons) with only as many triangles as the silhouette needs. Small relief is never geometry: planks, seams, hoops, rivets, stitches, knitting, fringe, cracks, engravings and dirt are painted by the fragment shader from the object's own coordinates. Only soft shapes that have to melt into each other are sculpted (mittens, boots, fur, pompoms on dogs).
 - **Ink outlines** are an inverted hull, and a hull doubles every triangle it covers: keep it for real silhouettes, paint the lines inside a shape.
+- **Triangle budget** (measured 2026-11-20, a lit day with 4 diggers, 4 zombies, 3 bodies, the odd deliveries): ~200k
+  triangles in the scene, ~180k drawn per frame in ~230 draw calls. Per thing: a digger ~7k, a zombie ~8.5k (up to
+  12.7k), a body ~3k, the hearse ~4k, the crocodile ~4.5k (was 16k: tiny details on smooth spheres with hulls — use
+  low spheres/capsules and no hull for dabs, teeth, toes). Static: plants 26k, the yard 19k + hull 17k, backdrop 13k.
 - **Gaussian splatting: tried and dropped.** We built a splat renderer and a set of splat puppets; it cost a second rendering path, was heavy, hard to animate, and did not look better than painted meshes. Do not bring it back without a concrete reason.
 - **Raymarching whole characters per pixel: tried and replaced.** It looked good but cost every covered pixel dozens of formula evaluations; low-poly meshes painted by a shader look the same and cost almost nothing. The demo page is gone.
 

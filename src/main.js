@@ -60,7 +60,7 @@ function setFirstPerson(on) {
 }
 setFirstPerson(new URLSearchParams(location.search).get('view') !== 'third');
 // g/th/fl/pk count presses (one-shot actions survive a dropped packet); pv is the outfit picked with the last pk
-const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0, cc: 0, cn: 1, us: 0 };
+const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0, cc: 0, cn: 1, us: 0, wk: 0, tc: 0 };
 let choosing = false; // the host says my outfit choice is open (dressing table)
 const pickOutfit = (i) => { input.pv = i; input.pk++; };
 // cw: the chapel charm I want in hand (index into RITES), sent with every input; the host applies it while I hold the charms
@@ -105,7 +105,7 @@ canvas.addEventListener('pointerdown', (e) => {
   if (!playing || e.pointerType !== 'mouse') return;
   unlockAudio();
   if (document.pointerLockElement !== canvas) { lockPointer(); return; }
-  if (e.button === 0) input.g++;
+  if (e.button === 0) input.wk++; // left click: swing the shovel (E picks things up)
   if (e.button === 2) input.th++;
 });
 addEventListener('mousemove', (e) => {
@@ -121,6 +121,7 @@ function readInput(dt) {
   if (k('ArrowUp')) look.pitch = clampPitch(look.pitch - dt * 1.2);
   if (k('ArrowDown')) look.pitch = clampPitch(look.pitch + dt * 1.2);
   input.mz = (k('KeyW') ? 1 : 0) - (k('KeyS') ? 1 : 0) + touch.mz;
+  input.tc = touch.active ? 1 : 0; // on a touch screen the GRAB button also swings the shovel (there is no mouse button)
   input.mx = (k('KeyD') ? 1 : 0) - (k('KeyA') ? 1 : 0) + touch.mx;
   input.run = k('ShiftLeft') || k('ShiftRight') || touch.run;
   input.jump = k('Space') || touch.jump;
@@ -335,7 +336,7 @@ function applyState(st) {
   $('players').innerHTML = st.players.map((p) => `<li style="--c:${p.color}">${escapeHtml(p.name)}${p.id === myId ? ' (you)' : ''}</li>`).join('');
 }
 // Hints are written by the host in keyboard terms; on a touch screen show the button names instead.
-const TOUCH_WORDS = [[/Hold F/g, 'Hold WORK'], [/\bE:/g, 'GRAB:'], [/keys 1-5 · Q to cancel/g, 'tap one · THROW to cancel'], [/Right-click to throw/g, 'THROW to throw'], [/Click to grab/g, 'Tap GRAB'], [/Click to whack/g, 'Tap GRAB to whack'],
+const TOUCH_WORDS = [[/Hold F/g, 'Hold WORK'], [/\bE:/g, 'GRAB:'], [/keys 1-5 · Q to cancel/g, 'tap one · THROW to cancel'], [/Right-click to throw/g, 'THROW to throw'], [/E to pick up/g, 'Tap GRAB'], [/E to drop/g, 'GRAB to drop'], [/Click to whack/g, 'Tap GRAB to whack'],
   [/Click to drop/g, 'GRAB to drop'], [/Press R/g, 'Tap LIMP']];
 const hintText = (h) => (touch.active ? TOUCH_WORDS.reduce((t, [re, w]) => t.replace(re, w), h) : h);
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

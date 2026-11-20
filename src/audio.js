@@ -62,6 +62,8 @@ function hum(vol, len = 3.1) {
 
 const SOUNDS = {
   hum: (v) => hum(0.32 * v),
+  // a hand-in window's shutter rolling up or down: a rattling slide
+  shutter: (v) => { noise(0.55, 1400, 0.18 * v); for (let i = 0; i < 7; i++) tone('square', 220 + i * 18, 200 + i * 18, 0.03, 0.04 * v, i * 0.07); },
   // the big red NO DELIVERY button: a low factory buzzer
   buzzer: (v) => { tone('sawtooth', 78, 74, 0.9, 0.22 * v); tone('square', 58, 56, 0.9, 0.12 * v); noise(0.9, 220, 0.06 * v); },
   // a grave's ghost: happy, a rising sparkly arpeggio; sad, a long wavering "wooo" sliding down

@@ -240,40 +240,50 @@ export function buildMorgue(scene, batch) {
     rack.name = 'charm-rack';
     scene.add(rack);
   }
-  // The hand-in windows open when someone comes up to them: the shutter slides up and the clerk inside looks out
-  // (Lost & Found in round glasses, the police in a peaked cap). Clerks are canvas paintings, same material settings as
-  // the signs; the shutter is a plank panel of its own so it can move (updateWindows).
-  const clerk = (police) => {
+  // The hand-in windows (see ringBell in game.js): a plank shutter that rolls up once the clerk has come, and behind it
+  // a "portal" into their office (a swirl painted by portalMaterial: violet and teal for Lost & Found, flashing red and
+  // blue for the police) with the clerk in front, a canvas cutout whose face shows what they think of what they got.
+  const clerkFace = (police, mood) => { // mood: 0 waiting, 1 pleased, 2 cross
     const c = document.createElement('canvas'); c.width = 256; c.height = 224;
-    const g = c.getContext('2d');
-    g.fillStyle = '#1a1422'; g.fillRect(0, 0, 256, 224);
-    g.fillStyle = police ? '#4a5a8a' : '#8a7a9a'; g.beginPath(); g.ellipse(128, 200, 70, 60, 0, Math.PI, 0); g.fill();   // shoulders
-    g.fillStyle = '#d8d2c8'; g.beginPath(); g.ellipse(128, 120, 52, 62, 0, 0, Math.PI * 2); g.fill();                    // head
-    g.fillStyle = '#231d33';
-    for (const x of [108, 148]) { g.beginPath(); g.arc(x, 112, 7, 0, Math.PI * 2); g.fill(); }                           // eyes
-    g.lineWidth = 4; g.strokeStyle = '#231d33'; g.beginPath(); g.arc(128, 140, 14, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+    const g = c.getContext('2d'), ink = '#231d33';
+    g.fillStyle = police ? '#3a4a7a' : '#7a6a8a'; g.beginPath(); g.ellipse(128, 214, 74, 64, 0, Math.PI, 0); g.fill(); // shoulders
+    g.fillStyle = '#e2dcd2'; g.beginPath(); g.ellipse(128, 122, 54, 64, 0, 0, Math.PI * 2); g.fill();                  // head
+    g.lineWidth = 4; g.strokeStyle = ink; g.stroke();
+    g.fillStyle = ink; g.lineCap = 'round';
+    if (mood === 1) { for (const x of [106, 150]) { g.beginPath(); g.arc(x, 116, 9, Math.PI * 1.1, Math.PI * 1.9); g.stroke(); } } // happy eyes
+    else for (const x of [106, 150]) { g.beginPath(); g.arc(x, 114, 6.5, 0, Math.PI * 2); g.fill(); }
+    if (mood === 2) { g.lineWidth = 5; g.beginPath(); g.moveTo(92, 96); g.lineTo(118, 104); g.moveTo(164, 96); g.lineTo(138, 104); g.stroke(); } // cross brows
+    g.lineWidth = 4; g.beginPath();
+    if (mood === 1) g.arc(128, 138, 20, 0.12 * Math.PI, 0.88 * Math.PI);        // a big smile
+    else if (mood === 2) g.arc(128, 162, 18, 1.15 * Math.PI, 1.85 * Math.PI);  // a frown
+    else { g.moveTo(116, 148); g.lineTo(140, 148); }                           // waiting, flat
+    g.stroke();
+    if (mood === 1) { g.fillStyle = 'rgba(230,120,140,0.5)'; for (const x of [92, 164]) { g.beginPath(); g.arc(x, 136, 9, 0, Math.PI * 2); g.fill(); } }
     if (police) { // a peaked cap with a badge
-      g.fillStyle = '#2a3460'; g.fillRect(74, 52, 108, 30); g.fillRect(64, 78, 128, 10);
+      g.fillStyle = '#26305a'; g.fillRect(72, 50, 112, 34); g.fillRect(62, 80, 132, 11);
       g.fillStyle = '#f0c060'; g.beginPath(); g.arc(128, 66, 8, 0, Math.PI * 2); g.fill();
-    } else { // round glasses and a tuft of hair
-      g.lineWidth = 3; for (const x of [108, 148]) { g.beginPath(); g.arc(x, 112, 15, 0, Math.PI * 2); g.stroke(); }
-      g.beginPath(); g.moveTo(123, 112); g.lineTo(133, 112); g.stroke();
-      g.fillStyle = '#77707c'; g.beginPath(); g.ellipse(128, 62, 38, 14, 0, Math.PI, 0); g.fill();
+    } else { // round glasses and a grey tuft
+      g.strokeStyle = ink; g.lineWidth = 3; for (const x of [106, 150]) { g.beginPath(); g.arc(x, 114, 16, 0, Math.PI * 2); g.stroke(); }
+      g.beginPath(); g.moveTo(122, 114); g.lineTo(134, 114); g.stroke();
+      g.fillStyle = '#8a8490'; g.beginPath(); g.ellipse(128, 64, 40, 16, 0, Math.PI, 0); g.fill();
     }
     const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
-    return new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: true });
+    return new THREE.MeshBasicMaterial({ map: tex, alphaTest: 0.5, fog: true, transparent: false });
   };
-  const slats = toon('#6a4a3a', { mottle: 0.6 });
+  const slats = toon('#6a4a3a', { mottle: 0.6, color2: '#55392c', stripes: 9, axis: 0, stripeDuty: 0.2 });
   const windows = Object.entries(Mg.windows).map(([k, wd]) => {
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.79), clerk(k === 'police'));
-    face.position.set(wd.x, 1.5, Mg.z0 + Mg.t + 0.025);
+    const police = k === 'police';
+    const portal = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.79), portalMaterial(police));
+    portal.position.set(wd.x, 1.5, Mg.z0 + Mg.t + 0.022);
+    const faces = [0, 1, 2].map((m) => clerkFace(police, m));
+    const clerk = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.54), faces[0]);
+    clerk.position.set(wd.x, 1.36, Mg.z0 + Mg.t + 0.03);
     const shutter = part(new THREE.BoxGeometry(0.98, 0.88, 0.03), slats, { outline: 0.008 });
     shutter.position.set(wd.x, 1.5, Mg.z0 + Mg.t + 0.05);
-    face.name = shutter.name = `window-${k}`;
-    scene.add(face, shutter);
-    return { wd, shutter, k: 0 };
+    portal.name = clerk.name = shutter.name = `window-${k}`;
+    scene.add(portal, clerk, shutter);
+    return { k, portal, clerk, faces, shutter, open: 0, state: 0, mood: 0 };
   });
-
   // the button's cap: pushed in and gone dark red while today's deliveries are off
   const capOn = toon('#7a1e1a', { mottle: 0.3 }), capOff = toon('#e0402e', { mottle: 0.3, rim: 1.3 });
   const cap = part(new THREE.CylinderGeometry(0.17, 0.2, 0.12, 20).rotateX(Math.PI / 2), capOff, { outline: 0.012 });
@@ -302,14 +312,26 @@ export function buildMorgue(scene, batch) {
     },
     counters,
     setNoDelivery(on) { cap.material = on ? capOn : capOff; cap.position.z = capZ + (on ? 0.05 : 0); },
-    // diggers: positions of everyone on their feet; a window opens while someone stands within 2.6 m of its counter
-    updateWindows(dt, diggers) {
+    // from the host's state: win = { lost: [0 shut | 1 bell rung | 2 open, clerk's face 0 | 1 | 2], police: [...] }
+    setWindows(win) {
+      if (!win) return;
       for (const w of windows) {
-        const near = diggers.some((q) => Math.hypot(q.x - w.wd.x, q.z - (w.wd.z + 0.8)) < 2.6);
-        w.k += ((near ? 1 : 0) - w.k) * Math.min(1, dt * 5);
-        w.shutter.position.y = 1.5 + w.k * 0.86;
+        const [s, m] = win[w.k] || [0, 0];
+        w.state = s;
+        if (m !== w.mood) { w.mood = m; w.clerk.material = w.faces[m]; }
       }
     },
+    // per frame: the shutter rolls up when open (and rattles while the clerk is on the way), the portal swirls
+    updateWindows(dt, time) {
+      for (const w of windows) {
+        w.open += ((w.state === 2 ? 1 : 0) - w.open) * Math.min(1, dt * 3);
+        const rattle = w.state === 1 ? Math.sin(time * 40) * 0.006 : 0;
+        w.shutter.position.y = 1.5 + w.open * 0.86 + rattle;
+        w.portal.material.uniforms.uT.value = time;
+        w.portal.visible = w.clerk.visible = w.open > 0.02;
+      }
+    },
+
   };
 }
 
@@ -385,4 +407,29 @@ export function railMesh(mats) {
   mats.forEach((mat, i) => m.setMatrixAt(i, mat));
   m.frustumCulled = false;
   return m;
+}
+
+// The view through an open hand-in window: a swirling "portal" into the clerk's own office. Lost & Found swirls violet
+// and teal with drifting sparkles; the police flash red and blue. One small ShaderMaterial (compiled in warmup.js).
+export function portalMaterial(police) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uT: { value: 0 }, uPolice: { value: police ? 1 : 0 } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+    fragmentShader: /* glsl */ `
+      uniform float uT, uPolice; varying vec2 vUv;
+      void main() {
+        vec2 p = (vUv - 0.5) * vec2(2.3, 2.0);
+        float r = length(p), a = atan(p.y, p.x);
+        float s = 0.5 + 0.5 * sin(a * 3.0 + r * 9.0 - uT * 2.6);
+        vec3 c1 = mix(vec3(0.42, 0.22, 0.62), vec3(0.85, 0.15, 0.2), uPolice);
+        vec3 c2 = mix(vec3(0.2, 0.62, 0.66), vec3(0.15, 0.3, 0.9), uPolice);
+        if (uPolice > 0.5 && fract(uT * 1.3) > 0.5) { vec3 k = c1; c1 = c2; c2 = k; } // the lights on a police car
+        vec3 col = mix(c1, c2, s) * (0.35 + 0.9 * smoothstep(1.4, 0.1, r));
+        vec2 g = floor(p * 18.0 + vec2(uT * 2.0, -uT));
+        float spark = step(0.97, fract(sin(dot(g, vec2(12.9898, 78.233))) * 43758.5453));
+        col += spark * vec3(0.9, 0.85, 0.6) * (1.0 - uPolice * 0.5);
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+      }`,
+  });
 }

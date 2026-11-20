@@ -26,7 +26,8 @@ Host a game, share the 4-letter room code (or the invite link) with friends, the
 |---|---|
 | WASD / Shift / Space | move / run / jump |
 | Mouse (click to lock) or arrow keys | look |
-| Click or E | grab / drop, whack with the shovel, take a body in at the hatch, write the name tag at the registry desk, open the outfit choice at the dressing table, take the charms and bless at the chapel, choose and light candles at a headstone |
+| Left click | swing the shovel |
+| E | pick up / put down (only E picks things up), take a body in at the hatch, write the name tag at the registry desk, open the outfit choice at the dressing table, take the charms and bless at the chapel, choose and light candles at a headstone |
 | 1–5 | pick an outfit / a charm (1–4) / a candle color (1–3) while that choice is open |
 | Mouse wheel | next charm at the chapel / how many candles |
 | Right-click or Q | throw what you hold / cancel the outfit or candle choice / put the charms back |

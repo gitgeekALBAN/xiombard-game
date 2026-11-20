@@ -8,6 +8,8 @@ import { buildCoffin, buildTruck } from './models.js';
 import { buildNote } from './models/note.js';
 import { buildCharmStack } from './models/charms.js';
 import { ghostMaterial } from './ghost.js';
+import { starMaterial } from './stars.js';
+import { portalMaterial } from './morgue.js';
 import { buildOddity } from './models/oddities.js';
 import { ODDITIES } from '../shared/layout.js';
 
@@ -39,6 +41,8 @@ export async function warmUp(view, onProgress = () => {}) {
   cast.add(buildCharmStack()); // the charm on its stick (its stick is the only plain colored basic material)
   cast.add(new THREE.Mesh(new THREE.SphereGeometry(0.2), ghostMaterial())); // a grave's ghost
   ODDITIES.forEach((_, i) => cast.add(...buildOddity(i))); // the odd deliveries
+  cast.add(new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), starMaterial)); // stars over a stunned head
+  cast.add(new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.2), portalMaterial(true))); // the view through an open hand-in window
   cast.add(new THREE.Mesh(view.shadowGeo, view.shadowMat));
 
   // start compiling: the scene and the cast into the scene's target, each post pass into its own

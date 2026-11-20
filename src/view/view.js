@@ -3,6 +3,7 @@ import { createSky } from '../shaders/sky.js';
 import { buildCoffin, buildTruck } from './models.js';
 import { buildNote } from './models/note.js';
 import { createGhosts } from './ghost.js';
+import { createStars } from './stars.js';
 import { FACE_T } from '../chars/material.js';
 // ?mood=0..3 shows every digger with that face (screenshots, tuning)
 const MOOD_FORCED = (() => { const m = new URLSearchParams(location.search).get('mood'); return m === null ? null : +m; })();
@@ -63,6 +64,8 @@ export class View {
     this.groundMat = this.world.groundMat;
     this.graves = createGraves(this.scene, this.groundMat);
     this.ghosts = createGhosts(this.scene); // a grave's ghost leaving when it is filled in
+    this.stars = createStars(this.scene);   // stars circling over anything stunned
+    this.stunned = new Set();
     // anything flagged userData.billboard faces the camera every frame
     this.billboards = [];
     this.scene.traverse((o) => { if (o.userData.billboard) this.billboards.push(o); });
@@ -231,6 +234,7 @@ export class View {
       else if (ev.type === 'ghost') this.ghosts.spawn(ev.pos, ev.happy);
     }
     this.world.setYard(st);
+    this.stunned = new Set(st.stun || []);
     st.plots.forEach(([d, f, b, seed, name, , cc = -1, cn = 0], i) => {
       this.graves.setPlot(i, d, f, b, seed, name, this.time);
       this.graves.setCandles(i, cc, cn);
@@ -242,7 +246,11 @@ export class View {
         const up = risen.has(e.id); if (up !== e.up) { e.up = up; e.crew.setRisen(up); }
         e.root.visible = !bed.has(e.id); // inside the closed hearse: nobody sees them until they come through the hatch
       }
-      if (e.kind === 'item') e.root.visible = !bed.has(e.id); // odd deliveries ride hidden too
+      if (e.kind === 'item') {
+        e.root.visible = !bed.has(e.id); // odd deliveries ride hidden too
+        const face = e.groups[0].userData.setFace;
+        if (face) face(this.stunned.has(e.id) ? 'cold' : 'awake'); // a live crocodile out cold: spiral eyes, tongue out
+      }
       if (e.kind === 'digger') {
         const p = pl.get(e.id);
         const sh = e.groups[CP.armR].userData.shovel;
@@ -265,7 +273,12 @@ export class View {
     this.sky.material.uniforms.uTime.value = this.time;
     this.ghosts.update(dt, this.camera);
     FACE_T.value = this.time; // the faces' mood animations (tongue, sweat, trembling pupils)
-    this.world.morgue.updateWindows(dt, this.order.filter((e) => e.kind === 'digger').map((e) => e.groups[0].position)); // the hand-in windows open for whoever comes up
+    { // stars over stunned heads: a character's head part, or the middle of a crocodile
+      const heads = [];
+      for (const id of this.stunned) { const e = this.ents.get(id); if (e && e.root.visible) heads.push(e.groups[e.crew ? CP.head : 0].position); }
+      this.stars.update(this.time, heads, this.camera);
+    }
+    this.world.morgue.updateWindows(dt, this.time); // the hand-in windows: shutters, portals
     const a = 1 - Math.exp(-dt * 16);
     const me = this.ents.get(this.myId);
     const meState = me && this.state ? this.state.players.find((p) => p.id === this.myId) : null;
