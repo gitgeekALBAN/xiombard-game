@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createSky } from '../shaders/sky.js';
 import { buildCoffin, buildTruck } from './models.js';
 import { buildNote } from './models/note.js';
+import { createGhosts } from './ghost.js';
 import { buildWorld } from './world.js';
 import { createGraves } from './graves.js';
 import { PLOTS, PLOT_HALF, insideMorgue, RITES } from '../shared/layout.js';
@@ -57,6 +58,7 @@ export class View {
     this.world = buildWorld(this.scene);
     this.groundMat = this.world.groundMat;
     this.graves = createGraves(this.scene, this.groundMat);
+    this.ghosts = createGhosts(this.scene); // a grave's ghost leaving when it is filled in
     // anything flagged userData.billboard faces the camera every frame
     this.billboards = [];
     this.scene.traverse((o) => { if (o.userData.billboard) this.billboards.push(o); });
@@ -222,6 +224,7 @@ export class View {
       if (ev.type === 'sfx') sfx(ev.name, ev.pos, this.camera.position);
       else if (ev.type === 'toast') this.toast(ev.text, ev.pos, ev.big);
       else if (ev.type === 'puff') this.puff(ev.pos, ev.kind);
+      else if (ev.type === 'ghost') this.ghosts.spawn(ev.pos, ev.happy);
     }
     this.world.setYard(st);
     st.plots.forEach(([d, f, b, seed, name, , cc = -1, cn = 0], i) => {
@@ -254,6 +257,7 @@ export class View {
     this.time += dt;
     this.renderer.info.reset();
     this.sky.material.uniforms.uTime.value = this.time;
+    this.ghosts.update(dt, this.camera);
     const a = 1 - Math.exp(-dt * 16);
     const me = this.ents.get(this.myId);
     const meState = me && this.state ? this.state.players.find((p) => p.id === this.myId) : null;

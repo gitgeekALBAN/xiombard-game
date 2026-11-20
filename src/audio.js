@@ -62,6 +62,9 @@ function hum(vol, len = 3.1) {
 
 const SOUNDS = {
   hum: (v) => hum(0.32 * v),
+  // a grave's ghost: happy, a rising sparkly arpeggio; sad, a long wavering "wooo" sliding down
+  ghostHappy: (v) => { [523, 659, 784, 1046, 1318].forEach((f, i) => tone('sine', f, f * 1.02, 0.35, 0.12 * v, i * 0.09)); },
+  ghostSad: (v) => { tone('sine', 520, 260, 1.6, 0.16 * v); tone('triangle', 515, 255, 1.6, 0.06 * v, 0.05); },
   bell: (v) => { [1046, 1568, 2093].forEach((f, i) => tone('sine', f, f * 0.995, 1.2 - i * 0.3, (0.12 - i * 0.03) * v, i * 0.01)); },
   dig: (v) => { noise(0.18, 900, 0.5 * v); tone('sine', 140, 70, 0.12, 0.3 * v); },
   grab: (v) => tone('sine', 300, 420, 0.08, 0.15 * v),

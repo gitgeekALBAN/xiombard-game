@@ -657,6 +657,10 @@ export class Sim {
     this.buried++;
     this.score += 1 + (named ? 1 : 0) + (dressed ? 1 : 0) + (nailed ? 1 : 0) + (blessed ? 1 : 0);
     this.emit('sfx', { name: 'bury', pos: [plot.x, 0, plot.z] });
+    // the ghost leaves the grave: happy if everything on the note was done, sad if anything was missed
+    const content = named && dressed && blessed && nailed;
+    this.emit('ghost', { pos: [plot.x, 0.2, plot.z], happy: content });
+    this.emit('sfx', { name: content ? 'ghostHappy' : 'ghostSad', pos: [plot.x, 1, plot.z] });
     this.emit('toast', { text: `R.I.P. ${plot.name}`, pos: [plot.x, 2.3, plot.z], big: true });
     this.emit('toast', { text: `${mark(named)} name  ${mark(dressed)} outfit  ${mark(blessed)} blessed  ${mark(nailed)} nailed`, pos: [plot.x, 1.7, plot.z] });
     if (plot.unrest >= 3) this.emit('toast', { text: 'The ground grumbles...', pos: [plot.x, 1.1, plot.z] });
