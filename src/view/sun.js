@@ -1,9 +1,9 @@
 import * as THREE from 'three';
-import { SUN, DAY, keyLight } from '../shaders/toon.js';
+import { SUN, keyLight } from '../shaders/toon.js';
 
-// The sun's cast shadows: one depth pass from the sun into a square map around the camera's focus, read by every
-// painted material (sunShadow in toon.js). Only by day and at dusk (the moon and the lanterns do without); at night
-// the pass is skipped. The map's center snaps to whole texels so shadow edges do not shimmer as the camera moves.
+// The key light's cast shadows (the sun by day, the moon by night): one depth pass from the key into a square map
+// around the camera's focus, read by every painted material (sunShadow in toon.js). The map's center snaps to whole
+// texels so shadow edges do not shimmer as the camera moves. It also carries the clock of the cloud cookie.
 //
 // What does not cast: the sky, the ground, the backdrop, the plants (objects or materials with userData.noShadow),
 // anything transparent, sprites and points, and the inverted ink hulls (back faces only), which would only double
@@ -27,10 +27,9 @@ export class Sun {
 
   // focus: the point the camera looks at (world). every: render the map only every n-th frame (low quality).
   // always: objects that cast even while hidden from the camera (the morgue roof, hidden for a camera indoors)
-  update(renderer, scene, focus, every = 1, always = []) {
-    const k = DAY.value, on = THREE.MathUtils.smoothstep(k, 0.3, 0.6);
-    SUN.uSunOn.value = on;
-    if (on <= 0) return;
+  update(renderer, scene, focus, every = 1, always = [], time = 0) {
+    SUN.uSunOn.value = 1;
+    SUN.uSunTime.value = time;
     if (this.frame++ % every) return;
     const dir = keyLight().dir, cam = this.cam, v = this._v;
     cam.position.copy(dir).multiplyScalar(110);

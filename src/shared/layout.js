@@ -70,6 +70,9 @@ export const MORGUE = {
     { c: [6.4, 0.25, 6.5], h: [0.9, 0.25, 0.25], kind: 'bench' },
   ],
   lamps: [[-8.8, 9.4], [-3.4, 9.4], [2.3, 9.4], [8.6, 9.4], [-5.6, 7.6]],
+  // lit windows: x, z on the wall's center line and the wall's outward normal (the view draws them, the lighting
+  // throws their light onto the ground outside)
+  wins: [[-10.5, 6.0, 0, -1], [-6, 6.0, 0, -1], [5, 6.0, 0, -1], [9.5, 6.0, 0, -1], [-6, 12.4, 0, 1], [6.5, 12.4, 0, 1], [10.5, 12.4, 0, 1], [13, 7.6, 1, 0]],
 };
 // stations a player works at (registry, dressing) and how near counts as "at it"
 export const atStation = (st, x, z, m = 0.95) => Math.abs(x - st.x) < st.hx + m && Math.abs(z - st.z) < st.hz + m;

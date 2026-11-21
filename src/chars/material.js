@@ -29,6 +29,7 @@ void main() {
 }`;
 const frag = /* glsl */ `
 uniform vec3 uLightDir, uLightCol, uShadeCol, uRimCol, uInk;
+uniform float uRig;      // 1 = lit by the game's shared rig (uLightCol is then only a tint); 0 = by uLightCol / uShadeCol
 uniform float uFace;     // 0 happy crew, 1 zombie, 2 zombie dog, 3 at rest
 uniform float uMood;     // a crew face's mood: 0 calm, 1 focused, 2 straining, 3 angry (see crewMood)
 uniform float uFaceT;    // seconds, shared by all characters: animates the moods
@@ -300,12 +301,23 @@ void main() {
   // soft storybook light: a wide wrapped gradient with a hint of painted steps, tinted shadows, baked occlusion
   float lit = smoothstep(-0.35, 0.75, dot(N, uLightDir));
   lit = floor(lit * 3.0 + 0.5) / 3.0 * 0.3 + lit * 0.7;
-  vec3 light = mix(uShadeCol, uLightCol, lit) * mix(0.5, 1.0, vFx.y);
   vec3 V = normalize(cameraPosition - vW);
   float edge = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0);
-  light += uRimCol * edge * (1.0 - 0.6 * lit);
-  light += lanternLight(vW, N) * mix(0.6, 1.0, vFx.y);
-  col *= light;
+  if (uRig > 0.5) {
+    // in the game: the shared rig (docs/lighting-guide.md) with these soft bands; the key also rims the edges that
+    // face it, so a figure against the moon or the low sun gets a bright outline
+    float sh, occ = mix(0.5, 1.0, vFx.y);
+    vec3 nat = rigNatural(N, vW, lit, lit, sh) * uLightCol * occ;
+    nat += rigKey() * edge * smoothstep(-0.45, 0.25, dot(N, uLightDir)) * (0.25 + 0.75 * sh) * 0.7 * (1.0 - roofed(vW));
+    nat += uRimCol * edge * (1.0 - 0.6 * lit);
+    col = nightEye(col) * nat + col * rigPractical(N, vW) * mix(0.6, 1.0, vFx.y);
+  } else {
+    // the cast page: one key and one shade color
+    vec3 light = mix(uShadeCol, uLightCol, lit) * mix(0.5, 1.0, vFx.y);
+    light += uRimCol * edge * (1.0 - 0.6 * lit);
+    light += lanternLight(vW, N) * mix(0.6, 1.0, vFx.y);
+    col *= light;
+  }
   col *= 1.0 - 0.22 * edge; // paint pools darker toward the outline
   col = mix(col, uInk, ink);
   col *= 1.0 + (hash1(vec3(gl_FragCoord.xy, 1.0)) - 0.5) * uGrain; // paper grain
@@ -353,7 +365,7 @@ export function characterMaterials(opts = {}) {
     ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uDay: DAY, ...SUN,
     uPart: { value: Array.from({ length: 8 }, () => new THREE.Matrix4()) }, uNoHead: { value: 0 },
     uLightDir: { value: new THREE.Vector3(-0.4, 0.7, 0.5).normalize() }, uLightCol: { value: new THREE.Color(1, 1, 1) }, uShadeCol: { value: new THREE.Color(0.5, 0.45, 0.66) },
-    uRimCol: { value: new THREE.Color(0, 0, 0) }, uInk: { value: new THREE.Color(INK) },
+    uRimCol: { value: new THREE.Color(0, 0, 0) }, uInk: { value: new THREE.Color(INK) }, uRig: { value: 0 },
     uFace: { value: 0 }, uMood: { value: 0 }, uFaceT: FACE_T, uTint: { value: new THREE.Vector4(0, 0, 0, 0) }, uHeadC: { value: new THREE.Vector4(0, 1, 0, 0.15) }, uHeadC2: { value: new THREE.Vector4(0, 0, 0, 0) }, uBellyR: { value: 0.25 },
     uPatch: { value: Array.from({ length: 4 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uPatchCol: { value: Array.from({ length: 4 }, () => new THREE.Color()) },
     uHatPatch: { value: new THREE.Vector4(0, 0, 0, 0) }, uHatPatchCol: { value: new THREE.Color() }, uHatR: { value: 0.15 },

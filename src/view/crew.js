@@ -46,9 +46,11 @@ export function buildCrew(rig, opts = {}) {
     // the key light (moon, low sun or high sun) is the toon shader's, so everyone sits in the same scene
     const key = keyLight();
     u.uLightDir.value.copy(key.dir);
-    u.uLightCol.value.copy(key.lit).multiplyScalar(0.82); // a touch dimmer: these bodies are almost white all over
+    // the shader takes the shared rig (sky, bounce, key with its shadows, lamps); this only tints it
+    u.uRig.value = 1;
+    u.uLightCol.value.setScalar(0.82); // a touch dimmer: these bodies are almost white all over
     u.uShadeCol.value.copy(key.shade);
-    u.uRimCol.value.copy(key.shade).multiplyScalar(0.5);
+    u.uRimCol.value.copy(key.shade).multiplyScalar(0.35);
     u.uNoHead.value = noHead ? 1 : 0;
   }
   // a body that got up at night wears a zombie's face, goes green and earthy until it lies down again

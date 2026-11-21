@@ -7,16 +7,18 @@ import { noise } from './noise.glsl.js';
 // Day/night: one shared uniform, DAY.value = k (0 = deep night, 0.5 = dusk/dawn, 1 = full day). Every material that
 // uses lightingGLSL must reference this same object as its `uDay` uniform (assign it AFTER UniformsUtils.merge,
 // which clones values). The key light swings from the cold moon to a low orange sun at dusk to a warm high sun.
-export const MOON_DIR = new THREE.Vector3(-0.35, 0.55, -0.75).normalize();
-// the sun rises and sets on the far side of the sky from the moon, a little toward the usual camera, so by day the
-// yard is lit three-quarter from the front right
-export const SUN_AZ = new THREE.Vector3(0.94, 0, 0.34).normalize();
+// The moon hangs in the north-west, over the morgue as seen from the plots: it back-lights the yard (rims, long
+// shadows toward the camera, dark silhouettes), which is how a night reads; a moon behind the camera is flat.
+export const MOON_DIR = new THREE.Vector3(-0.48, 0.5, 0.72).normalize();
+// The sun stands in the south-east: 45 degrees to the side of a camera that looks at the morgue from the plots, so
+// the morgue's front and everything in the yard is lit three-quarter and shadows fall away to the left.
+export const SUN_AZ = new THREE.Vector3(0.72, 0, -0.69).normalize();
 export const LANTERN_Y = 2.35; // height of the lantern flame above the ground
 export const INK = '#120d1a'; // outline color
 export const DAY = { value: 0 };
 // The sun's shadow map (view/sun.js fills it every frame by day): every material that uses lightingGLSL shares
 // these uniform objects — call shareLight(material) after creating it.
-export const SUN = { uSunMap: { value: null }, uSunMat: { value: new THREE.Matrix4() }, uSunOn: { value: 0 }, uSunTexel: { value: 1 / 2048 } };
+export const SUN = { uSunMap: { value: null }, uSunMat: { value: new THREE.Matrix4() }, uSunOn: { value: 0 }, uSunTexel: { value: 1 / 2048 }, uSunTime: { value: 0 }, uLightDbg: { value: 0 } };
 export function shareLight(m) {
   m.uniforms.uDay = DAY;
   Object.assign(m.uniforms, SUN);
@@ -43,18 +45,21 @@ export function sunDir(k = DAY.value, out = new THREE.Vector3()) {
   const e = -0.08 + 0.64 * sstep(0.25, 1, clamp01(k));
   return out.set(SUN_AZ.x * Math.cos(e), Math.sin(e), SUN_AZ.z * Math.cos(e));
 }
-// light band colors (linear multipliers): [dark, mid, lit] at night, dusk, day
-const BANDS = {
-  // night: a cold moon, deep violet shadows; day: a warm sun, cool lavender shadows (more warm/cool contrast)
-  dark: [[0.26, 0.24, 0.55], [0.4, 0.27, 0.55], [0.56, 0.5, 0.8]],
-  mid: [[0.48, 0.66, 1.0], [0.84, 0.56, 0.66], [0.98, 0.88, 0.88]],
-  lit: [[0.78, 1.08, 1.32], [1.4, 0.86, 0.5], [1.42, 1.2, 0.84]],
+// The lighting rig (docs/lighting-guide.md): every light has a job. Linear multipliers of the surface color,
+// each at [night, dusk, day].
+export const RIG = {
+  key: [[0.38, 0.52, 0.84], [1.25, 0.62, 0.26], [1.05, 0.86, 0.52]], // moon / low sun / sun: casts the shadows
+  spill: [[0.05, 0.09, 0.2], [0.55, 0.18, 0.08], [0.3, 0.14, 0.05]], // softer, more saturated wrap past the terminator
+  sky: [[0.13, 0.16, 0.36], [0.3, 0.24, 0.48], [0.34, 0.46, 0.74]], // the dome: on faces that look up
+  bounce: [[0.08, 0.08, 0.2], [0.34, 0.22, 0.22], [0.4, 0.44, 0.22]], // off the lit ground: on faces that look down
+  kick: [[0.05, 0.08, 0.18], [0.16, 0.12, 0.34], [0.1, 0.16, 0.3]], // sky light from opposite the key
+  indoor: [[0.12, 0.11, 0.24], [0.3, 0.22, 0.3], [0.62, 0.52, 0.44]], // under the roof, instead of sky and bounce
 };
 const g3 = (b) => `day3(vec3(${b[0].join(', ')}), vec3(${b[1].join(', ')}), vec3(${b[2].join(', ')}))`;
 const KEY = { dir: new THREE.Vector3(), lit: new THREE.Color(), shade: new THREE.Color() };
 const _s = new THREE.Vector3();
-// The key light for the current DAY.value: direction to the light, multiplier for fully lit surfaces and for
-// shadowed ones (linear, as in the GLSL). Returns the same object every call.
+// The key light for the current DAY.value: direction to the light, and what a face in full light and a face in
+// shade get from the whole rig (linear, as in the GLSL). Returns the same object every call.
 export function keyLight() {
   const k = clamp01(DAY.value);
   sunDir(k, _s);
@@ -62,12 +67,12 @@ export function keyLight() {
   _s.normalize();
   // both ends are above the horizon, so the blend never passes through zero
   KEY.dir.copy(MOON_DIR).lerp(_s, sstep(0.2, 0.55, k)).normalize();
-  const b = (x) => [0, 1, 2].map((i) => day3(x[0][i], x[1][i], x[2][i], k));
-  KEY.lit.setRGB(...b(BANDS.lit));
-  KEY.shade.setRGB(...b(BANDS.dark));
+  const b = (x, i) => day3(x[0][i], x[1][i], x[2][i], k);
+  const side = [0, 1, 2].map((i) => (b(RIG.sky, i) + b(RIG.bounce, i)) / 2); // a wall's share of sky and bounce
+  KEY.lit.setRGB(...side.map((v, i) => v + b(RIG.key, i)));
+  KEY.shade.setRGB(...side.map((v, i) => v + b(RIG.kick, i) * 0.5));
   return KEY;
 }
-
 // Day curves in GLSL; guarded so the ground and lighting libraries can both include it.
 export const dayGLSL = /* glsl */ `
 #ifndef XIOM_DAY
@@ -98,7 +103,7 @@ vec3 keyDir() {
 // GLSL shared by every lit material (models, ground, backdrop).
 // toonShade(base, N, worldPos)            — default rim
 // toonShadeRim(base, N, worldPos, rim)    — rim strength 0..2
-// lanternLight(worldPos, N)               — warm light only, for custom shaders (fades out by day)
+// rigNatural / rigPractical / nightEye    — the parts of the rig, for shaders with their own bands (characters)
 export const lightingGLSL = /* glsl */ `
 ${dayGLSL}
 // sun shadow: 1 in the sun, 0 in a cast shadow (always 1 at night and outside the shadow map)
@@ -115,22 +120,62 @@ float sunShadow(vec3 w, vec3 N) {
   vec2 e = smoothstep(vec2(0.0), vec2(0.06), s.xy) * smoothstep(vec2(1.0), vec2(0.94), s.xy); // fade out at the edge
   return mix(1.0, sh * 0.25, uSunOn * e.x * e.y);
 }
+// small value noise of its own, so every material that includes the lighting has it under the same name
+float lgHash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+float lgNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(lgHash(i), lgHash(i + vec2(1.0, 0.0)), f.x), mix(lgHash(i + vec2(0.0, 1.0)), lgHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+// Cloud shadows drifting over the land: a cookie on the key light, so the ground is never one value from fence to
+// fence. The middle of the yard keeps most of its light (a light island around the plots and the door).
+uniform float uSunTime;
+float cloudCookie(vec3 w) {
+  vec2 p = w.xz * 0.05 + uSunTime * vec2(0.011, 0.006);
+  float n = lgNoise(p) * 0.62 + lgNoise(p * 2.3 + 7.1) * 0.38;
+  float c = smoothstep(0.4, 0.56, n);
+  float open = smoothstep(9.0, 24.0, length(w.xz - vec2(-1.0, 2.0)));
+  return 1.0 - c * day3(0.62, 0.45, 0.42) * mix(0.45, 1.0, open);
+}
+// Sky and bounce light do not reach the foot of the morgue's walls: a soft dark seam where wall meets ground.
+float contactAO(vec3 w) {
+  vec2 q = abs(w.xz - vec2(${((MORGUE.x0 + MORGUE.x1) / 2).toFixed(2)}, ${((MORGUE.z0 + MORGUE.z1) / 2).toFixed(2)})) - vec2(${((MORGUE.x1 - MORGUE.x0) / 2).toFixed(2)}, ${((MORGUE.z1 - MORGUE.z0) / 2).toFixed(2)});
+  float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0); // signed distance to the walls' rectangle
+  return 1.0 - 0.4 * smoothstep(1.5, 0.0, abs(d)) * smoothstep(1.3, 0.0, w.y);
+}
+// A lantern is two lights (a practical's "throw pattern"): a hot pool under it and a wide, dim, redder spill.
 const int NL = ${LANTERNS.length};
 const vec3 LANTERN[NL] = vec3[](${LANTERNS.map(([x, z]) => `vec3(${x.toFixed(2)}, ${LANTERN_Y.toFixed(2)}, ${z.toFixed(2)})`).join(', ')});
 vec3 lanternLight(vec3 w, vec3 N) {
   float on = lampsOn();
   if (on <= 0.0) return vec3(0.0);
-  float g = 0.0;
+  float g = 0.0, s = 0.0;
   for (int i = 0; i < NL; i++) {
     vec3 d = LANTERN[i] - w;
-    float r2 = dot(d, d);
-    float att = 1.0 / (1.0 + r2 * 0.09) * smoothstep(17.0, 5.0, sqrt(r2));
-    float wrap = clamp(dot(N, d * inversesqrt(r2 + 1e-4)) * 0.6 + 0.4, 0.0, 1.0);
-    g += att * wrap;
+    float r2 = dot(d, d), r = sqrt(r2);
+    float wrap = clamp(dot(N, d / (r + 1e-3)) * 0.6 + 0.4, 0.0, 1.0);
+    g += wrap / (1.0 + r2 * 0.16) * smoothstep(11.0, 3.0, r);
+    s += wrap * smoothstep(15.0, 4.0, r);
   }
   // two soft steps so lantern pools read as painted shapes, not a smooth gradient
-  float q = smoothstep(0.05, 0.11, g) * 0.35 + smoothstep(0.22, 0.34, g) * 0.4 + g * 0.6;
-  return vec3(1.0, 0.56, 0.2) * q * 2.4 * on; // strong warm pools against the cold moonlight
+  float q = smoothstep(0.05, 0.11, g) * 0.3 + smoothstep(0.22, 0.34, g) * 0.4 + g * 0.7;
+  return (vec3(1.0, 0.6, 0.25) * q * 2.4 + vec3(1.0, 0.34, 0.1) * min(s, 1.5) * 0.11) * on;
+}
+// Lit windows and the open door throw their light out onto the wall and the ground in front of them.
+const int NW = ${MORGUE.wins.length + 1};
+const vec3 WINP[NW] = vec3[](${[...MORGUE.wins.map(([x, z, nx, nz]) => [x + nx * 0.45, 1.7, z + nz * 0.45]), [(MORGUE.door[0] + MORGUE.door[1]) / 2, 1.2, MORGUE.z0 - 0.7]].map((p) => `vec3(${p.map((v) => v.toFixed(2)).join(', ')})`).join(', ')});
+const vec3 WINN[NW] = vec3[](${[...MORGUE.wins.map(([, , nx, nz]) => [nx, nz, 1]), [0, -1, 2.2]].map((p) => `vec3(${p.map((v) => v.toFixed(1)).join(', ')})`).join(', ')});
+vec3 windowLight(vec3 w, vec3 N) {
+  float on = lampsOn();
+  if (on <= 0.0 || w.x < ${(MORGUE.x0 - 7).toFixed(1)} || w.x > ${(MORGUE.x1 + 7).toFixed(1)} || w.z < ${(MORGUE.z0 - 8).toFixed(1)} || w.z > ${(MORGUE.z1 + 7).toFixed(1)}) return vec3(0.0);
+  float g = 0.0;
+  for (int i = 0; i < NW; i++) {
+    vec3 d = WINP[i] - w;
+    float r2 = dot(d, d), r = sqrt(r2);
+    float front = smoothstep(-0.1, 0.3, dot(w.xz - WINP[i].xz, WINN[i].xy) + 0.45); // only outside the wall
+    float wrap = clamp(dot(N, d / (r + 1e-3)) * 0.6 + 0.4, 0.0, 1.0);
+    g += WINN[i].z * wrap * front / (1.0 + r2 * 0.3) * smoothstep(6.5, 1.5, r);
+  }
+  return vec3(1.0, 0.64, 0.3) * (smoothstep(0.06, 0.12, g) * 0.25 + g) * 1.5 * on;
 }
 // Under the morgue's roof the sun and the moon barely reach: 1 inside the hall (a soft edge just inside the walls),
 // 0 outside, so the walls' outer faces keep their light.
@@ -155,23 +200,65 @@ vec3 indoorLight(vec3 w, vec3 N) {
   float q = smoothstep(0.08, 0.16, g) * 0.35 + smoothstep(0.3, 0.45, g) * 0.35 + g * 0.55; // painted steps, as outside
   return vec3(1.0, 0.62, 0.3) * q * day3(1.9, 1.7, 1.3);
 }
-vec3 toonShadeRim(vec3 base, vec3 N, vec3 w, float rimK) {
-  float d = dot(N, keyDir());
-  float sh = sunShadow(w, N);
-  float lit = smoothstep(0.36, 0.44, d) * sh;
-  float mid = smoothstep(-0.16, -0.08, d) * (0.45 + 0.55 * sh); // a cast shadow is a cool lavender band, not black
-  // shadows go purple (cool lavender by day) instead of just darker
-  vec3 light = mix(${g3(BANDS.dark)}, ${g3(BANDS.mid)}, mid);
-  light = mix(light, ${g3(BANDS.lit)}, lit);
+
+// ---- the rig (docs/lighting-guide.md) ----
+uniform float uLightDbg; // ?light=key|fill|practical: 1, 2, 3 show that part alone on grey
+vec3 rigKey() { return ${g3(RIG.key)}; }
+// Natural light on a face. lit and mid are the caller's own key bands (0..1, before shadows): lit where the face
+// takes the key, mid on the wider band that still takes its spill. sh comes back as the key's shadow (0 in shadow).
+//  key    the sun or the moon, through the cloud cookie and the shadow map
+//  spill  a softer, more saturated wrap past the terminator and along shadow edges
+//  sky    the dome on faces that look up, bounce off the ground on faces that look down, a kick from behind
+vec3 rigNatural(vec3 N, vec3 w, float lit, float mid, out float sh) {
+  sh = sunShadow(w, N);
+  float ck = cloudCookie(w);
+  vec3 kd = keyDir();
+  vec3 fill = mix(${g3(RIG.bounce)} * mix(1.0, 0.55, smoothstep(0.0, 3.0, w.y)), ${g3(RIG.sky)}, smoothstep(0.15, 0.85, N.y * 0.5 + 0.5));
+  fill += ${g3(RIG.kick)} * clamp(dot(N, normalize(vec3(-kd.x, 0.45, -kd.z))), 0.0, 1.0);
+  fill *= contactAO(w);
+  vec3 key = rigKey() * (lit * sh * ck)
+           + ${g3(RIG.spill)} * ((mid * (1.0 - lit) * (0.35 + 0.65 * sh) + lit * 4.0 * sh * (1.0 - sh)) * ck);
   float rf = roofed(w);
-  // by day the hall fills with warm light bounced in through the door and the windows, and the sun that comes in
-  // through the door and the hatch lies on the floor in bright patches (the roof casts the rest of the shadow)
-  if (rf > 0.0) light = mix(light, day3(${g3(BANDS.dark)} * 0.5, ${g3(BANDS.dark)} * 0.65, vec3(0.86, 0.72, 0.62)) + vec3(1.0, 0.78, 0.5) * lit * 0.9 * uSunOn, rf) + indoorLight(w, N) * rf; // indoors: lamps, not the sky
-  vec3 V = normalize(cameraPosition - w);
-  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0) * (0.35 + 0.65 * mid) * (1.0 - 0.7 * rf);
-  vec3 rimCol = (base * 1.1 + 0.035) * day3(vec3(0.62, 0.74, 1.25), vec3(1.1, 0.62, 0.6), vec3(0.62, 0.6, 0.55));
-  return base * (light + lanternLight(w, N)) + rim * rimK * rimCol;
+  // under the roof: the hall's own soft light, and the sun where it comes in through the door and the hatch
+  if (rf > 0.0) { fill = mix(fill, ${g3(RIG.indoor)}, rf); key *= 1.0 - 0.1 * rf; }
+  if (uLightDbg > 0.5) return uLightDbg < 1.5 ? key : uLightDbg < 2.5 ? fill : vec3(0.0);
+  return fill + key;
 }
+// Lamp light: lanterns, lit windows and the door outside; the hanging lamps inside.
+vec3 rigPractical(vec3 N, vec3 w) {
+  if (uLightDbg > 0.5 && uLightDbg < 2.5) return vec3(0.0);
+  float rf = roofed(w);
+  vec3 p = (lanternLight(w, N) + windowLight(w, N)) * (1.0 - rf);
+  if (rf > 0.0) p += indoorLight(w, N) * rf;
+  return p;
+}
+// By moonlight the eye loses color: chroma drops, reds go dark, blue-greens stay light (the Purkinje shift). Only
+// the natural light is seen this way; lamp light keeps full color, which is what makes lamp-lit things pop.
+vec3 nightEye(vec3 base) {
+  if (uLightDbg > 0.5) return vec3(0.55);
+  float n = 1.0 - smoothstep(0.1, 0.55, dayK());
+  return mix(base, dot(base, vec3(0.12, 0.6, 0.28)) * vec3(0.84, 0.97, 1.14), 0.5 * n);
+}
+// What a lamp shows of a surface that wears night colors (the ground): its own warm, light self, not the blue the
+// moon makes of it. Without this a lantern's pool on dark blue grass is nearly invisible.
+vec3 lampBase(vec3 base) {
+  float n = 1.0 - dayPaint();
+  return mix(base, max(base.r, max(base.g, base.b)) * vec3(1.5, 1.2, 0.8), 0.7 * n);
+}
+// base: the surface color under natural light; lamp: its color under lamp light (the same, or lampBase(base))
+vec3 toonShade2(vec3 base, vec3 lamp, vec3 N, vec3 w, float rimK) {
+  float d = dot(N, keyDir());
+  float lit = smoothstep(0.36, 0.44, d);
+  float mid = smoothstep(-0.16, -0.08, d);
+  float sh;
+  vec3 nat = rigNatural(N, w, lit, mid, sh);
+  vec3 V = normalize(cameraPosition - w);
+  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0) * (0.35 + 0.65 * mid * (0.4 + 0.6 * sh)) * (1.0 - 0.7 * roofed(w));
+  vec3 rimCol = (base * 1.1 + 0.035) * day3(vec3(0.62, 0.74, 1.25), vec3(1.1, 0.62, 0.6), vec3(0.62, 0.6, 0.55));
+  if (uLightDbg > 0.5) { rim = 0.0; lamp = vec3(0.55); }
+  return nightEye(base) * nat + lamp * rigPractical(N, w) + rim * rimK * rimCol;
+}
+vec3 toonShadeRim(vec3 base, vec3 N, vec3 w, float rimK) { return toonShade2(base, base, N, w, rimK); }
 vec3 toonShade(vec3 base, vec3 N, vec3 w) { return toonShadeRim(base, N, w, 1.0); }
 `;
 

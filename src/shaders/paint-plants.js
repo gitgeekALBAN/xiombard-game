@@ -218,7 +218,7 @@ void main() {
   float lum = dot(base, vec3(0.3, 0.55, 0.15));
   vec3 night = mix(vec3(lum), base, 0.6) * vec3(0.7, 0.82, 1.0);
   base = mix(night, base, dp);
-  vec3 col = toonShadeRim(base, N, vW, rimK);
+  vec3 col = toonShade2(base, lampBase(base), N, vW, rimK); // lamp light shows the plant's warm self, like the ground
   // a few toadstools glow at night
   if (glow > 0.0) col = mix(col, vCol * 1.4 + vec3(0.25, 0.12, 0.02), glow * (1.0 - dp) * 0.6);
   gl_FragColor = vec4(col, 1.0);

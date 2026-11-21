@@ -20,15 +20,15 @@ import { sfx } from '../audio.js';
 import { isTouchDevice } from '../touch.js';
 import { Post } from './post.js';
 import { Sun } from './sun.js';
-import { DAY, day3, dayColor } from '../shaders/toon.js';
+import { DAY, SUN, day3, dayColor } from '../shaders/toon.js';
 
 // Fog and sky horizon share this color (sRGB): a dark saturated violet, so distance reads as depth, not milk.
 // FogExp2 at 0.0145 gives about 16% fog at 30 m, 50% at 57 m and 95% at 120 m.
-const FOG_COLOR = '#2e2856';
+const FOG_COLOR = '#353d70'; // lighter than the moonlit ground far away: distant figures read dark on light
 const FOG_DENSITY = 0.0145;
 // Day/night keys [night, dusk, day] for setDay; the night entries are the look above. By day only a light blue
 // haze far away (the lighting concept: a clear golden afternoon under a turquoise sky).
-const FOG_DAY = [FOG_COLOR, '#8a4e66', '#b2d8e4'], FOG_DENSITY_DAY = [FOG_DENSITY, 0.0115, 0.0026];
+const FOG_DAY = [FOG_COLOR, '#8a4e66', '#b2d8e4'], FOG_DENSITY_DAY = [0.0125, 0.0115, 0.0026];
 const SHADOW_DAY = ['#07040d', '#1a0c22', '#2a1f3c'];
 
 const _q = new THREE.Quaternion(), _rgb = { r: 0, g: 0, b: 0 };
@@ -151,6 +151,8 @@ export class View {
     // ?day=0..1 previews the day/night look (0 = night, the default)
     const dq = new URLSearchParams(location.search).get('day');
     if (dq !== null) this.setDay(Number(dq));
+    // ?light=key|fill|practical shows one part of the lighting rig alone, on grey (docs/lighting-guide.md)
+    SUN.uLightDbg.value = { key: 1, fill: 2, practical: 3 }[new URLSearchParams(location.search).get('light')] || 0;
   }
 
   // ---------- day/night (visual only) ----------
@@ -393,7 +395,7 @@ export class View {
     this.viewmodel.update(dt, { show: this.fpNow && !!meState && !meState.busy, speed: Math.min(moved, 8), dig: !!meState?.dig, swing: !!meState?.sw });
     this.viewmodel.updateCharm(dt, { fp: this.fpNow && !!meState, ch: meState ? meState.ch ?? -1 : -1, chant: !!meState?.chant });
     if (this.debugCam) this._sunFocus.set(...this.debugCam.t); else this._sunFocus.copy(this.camTarget);
-    this.sun.update(this.renderer, this.scene, this._sunFocus, this.post.quality === 'high' ? 1 : 2, [this.world.morgue.roof]);
+    this.sun.update(this.renderer, this.scene, this._sunFocus, this.post.quality === 'high' ? 1 : 2, [this.world.morgue.roof], this.time);
     this.post.render(this.scene, this.camera, this.time);
     this.updateLabels();
   }

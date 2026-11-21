@@ -56,14 +56,18 @@ choice between calmer graves and a sturdier yard. 3 AI bot teammates join by def
 off duty: they walk out and stand east of the morgue (`doStand` in `bots.js`). `?botwork` puts them to work on the old
 chain; they have not learned the registry desk and the dressing table yet.
 Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, crooked shapes, big heads, purple night,
-huge moon, curly trees. Lighting (decided 2026-11-21, from a NanoGPT lighting concept): fun and inviting, never grey —
-by day a golden sun under a turquoise sky, juicy grass, little haze; by night a bright teal-blue moonlit ground, violet
-sky and big warm orange pools under every lantern and lamp (`BANDS` and `lanternLight` in `toon.js`, sky in `sky.js`,
-fog in `view.js`, saturation in `post.js`). By day and at dusk the sun casts real shadows: `view/sun.js` renders one
-depth pass from the sun (2048², ±34 m around the camera's focus, texel-snapped) and every painted material reads it
-(`sunShadow`; a new lit material must call `shareLight(m)`). The ground, plants, backdrop, sky, ink hulls and anything
-transparent do not cast; characters cast through their own skinned depth material (`userData.depthMat`). At night
-the pass is skipped. Inspired by the mood only — never copy characters or designs from existing films/games.
+huge moon, curly trees. **Lighting follows `docs/lighting-guide.md`** (decided 2026-11-22: rules from Birn, Valve's
+TF2 / Left 4 Dead, Gurney and others, turned into one rig; read it before touching light). In short: every light has a
+job and a row in `RIG` (`toon.js`) at night / dusk / day — key (sun in the south-east by day, moon in the north-west
+over the morgue by night), spill, sky dome, bounce, kick, hall ambient — plus a drifting cloud cookie, contact
+occlusion at the morgue's walls, practicals (lanterns with a pool and a spill, lit windows and the door from
+`MORGUE.wins`, the hall lamps) and `nightEye` (moonlit colors lose chroma; lamp light keeps it). Day is about 3:1
+key to fill, night about 4.5:1: mostly cool shadow broken by warm pools, never evenly bright. `?light=key|fill|practical`
+shows one part alone on grey. The key casts real shadows day and night: `view/sun.js` renders one depth pass from it
+(2048², ±34 m around the camera's focus, texel-snapped) and every painted material reads it (`sunShadow`; a new lit
+material must call `shareLight(m)`). The ground, plants, backdrop, sky, ink hulls and anything transparent do not
+cast; characters cast through their own skinned depth material (`userData.depthMat`) and are lit by the same rig
+(`uRig` in `chars/material.js`). Inspired by the mood only — never copy characters or designs from existing films/games.
 
 Built on **three.js** + **Vite**, published to **GitHub Pages**.
 Live: https://gitgeekalban.github.io/xiombard-game/

@@ -49,9 +49,7 @@ export function buildMorgue(scene, batch) {
     const tilt = R.range(-0.06, 0.06), ry = Math.atan2(nx, nz);
     for (const s of [1, -1]) w(paintBox(0.66, 0.66, 0.07), glass, M([x + nx * off * s, 1.7, z + nz * off * s], [0, ry, tilt]), 0.012);
   };
-  for (const x of [-10.5, -6, 5, 9.5]) win(x, Mg.z0, 0, -1); // south wall, either side of the door
-  for (const x of [-6, 6.5, 10.5]) win(x, Mg.z1, 0, 1); // north wall, between the stations
-  win(Mg.x1, 7.6, 1, 0); // east end, the office
+  for (const [x, z, nx, nz] of Mg.wins) win(x, z, nx, nz); // south wall either side of the door, north wall, the office end
 
   // --- the stations, in the order a body goes through them ---
   const slab = spec('#9a93ad', { pat: P.stone }), cloth = spec('#d9cbb0', { pat: P.stripes, p1: 3 });

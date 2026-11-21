@@ -103,9 +103,9 @@ vec3 lawnOn(vec2 p, float px, vec3 earth, float bare) {
   float lit = smoothstep(0.3, 0.72, n1);       // big lighter and darker patches
   float yel = smoothstep(0.55, 0.8, n2);       // yellower green
   float dry = smoothstep(0.72, 0.88, n3);      // dry straw over bare earth
-  vec3 gap = mix(${dn('#0d1d2c', '#3a5e2c')}, ${dn('#132a3a', '#517c32')}, lit);
-  vec3 bBase = mix(${dn('#14304a', '#4a7a2e')}, ${dn('#1a3e56', '#5f9234')}, lit);
-  vec3 bTip = mix(${dn('#3a6e84', '#82a844')}, ${dn('#5a94a4', '#aac454')}, lit);
+  vec3 gap = mix(${dn('#11132a', '#35532f')}, ${dn('#171a33', '#4c6e36')}, lit);
+  vec3 bBase = mix(${dn('#191c3a', '#426a33')}, ${dn('#1f2546', '#5a833a')}, lit);
+  vec3 bTip = mix(${dn('#48567e', '#78984a')}, ${dn('#626f98', '#a3b862')}, lit);
   bBase = mix(bBase, ${dn('#282a40', '#6a7a30')}, yel * 0.55);
   bTip = mix(bTip, ${dn('#6c7090', '#bcbc62')}, yel * 0.55);
   gap = mix(gap, ${dn('#262226', '#8c7250')}, dry * 0.7);
@@ -131,7 +131,7 @@ vec3 lawnOn(vec2 p, float px, vec3 earth, float bare) {
       float rr = 0.015 + 0.006 * h.x;
       float m = min(length(d - vec2(0.0, rr)), min(length(d - vec2(-0.866, -0.5) * rr), length(d - vec2(0.866, -0.5) * rr)));
       float leaf = smoothstep(rr + px, rr - px, m) * step(h.z, 0.6);
-      vec3 cc = mix(${dn('#386a80', '#82b44a')}, ${dn('#14304a', '#3c7a2a')}, smoothstep(0.35, 1.0, m / rr));
+      vec3 cc = mix(${dn('#3e4e7a', '#78a44e')}, ${dn('#1b2342', '#3a6e2c')}, smoothstep(0.35, 1.0, m / rr));
       col = mix(col, cc, leaf * cp);
     }
   }
@@ -398,7 +398,7 @@ export function groundMaterial() {
           col = groundTopEx(p, px, smoothstep(0.1, 0.85, trample));
           col = mix(col, ${srgb('#8c7464')}, line * 0.75);
         }
-        gl_FragColor = vec4(toonShade(col, N, vW), 1.0);
+        gl_FragColor = vec4(toonShade2(col, lampBase(col), N, vW, 1.0), 1.0);
         #include <colorspace_fragment>
         #include <fog_fragment>
       }`,

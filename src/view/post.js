@@ -139,8 +139,8 @@ export class Post {
     const f = this.final.uniforms;
     f.uLift.value = day3(1, 0.8, 0.15, k);
     f.uVigCol.value.set(day3(0.32, 0.4, 0.62, k), day3(0.26, 0.26, 0.5, k), day3(0.42, 0.42, 0.44, k));
-    f.uVig.value = day3(0.7, 0.65, 0.4, k);
-    f.uSat.value = day3(1.18, 1.15, 1.14, k); // storybook colors: juicy, never grey
+    f.uVig.value = day3(0.85, 0.7, 0.4, k);
+    f.uSat.value = day3(1.0, 1.1, 1.08, k); // the night keeps its low chroma (only lamp light is saturated)
   }
 
   setQuality(q) {
