@@ -9,6 +9,7 @@ import { rng } from '../shared/rng.js';
 import { MORGUE, OUTFITS, RITES, morgueBoxes, TRAPS, FENCE_SECTIONS, FENCE_HP, fenceSectionAt } from '../shared/layout.js';
 import { drawCharm } from './models/charms.js';
 import { buildClerk } from './clerks.js';
+import { buildShafts } from './shafts.js';
 
 // The morgue and what the night does to the yard.
 // The morgue's walls, floor and furniture go into the yard's static Batch (no draw calls of their own). The roof is
@@ -291,10 +292,12 @@ export function buildMorgue(scene, batch) {
     M([Mg.table.x + 0.95, 2.45, Mg.z1 - 0.2], [0, Math.PI, 0.05]),   // inside, right of INTAKE
   ].map((m) => { const c = new THREE.Mesh(plate, countMat); c.applyMatrix4(m); c.name = 'hatch-counter'; scene.add(c); return c; });
   let shown = null;
+  const shafts = buildShafts(scene); // the sun's and the moon's beams in the hall's air
 
   return {
     roof,
     setDay(k) {
+      shafts.setDay(k);
       glow.mesh.visible = lampsOn(k) > 0;
       textMat.color.setScalar(0.5 + 0.5 * k); // the paper is not a lamp: dimmer at night
       countMat.color.copy(textMat.color);
@@ -323,6 +326,7 @@ export function buildMorgue(scene, batch) {
     // per frame: the shutter rolls up when open (and rattles while the clerk is on the way), the clerk steps up to the
     // counter, the portal swirls
     updateWindows(dt, time) {
+      shafts.update(time);
       for (const w of windows) {
         w.open += ((w.state === 2 ? 1 : 0) - w.open) * Math.min(1, dt * 3);
         const rattle = w.state === 1 ? Math.sin(time * 40) * 0.006 : 0;

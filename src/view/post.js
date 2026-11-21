@@ -77,7 +77,7 @@ void main() {
 const finalFrag = /* glsl */ `
 uniform sampler2D tScene; uniform sampler2D tBloom;
 uniform float uBloom; uniform float uGrain; uniform float uTime; uniform float uAspect; uniform float uFlat;
-uniform float uLift; uniform vec3 uVigCol; uniform float uVig; uniform float uSat;
+uniform float uLift; uniform vec3 uVigCol; uniform float uVig; uniform float uSat; uniform float uFg;
 varying vec2 vUv;
 ${luma}
 vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -100,6 +100,8 @@ void main() {
   vec2 v = (vUv - 0.5) * vec2(uAspect, 1.0);
   float vig = smoothstep(0.35, 1.05, length(v * vec2(0.82, 1.0) + vec2(0.0, 0.04)));
   g = mix(g, g * uVigCol, vig * uVig);
+  // the foreground sits in cool shade so the eye goes to the lit middle distance (a painter's dark foreground)
+  g = mix(g, g * vec3(0.6, 0.7, 0.86), smoothstep(0.5, 0.0, vUv.y) * uFg);
   // fine grain, also dithers away banding in the dark gradients
   float n = hash(gl_FragCoord.xy + fract(uTime * 7.13) * 431.0) - 0.5;
   g += n * (uGrain + 1.0 / 255.0) * (1.0 - l * 0.5);
@@ -123,7 +125,7 @@ export class Post {
     this.final = mat(finalFrag, {
       tScene: { value: null }, tBloom: { value: null }, uBloom: { value: this.strength }, uGrain: { value: 0 },
       uTime: { value: 0 }, uAspect: { value: 1 }, uFlat: { value: 0 },
-      uLift: { value: 1 }, uVigCol: { value: new THREE.Vector3(0.32, 0.26, 0.42) }, uVig: { value: 0.75 }, uSat: { value: 1.18 },
+      uLift: { value: 1 }, uVigCol: { value: new THREE.Vector3(0.32, 0.26, 0.42) }, uVig: { value: 0.75 }, uSat: { value: 1.18 }, uFg: { value: 0 },
     });
     this.sceneRT = null;
     this.down_ = [];
@@ -140,6 +142,7 @@ export class Post {
     f.uLift.value = day3(1, 0.8, 0.15, k);
     f.uVigCol.value.set(day3(0.32, 0.4, 0.62, k), day3(0.26, 0.26, 0.5, k), day3(0.42, 0.42, 0.44, k));
     f.uVig.value = day3(0.85, 0.7, 0.5, k);
+    f.uFg.value = day3(0.25, 0.3, 0.42, k);
     f.uSat.value = day3(1.0, 1.1, 1.14, k); // the night keeps its low chroma (only lamp light is saturated)
   }
 

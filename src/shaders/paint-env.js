@@ -142,6 +142,9 @@ void main() {
       base = mix(base, INK, line(min(fx, 1.0 - fx) * 0.36, 0.008) * (1.0 - under));
       if (h > 0.965) base = ${lin('#1e1427')}; // a shingle gone
       base *= 1.0 + (vnoise(o.xy * vec2(9.0, 26.0)) - 0.5) * 0.25;
+      // a roof is not one flat color: darker toward the eaves, lighter and sun-bleached toward the ridge by day
+      base *= mix(0.72, 1.2, smoothstep(2.8, 4.4, vW.y));
+      base = mix(base, base * vec3(1.35, 1.12, 1.0) + 0.025, dayPaint() * 0.75);
     }
     mot = 0.4;
   } else if (pat == 5) {

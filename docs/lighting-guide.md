@@ -93,7 +93,7 @@ One table in `toon.js` (`RIG`), three keys each: night, dusk, day. Values are li
 | Sky dome (up) | blue 0.22 / 0.32 / 0.64 | violet 0.30 / 0.24 / 0.48 | navy 0.13 / 0.16 / 0.36 | by the normal's y; by day sun + sky on a lit plane is warm on purpose (a golden afternoon: sunlit grass goes yellow-green, shade blue-green) |
 | Bounce (down) | lawn green 0.36 / 0.40 / 0.20 | 0.34 / 0.22 / 0.22 | 0.08 / 0.08 / 0.20 | stronger near the ground |
 | Kick | blue 0.10 / 0.16 / 0.30 | 0.16 / 0.12 / 0.34 | 0.05 / 0.08 / 0.18 | from opposite the key, 25° up |
-| Hall ambient | warm 0.62 / 0.52 / 0.44 | 0.30 / 0.22 / 0.30 | 0.12 / 0.11 / 0.24 | under the roof instead of sky and bounce |
+| Hall ambient | warm 0.86 / 0.70 / 0.52 | 0.30 / 0.22 / 0.30 | 0.12 / 0.11 / 0.24 | under the roof instead of sky and bounce |
 | Key : fill | about 5 : 1 | | about 4.5 : 1 | cheerful day, contrasty night |
 
 Also:
@@ -108,6 +108,12 @@ Also:
 - **Rim**: characters get an edge light in the key's colour where they face it (moon rims at night).
 - **Windows let the key in** (`windowSun`): inside the hall the sun (or the moon) lies on the floor in
   window-shaped patches with the mullions' cross; by day the panes are bright from inside.
+- **Light shafts** (`view/shafts.js`): a soft additive beam from each pane, the door and the hatch down to its
+  patch on the floor, with slow dust in it (sun by day, moon by night).
+- **The hall's walls** are lit by the hall (`inHall`), never by the sky: their inner faces count as indoors.
+- **A roof is not one colour**: darker toward the eaves, sun-bleached toward the ridge by day.
+- **Dark foreground** (`uFg` in `post.js`): the bottom of the frame sits in cool shade so the eye goes to the lit
+  middle distance.
 - **Atmosphere**: night fog is lighter than the moonlit ground far away, so distant figures are dark on light.
 - **Grade** (`post.js`): a little saturation by day, none added by night, a stronger vignette at night.
 

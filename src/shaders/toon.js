@@ -53,7 +53,7 @@ export const RIG = {
   sky: [[0.13, 0.16, 0.36], [0.3, 0.24, 0.48], [0.22, 0.32, 0.64]], // the dome: on faces that look up
   bounce: [[0.08, 0.08, 0.2], [0.34, 0.22, 0.22], [0.36, 0.4, 0.2]], // off the lit ground: on faces that look down
   kick: [[0.05, 0.08, 0.18], [0.16, 0.12, 0.34], [0.1, 0.16, 0.3]], // sky light from opposite the key
-  indoor: [[0.12, 0.11, 0.24], [0.3, 0.22, 0.3], [0.62, 0.52, 0.44]], // under the roof, instead of sky and bounce
+  indoor: [[0.12, 0.11, 0.24], [0.3, 0.22, 0.3], [0.86, 0.7, 0.52]], // under the roof, instead of sky and bounce
 };
 const g3 = (b) => `day3(vec3(${b[0].join(', ')}), vec3(${b[1].join(', ')}), vec3(${b[2].join(', ')}))`;
 const KEY = { dir: new THREE.Vector3(), lit: new THREE.Color(), shade: new THREE.Color() };
@@ -129,11 +129,11 @@ float sunShadow(vec3 w, vec3 N) {
 // fence. The middle of the yard keeps most of its light (a light island around the plots and the door).
 uniform float uSunTime;
 float cloudCookie(vec3 w) {
-  vec2 p = w.xz * 0.05 + uSunTime * vec2(0.011, 0.006);
+  vec2 p = w.xz * 0.06 + uSunTime * vec2(0.013, 0.007);
   float n = lgNoise(p) * 0.62 + lgNoise(p * 2.3 + 7.1) * 0.38;
-  float c = smoothstep(0.4, 0.56, n);
+  float c = smoothstep(0.38, 0.54, n);
   float open = smoothstep(9.0, 24.0, length(w.xz - vec2(-1.0, 2.0)));
-  return 1.0 - c * day3(0.62, 0.5, 0.7) * mix(day3(0.45, 0.45, 0.5), 1.0, open); // lighter over the yard: it stays the pool of light
+  return 1.0 - c * day3(0.62, 0.5, 0.74) * mix(day3(0.45, 0.45, 0.8), 1.0, open); // at night lighter over the yard: the lanterns' island
 }
 // Sky and bounce light do not reach the foot of the morgue's walls: a soft dark seam where wall meets ground.
 float contactAO(vec3 w) {
@@ -227,6 +227,9 @@ float facesHall(vec3 w, vec3 N) {
   vec2 q = abs(w.xz - c) - vec2(${((MORGUE.x1 - MORGUE.x0) / 2 + 0.3).toFixed(2)}, ${((MORGUE.z1 - MORGUE.z0) / 2 + 0.3).toFixed(2)});
   return step(max(q.x, q.y), 0.0) * step(0.0, dot(N.xz, c - w.xz));
 }
+// how much a face belongs to the hall: anything under the roof, and the walls' own inner faces
+float inHall(vec3 w, vec3 N) { return max(roofed(w), facesHall(w, N) * step(w.y, ${(MORGUE.h + 0.1).toFixed(2)})); }
+
 // ---- the rig (docs/lighting-guide.md) ----
 uniform float uLightDbg; // ?light=key|fill|practical: 1, 2, 3 show that part alone on grey
 vec3 rigKey() { return ${g3(RIG.key)}; }
@@ -239,11 +242,11 @@ vec3 rigNatural(vec3 N, vec3 w, float lit, float mid, out float sh) {
   sh = sunShadow(w, N);
   float ck = cloudCookie(w);
   vec3 kd = keyDir();
-  float rf = roofed(w);
-  if (rf > 0.0) { sh = max(sh, windowSun(w, kd) * rf); ck = mix(ck, 1.0, rf); }
+  float rf = inHall(w, N);
+  if (rf > 0.0) { sh = max(sh * (1.0 - rf * (1.0 - roofed(w))), windowSun(w, kd) * rf); ck = mix(ck, 1.0, rf); }
   vec3 fill = mix(${g3(RIG.bounce)} * mix(1.0, 0.55, smoothstep(0.0, 3.0, w.y)), ${g3(RIG.sky)}, smoothstep(0.15, 0.85, N.y * 0.5 + 0.5));
   fill += ${g3(RIG.kick)} * clamp(dot(N, normalize(vec3(-kd.x, 0.45, -kd.z))), 0.0, 1.0);
-  fill *= contactAO(w);
+  fill *= mix(contactAO(w), 1.0, inHall(w, N)); // the seam is for the walls' feet outside
   vec3 key = rigKey() * (lit * sh * ck)
            + ${g3(RIG.spill)} * ((mid * (1.0 - lit) * (0.35 + 0.65 * sh) + lit * 3.0 * sh * (1.0 - sh)) * ck);
   // under the roof: the hall's own soft light, and the sun where it comes in through the door, the hatch and the panes
@@ -254,7 +257,7 @@ vec3 rigNatural(vec3 N, vec3 w, float lit, float mid, out float sh) {
 // Lamp light: lanterns, lit windows and the door outside; the hanging lamps inside.
 vec3 rigPractical(vec3 N, vec3 w) {
   if (uLightDbg > 0.5 && uLightDbg < 2.5) return vec3(0.0);
-  float rf = roofed(w);
+  float rf = inHall(w, N);
   vec3 p = (lanternLight(w, N) + windowLight(w, N)) * (1.0 - rf);
   if (rf > 0.0) p += indoorLight(w, N) * rf;
   return p;
@@ -280,7 +283,7 @@ vec3 toonShade2(vec3 base, vec3 lamp, vec3 N, vec3 w, float rimK) {
   float sh;
   vec3 nat = rigNatural(N, w, lit, mid, sh);
   vec3 V = normalize(cameraPosition - w);
-  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0) * (0.35 + 0.65 * mid * (0.4 + 0.6 * sh)) * (1.0 - 0.7 * roofed(w));
+  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0) * (0.35 + 0.65 * mid * (0.4 + 0.6 * sh)) * (1.0 - 0.7 * inHall(w, N));
   vec3 rimCol = (base * 1.1 + 0.035) * day3(vec3(0.62, 0.74, 1.25), vec3(1.1, 0.62, 0.6), vec3(0.62, 0.6, 0.55));
   if (uLightDbg > 0.5) { rim = 0.0; lamp = vec3(0.55); }
   return nightEye(base) * nat + lamp * rigPractical(N, w) + rim * rimK * rimCol;
