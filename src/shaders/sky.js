@@ -136,8 +136,8 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         float moonVis = 1.0 - smoothstep(0.35, 0.85, k);
 
         // ---- gradient (display space) ----
-        vec3 zen = day3(vec3(0.04, 0.05, 0.19), vec3(0.2, 0.14, 0.4), vec3(0.3, 0.74, 0.84));
-        vec3 mid = day3(vec3(0.21, 0.12, 0.4), vec3(0.66, 0.34, 0.48), vec3(0.74, 0.9, 0.93));
+        vec3 zen = day3(vec3(0.04, 0.05, 0.19), vec3(0.2, 0.14, 0.4), vec3(0.17, 0.47, 0.85));
+        vec3 mid = day3(vec3(0.21, 0.12, 0.4), vec3(0.66, 0.34, 0.48), vec3(0.56, 0.8, 0.95));
         vec3 glow = uHorizon * day3(1.28, 1.12, 1.03) + day3(vec3(0.03, 0.02, 0.02), vec3(0.04, 0.02, 0.0), vec3(0.01, 0.0, -0.01));
         glow *= 1.0 + 0.3 * side * (1.0 - smoothstep(0.2, 0.55, k));
         // the low sun sets the horizon on fire on its own side, a rose band on the far side
@@ -224,9 +224,9 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         vec2 lightAE = mix(vec2(atan(uMoon.x, uMoon.z), asin(uMoon.y)), vec2(atan(sun.x, sun.z), asin(clamp(sun.y, -1.0, 1.0))), sunW);
         vec2 toL = normalize(vec2(wrapA(lightAE.x - az), lightAE.y - el) + 1e-5);
         vec2 grain = vec2(vnoise(vec2(az * 230.0, el * 270.0)), vnoise(vec2(az * 45.0, el * 60.0) + 7.0));
-        cLit = day3(vec3(0.3, 0.27, 0.47), vec3(0.52, 0.31, 0.45), vec3(0.955, 0.94, 0.9));
-        cShade = day3(vec3(0.2, 0.175, 0.35), vec3(0.34, 0.2, 0.37), vec3(0.81, 0.83, 0.94));
-        cUnder = day3(vec3(0.155, 0.135, 0.29), vec3(1.0, 0.57, 0.32), vec3(0.71, 0.74, 0.91));
+        cLit = day3(vec3(0.3, 0.27, 0.47), vec3(0.52, 0.31, 0.45), vec3(1.0, 0.96, 0.85));
+        cShade = day3(vec3(0.2, 0.175, 0.35), vec3(0.34, 0.2, 0.37), vec3(0.7, 0.75, 0.93));
+        cUnder = day3(vec3(0.155, 0.135, 0.29), vec3(1.0, 0.57, 0.32), vec3(0.6, 0.65, 0.88));
         cRim = day3(vec3(0.74, 0.71, 0.92), vec3(1.0, 0.82, 0.58), vec3(0.97, 0.96, 0.93));
         rimAmt = day3(1.0, 0.85, 0.0);
         float covered = 0.0;

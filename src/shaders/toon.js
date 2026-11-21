@@ -42,16 +42,16 @@ export function dayColor(hex, k, out) {
 }
 export const lampsOn = (k = DAY.value) => 1 - sstep(0.45, 0.8, clamp01(k));
 export function sunDir(k = DAY.value, out = new THREE.Vector3()) {
-  const e = -0.08 + 0.64 * sstep(0.25, 1, clamp01(k));
+  const e = -0.08 + 0.5 * sstep(0.25, 1, clamp01(k)); // 24 degrees up at noon: long storybook shadows
   return out.set(SUN_AZ.x * Math.cos(e), Math.sin(e), SUN_AZ.z * Math.cos(e));
 }
 // The lighting rig (docs/lighting-guide.md): every light has a job. Linear multipliers of the surface color,
 // each at [night, dusk, day].
 export const RIG = {
-  key: [[0.38, 0.52, 0.84], [1.25, 0.62, 0.26], [1.05, 0.86, 0.52]], // moon / low sun / sun: casts the shadows
-  spill: [[0.05, 0.09, 0.2], [0.55, 0.18, 0.08], [0.3, 0.14, 0.05]], // softer, more saturated wrap past the terminator
-  sky: [[0.13, 0.16, 0.36], [0.3, 0.24, 0.48], [0.34, 0.46, 0.74]], // the dome: on faces that look up
-  bounce: [[0.08, 0.08, 0.2], [0.34, 0.22, 0.22], [0.4, 0.44, 0.22]], // off the lit ground: on faces that look down
+  key: [[0.38, 0.52, 0.84], [1.25, 0.62, 0.26], [1.5, 1.05, 0.34]], // moon / low sun / sun: casts the shadows
+  spill: [[0.05, 0.09, 0.2], [0.55, 0.18, 0.08], [0.36, 0.15, 0.04]], // softer, more saturated wrap past the terminator
+  sky: [[0.13, 0.16, 0.36], [0.3, 0.24, 0.48], [0.22, 0.32, 0.64]], // the dome: on faces that look up
+  bounce: [[0.08, 0.08, 0.2], [0.34, 0.22, 0.22], [0.36, 0.4, 0.2]], // off the lit ground: on faces that look down
   kick: [[0.05, 0.08, 0.18], [0.16, 0.12, 0.34], [0.1, 0.16, 0.3]], // sky light from opposite the key
   indoor: [[0.12, 0.11, 0.24], [0.3, 0.22, 0.3], [0.62, 0.52, 0.44]], // under the roof, instead of sky and bounce
 };
@@ -89,7 +89,7 @@ float dayPaint() { return smoothstep(0.35, 0.9, dayK()); }
 float duskAmt() { return 1.0 - abs(dayK() * 2.0 - 1.0); }
 float lampsOn() { return 1.0 - smoothstep(0.45, 0.8, dayK()); }
 vec3 sunDir() {
-  float e = -0.08 + 0.64 * smoothstep(0.25, 1.0, dayK());
+  float e = -0.08 + 0.5 * smoothstep(0.25, 1.0, dayK());
   return vec3(SUN_AZ.x * cos(e), sin(e), SUN_AZ.z * cos(e));
 }
 vec3 keyDir() {
@@ -106,25 +106,24 @@ vec3 keyDir() {
 // rigNatural / rigPractical / nightEye    — the parts of the rig, for shaders with their own bands (characters)
 export const lightingGLSL = /* glsl */ `
 ${dayGLSL}
-// sun shadow: 1 in the sun, 0 in a cast shadow (always 1 at night and outside the shadow map)
-uniform sampler2D uSunMap; uniform mat4 uSunMat; uniform float uSunOn; uniform float uSunTexel;
-float sunShadow(vec3 w, vec3 N) {
-  if (uSunOn <= 0.0) return 1.0;
-  vec3 s = (uSunMat * vec4(w + N * 0.05, 1.0)).xyz * 0.5 + 0.5;
-  if (s.x < 0.0 || s.y < 0.0 || s.x > 1.0 || s.y > 1.0 || s.z > 1.0) return 1.0;
-  float z = s.z - 0.0012, t = uSunTexel, sh = 0.0;
-  sh += step(z, texture2D(uSunMap, s.xy + vec2(-0.5, -0.5) * t).r);
-  sh += step(z, texture2D(uSunMap, s.xy + vec2(0.5, -0.5) * t).r);
-  sh += step(z, texture2D(uSunMap, s.xy + vec2(-0.5, 0.5) * t).r);
-  sh += step(z, texture2D(uSunMap, s.xy + vec2(0.5, 0.5) * t).r);
-  vec2 e = smoothstep(vec2(0.0), vec2(0.06), s.xy) * smoothstep(vec2(1.0), vec2(0.94), s.xy); // fade out at the edge
-  return mix(1.0, sh * 0.25, uSunOn * e.x * e.y);
-}
 // small value noise of its own, so every material that includes the lighting has it under the same name
 float lgHash(vec2 p) { vec3 q = fract(vec3(p.xyx) * 0.1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
 float lgNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
   return mix(mix(lgHash(i), lgHash(i + vec2(1.0, 0.0)), f.x), mix(lgHash(i + vec2(0.0, 1.0)), lgHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+// the key's shadow: 1 in the light, 0 in a cast shadow (1 outside the shadow map)
+uniform sampler2D uSunMap; uniform mat4 uSunMat; uniform float uSunOn; uniform float uSunTexel;
+float sunShadow(vec3 w, vec3 N) {
+  if (uSunOn <= 0.0) return 1.0;
+  vec3 s = (uSunMat * vec4(w + N * 0.05, 1.0)).xyz * 0.5 + 0.5;
+  if (s.x < 0.0 || s.y < 0.0 || s.x > 1.0 || s.y > 1.0 || s.z > 1.0) return 1.0;
+  // 3x3 taps, the grid turned by a random angle per pixel: texel stair-steps break up into a soft grainy edge
+  float z = s.z - 0.0014, t = uSunTexel * 1.25, sh = 0.0, a = lgHash(gl_FragCoord.xy) * 6.2832;
+  mat2 rot = mat2(cos(a), sin(a), -sin(a), cos(a));
+  for (int j = -1; j <= 1; j++) for (int i = -1; i <= 1; i++) sh += step(z, texture2D(uSunMap, s.xy + rot * vec2(float(i), float(j)) * t).r);
+  vec2 e = smoothstep(vec2(0.0), vec2(0.06), s.xy) * smoothstep(vec2(1.0), vec2(0.94), s.xy); // fade out at the edge
+  return mix(1.0, sh / 9.0, uSunOn * e.x * e.y);
 }
 // Cloud shadows drifting over the land: a cookie on the key light, so the ground is never one value from fence to
 // fence. The middle of the yard keeps most of its light (a light island around the plots and the door).
@@ -134,7 +133,7 @@ float cloudCookie(vec3 w) {
   float n = lgNoise(p) * 0.62 + lgNoise(p * 2.3 + 7.1) * 0.38;
   float c = smoothstep(0.4, 0.56, n);
   float open = smoothstep(9.0, 24.0, length(w.xz - vec2(-1.0, 2.0)));
-  return 1.0 - c * day3(0.62, 0.45, 0.42) * mix(0.45, 1.0, open);
+  return 1.0 - c * day3(0.62, 0.5, 0.7) * mix(day3(0.45, 0.45, 0.5), 1.0, open); // lighter over the yard: it stays the pool of light
 }
 // Sky and bounce light do not reach the foot of the morgue's walls: a soft dark seam where wall meets ground.
 float contactAO(vec3 w) {
@@ -201,6 +200,33 @@ vec3 indoorLight(vec3 w, vec3 N) {
   return vec3(1.0, 0.62, 0.3) * q * day3(1.9, 1.7, 1.3);
 }
 
+// The key coming in through the hall's windows: 1 where a point inside sees the sun or the moon through a pane (the
+// mullions throw their cross), so the light lies on the floor and the far wall in window-shaped patches. The door
+// and the hatch are real holes: the shadow map handles those.
+const int NWI = ${MORGUE.wins.length};
+const vec4 WIN[NWI] = vec4[](${MORGUE.wins.map((v) => `vec4(${v.map((n) => n.toFixed(2)).join(', ')})`).join(', ')});
+float windowSun(vec3 w, vec3 kd) {
+  float s = 0.0;
+  for (int i = 0; i < NWI; i++) {
+    vec2 n = WIN[i].zw;
+    float f = dot(kd.xz, n); // the light arrives from this wall's side
+    if (f < 0.05) continue;
+    float t = dot(WIN[i].xy - w.xz, n) / f; // how far along the light to the wall
+    if (t < 0.0) continue;
+    vec3 p = w + kd * t;
+    vec2 q = vec2(dot(p.xz - WIN[i].xy, vec2(-n.y, n.x)), p.y - 1.7);
+    float pane = smoothstep(0.29, 0.26, abs(q.x)) * smoothstep(0.29, 0.26, abs(q.y));
+    float cross = smoothstep(0.02, 0.035, abs(q.x)) * smoothstep(0.02, 0.035, abs(q.y - 0.066));
+    s = max(s, pane * cross);
+  }
+  return s;
+}
+// 1 on a face that looks into the hall from one of its walls (the inner side of a window, say)
+float facesHall(vec3 w, vec3 N) {
+  vec2 c = vec2(${((MORGUE.x0 + MORGUE.x1) / 2).toFixed(2)}, ${((MORGUE.z0 + MORGUE.z1) / 2).toFixed(2)});
+  vec2 q = abs(w.xz - c) - vec2(${((MORGUE.x1 - MORGUE.x0) / 2 + 0.3).toFixed(2)}, ${((MORGUE.z1 - MORGUE.z0) / 2 + 0.3).toFixed(2)});
+  return step(max(q.x, q.y), 0.0) * step(0.0, dot(N.xz, c - w.xz));
+}
 // ---- the rig (docs/lighting-guide.md) ----
 uniform float uLightDbg; // ?light=key|fill|practical: 1, 2, 3 show that part alone on grey
 vec3 rigKey() { return ${g3(RIG.key)}; }
@@ -213,13 +239,14 @@ vec3 rigNatural(vec3 N, vec3 w, float lit, float mid, out float sh) {
   sh = sunShadow(w, N);
   float ck = cloudCookie(w);
   vec3 kd = keyDir();
+  float rf = roofed(w);
+  if (rf > 0.0) { sh = max(sh, windowSun(w, kd) * rf); ck = mix(ck, 1.0, rf); }
   vec3 fill = mix(${g3(RIG.bounce)} * mix(1.0, 0.55, smoothstep(0.0, 3.0, w.y)), ${g3(RIG.sky)}, smoothstep(0.15, 0.85, N.y * 0.5 + 0.5));
   fill += ${g3(RIG.kick)} * clamp(dot(N, normalize(vec3(-kd.x, 0.45, -kd.z))), 0.0, 1.0);
   fill *= contactAO(w);
   vec3 key = rigKey() * (lit * sh * ck)
-           + ${g3(RIG.spill)} * ((mid * (1.0 - lit) * (0.35 + 0.65 * sh) + lit * 4.0 * sh * (1.0 - sh)) * ck);
-  float rf = roofed(w);
-  // under the roof: the hall's own soft light, and the sun where it comes in through the door and the hatch
+           + ${g3(RIG.spill)} * ((mid * (1.0 - lit) * (0.35 + 0.65 * sh) + lit * 3.0 * sh * (1.0 - sh)) * ck);
+  // under the roof: the hall's own soft light, and the sun where it comes in through the door, the hatch and the panes
   if (rf > 0.0) { fill = mix(fill, ${g3(RIG.indoor)}, rf); key *= 1.0 - 0.1 * rf; }
   if (uLightDbg > 0.5) return uLightDbg < 1.5 ? key : uLightDbg < 2.5 ? fill : vec3(0.0);
   return fill + key;
@@ -248,7 +275,7 @@ vec3 lampBase(vec3 base) {
 // base: the surface color under natural light; lamp: its color under lamp light (the same, or lampBase(base))
 vec3 toonShade2(vec3 base, vec3 lamp, vec3 N, vec3 w, float rimK) {
   float d = dot(N, keyDir());
-  float lit = smoothstep(0.36, 0.44, d);
+  float lit = smoothstep(0.2, 0.3, d); // low enough that the ground takes a low sun
   float mid = smoothstep(-0.16, -0.08, d);
   float sh;
   vec3 nat = rigNatural(N, w, lit, mid, sh);

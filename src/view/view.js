@@ -28,7 +28,7 @@ const FOG_COLOR = '#353d70'; // lighter than the moonlit ground far away: distan
 const FOG_DENSITY = 0.0145;
 // Day/night keys [night, dusk, day] for setDay; the night entries are the look above. By day only a light blue
 // haze far away (the lighting concept: a clear golden afternoon under a turquoise sky).
-const FOG_DAY = [FOG_COLOR, '#8a4e66', '#b2d8e4'], FOG_DENSITY_DAY = [0.0125, 0.0115, 0.0026];
+const FOG_DAY = [FOG_COLOR, '#8a4e66', '#cbe4ea'], FOG_DENSITY_DAY = [0.0125, 0.0115, 0.0026];
 const SHADOW_DAY = ['#07040d', '#1a0c22', '#2a1f3c'];
 
 const _q = new THREE.Quaternion(), _rgb = { r: 0, g: 0, b: 0 };

@@ -180,9 +180,11 @@ void main() {
     if (abs(N.z) < 0.6) frame = 1.0;
     float mull = max(line(o.x, 0.02), line(o.y - hh * 0.2, 0.02));
     vec3 glass = AMBER * (0.85 + 0.25 * vnoise(o.xy * 6.0));
+    float inHall = dayPaint() * facesHall(vW, N); // from inside, by day: the pane is bright daylight, not a lamp
+    glass = mix(glass, vec3(1.0, 0.95, 0.74) * 1.3, inHall);
     base = mix(mix(glass, WOOD_DARK, mull), WOOD, frame);
     base = mix(base, INK, line(max(abs(o.x) - hw + 0.07, abs(o.y) - hh + 0.07), 0.008));
-    em = 0.88 * (1.0 - max(frame, mull)); lamp = 1.0; rim = 0.8;
+    em = 0.88 * (1.0 - max(frame, mull)); lamp = 1.0 - inHall; rim = 0.8;
     if (frame > 0.5) mot = 0.5;
   } else if (pat == 9) {
     // plank door: three dark boards, two light rails with a Z brace, an iron knob, nails
@@ -254,7 +256,7 @@ void main() {
 
   if (mot > 0.0) base *= 1.0 + mot * (mottle(o) - 0.5) * 1.2;
   // lamps go out by day: the glowing part loses its glow and darkens, as in toon()
-  if (lamp > 0.0 && em > 0.0) { float on = lampsOn(); em *= on; base *= mix(0.4, 1.0, on); }
+  if (lamp > 0.0 && em > 0.0) { float on = mix(1.0, lampsOn(), lamp); em *= on; base *= mix(0.4, 1.0, on); }
   vec3 col = mix(toonShadeRim(base, N, vW, rim), base, em);
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>

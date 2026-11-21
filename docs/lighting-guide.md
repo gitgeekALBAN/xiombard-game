@@ -87,14 +87,14 @@ One table in `toon.js` (`RIG`), three keys each: night, dusk, day. Values are li
 
 | Light | Day | Dusk | Night | Notes |
 |---|---|---|---|---|
-| Key direction | sun in the south-east, 32° up | sun low | moon in the north-west, 30° up | by day the front of the morgue and the yard are lit three-quarter; by night the moon hangs over the morgue and back-lights the yard |
-| Key | warm yellow 1.05 / 0.86 / 0.52 | orange 1.25 / 0.62 / 0.26 | cool grey-blue 0.38 / 0.52 / 0.84 | casts the shadow map, day and night; cloud cookie on top |
-| Spill | orange 0.30 / 0.14 / 0.05 | red 0.55 / 0.18 / 0.08 | blue 0.05 / 0.09 / 0.20 | on the band past the terminator and in shadow edges |
-| Sky dome (up) | blue 0.34 / 0.46 / 0.74 | violet 0.30 / 0.24 / 0.48 | navy 0.13 / 0.16 / 0.36 | by the normal's y; sun + sky on a flat lit plane is close to white |
-| Bounce (down) | lawn green 0.40 / 0.44 / 0.22 | 0.34 / 0.22 / 0.22 | 0.08 / 0.08 / 0.20 | stronger near the ground |
+| Key direction | sun in the south-east, 24° up (long shadows) | sun low | moon in the north-west, 30° up | by day the front of the morgue and the yard are lit three-quarter; by night the moon hangs over the morgue and back-lights the yard |
+| Key | golden 1.5 / 1.05 / 0.34 | orange 1.25 / 0.62 / 0.26 | cool grey-blue 0.38 / 0.52 / 0.84 | casts the shadow map, day and night; cloud cookie on top |
+| Spill | orange 0.36 / 0.15 / 0.04 | red 0.55 / 0.18 / 0.08 | blue 0.05 / 0.09 / 0.20 | on the band past the terminator and in shadow edges |
+| Sky dome (up) | blue 0.22 / 0.32 / 0.64 | violet 0.30 / 0.24 / 0.48 | navy 0.13 / 0.16 / 0.36 | by the normal's y; by day sun + sky on a lit plane is warm on purpose (a golden afternoon: sunlit grass goes yellow-green, shade blue-green) |
+| Bounce (down) | lawn green 0.36 / 0.40 / 0.20 | 0.34 / 0.22 / 0.22 | 0.08 / 0.08 / 0.20 | stronger near the ground |
 | Kick | blue 0.10 / 0.16 / 0.30 | 0.16 / 0.12 / 0.34 | 0.05 / 0.08 / 0.18 | from opposite the key, 25° up |
 | Hall ambient | warm 0.62 / 0.52 / 0.44 | 0.30 / 0.22 / 0.30 | 0.12 / 0.11 / 0.24 | under the roof instead of sky and bounce |
-| Key : fill | about 3 : 1 | | about 4.5 : 1 | cheerful day, contrasty night |
+| Key : fill | about 5 : 1 | | about 4.5 : 1 | cheerful day, contrasty night |
 
 Also:
 - **Cloud cookie** (`cloudCookie`): slow cloud shadows take up to 40-60% off the key in soft-edged patches, so the
@@ -106,6 +106,8 @@ Also:
   This is what makes lamp-lit things pop. The ground and the plants wear night colours of their own, so under a lamp
   they show a warm version of themselves (`lampBase`), or a lantern's pool on dark blue grass would hardly show.
 - **Rim**: characters get an edge light in the key's colour where they face it (moon rims at night).
+- **Windows let the key in** (`windowSun`): inside the hall the sun (or the moon) lies on the floor in
+  window-shaped patches with the mullions' cross; by day the panes are bright from inside.
 - **Atmosphere**: night fog is lighter than the moonlit ground far away, so distant figures are dark on light.
 - **Grade** (`post.js`): a little saturation by day, none added by night, a stronger vignette at night.
 
