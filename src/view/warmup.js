@@ -51,6 +51,12 @@ export async function warmUp(view, onProgress = () => {}) {
   r.setRenderTarget(sceneTarget);
   const mats = new Set([...r.compile(scene, cam), ...r.compile(cast, cam, scene)]);
   const quad = new THREE.PlaneGeometry(2, 2), empty = new THREE.Scene();
+  // the sun's shadow pass (view/sun.js): its plain depth material (also instanced) and the characters' own
+  const sunCast = new THREE.Group();
+  sunCast.add(new THREE.Mesh(quad, view.sun.mat), new THREE.InstancedMesh(quad, view.sun.mat, 1));
+  cast.traverse((o) => { const d = o.material && o.material.userData && o.material.userData.depthMat; if (d) sunCast.add(new THREE.Mesh(o.geometry, d)); });
+  r.setRenderTarget(view.sun.rt);
+  for (const x of r.compile(sunCast, cam, empty)) mats.add(x);
   for (const [m, target] of passes) {
     r.setRenderTarget(target);
     for (const x of r.compile(new THREE.Mesh(quad, m), cam, empty)) mats.add(x);

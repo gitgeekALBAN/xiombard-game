@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { noise } from './noise.glsl.js';
-import { lightingGLSL, dayGLSL, DAY } from './toon.js';
+import { lightingGLSL, dayGLSL, DAY, shareLight } from './toon.js';
 import { PLOTS, PLOT_HALF, ROAD_Z, ROAD_HALF, PATHS } from '../shared/layout.js';
 
 const f = (v) => v.toFixed(2);
@@ -404,6 +404,7 @@ export function groundMaterial() {
       }`,
     fog: true,
   });
-  m.uniforms.uDay = DAY; // shared day/night uniform (see toon.js)
+  shareLight(m); // shared day/night uniform (see toon.js)
+  m.userData.noShadow = true; // receives the sun's shadows, casts none (view/sun.js)
   return m;
 }

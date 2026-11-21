@@ -59,7 +59,11 @@ Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, croo
 huge moon, curly trees. Lighting (decided 2026-11-21, from a NanoGPT lighting concept): fun and inviting, never grey —
 by day a golden sun under a turquoise sky, juicy grass, little haze; by night a bright teal-blue moonlit ground, violet
 sky and big warm orange pools under every lantern and lamp (`BANDS` and `lanternLight` in `toon.js`, sky in `sky.js`,
-fog in `view.js`, saturation in `post.js`). Inspired by the mood only — never copy characters or designs from existing films/games.
+fog in `view.js`, saturation in `post.js`). By day and at dusk the sun casts real shadows: `view/sun.js` renders one
+depth pass from the sun (2048², ±34 m around the camera's focus, texel-snapped) and every painted material reads it
+(`sunShadow`; a new lit material must call `shareLight(m)`). The ground, plants, backdrop, sky, ink hulls and anything
+transparent do not cast; characters cast through their own skinned depth material (`userData.depthMat`). At night
+the pass is skipped. Inspired by the mood only — never copy characters or designs from existing films/games.
 
 Built on **three.js** + **Vite**, published to **GitHub Pages**.
 Live: https://gitgeekalban.github.io/xiombard-game/

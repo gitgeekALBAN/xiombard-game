@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DAY, lightingGLSL } from './toon.js';
+import { DAY, lightingGLSL, shareLight } from './toon.js';
 import { noise } from './noise.glsl.js';
 
 // One painted material for every plant in the yard (grass, reeds, toadstools, ferns, ivy, leaves, pumpkins...).
@@ -232,6 +232,7 @@ export function plantMaterial() {
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uTime: { value: 0 } }]),
     vertexShader: vert, fragmentShader: frag, fog: true, side: THREE.DoubleSide,
   });
-  m.uniforms.uDay = DAY;
+  shareLight(m);
+  m.userData.noShadow = true; // grass and flowers would only speckle the sun's shadow map
   return m;
 }

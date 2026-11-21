@@ -19,6 +19,7 @@ import { createViewmodel } from './viewmodel.js';
 import { sfx } from '../audio.js';
 import { isTouchDevice } from '../touch.js';
 import { Post } from './post.js';
+import { Sun } from './sun.js';
 import { DAY, day3, dayColor } from '../shaders/toon.js';
 
 // Fog and sky horizon share this color (sRGB): a dark saturated violet, so distance reads as depth, not milk.
@@ -46,6 +47,8 @@ export class View {
     r.info.autoReset = false;
     container.appendChild(r.domElement);
     this.post = new Post(r, quality);
+    this.sun = new Sun(); // the sun's cast shadows (by day)
+    this._sunFocus = new THREE.Vector3();
     this.scene = new THREE.Scene();
     // The fog color is an ordinary sRGB color: three.js converts the uniform to whatever space the fog is mixed in
     // (sRGB on the canvas, linear in the post render target), and the sky decodes the same value exactly at the
@@ -389,6 +392,8 @@ export class View {
     this.fpNow = fp && !this.debugCam;
     this.viewmodel.update(dt, { show: this.fpNow && !!meState && !meState.busy, speed: Math.min(moved, 8), dig: !!meState?.dig, swing: !!meState?.sw });
     this.viewmodel.updateCharm(dt, { fp: this.fpNow && !!meState, ch: meState ? meState.ch ?? -1 : -1, chant: !!meState?.chant });
+    if (this.debugCam) this._sunFocus.set(...this.debugCam.t); else this._sunFocus.copy(this.camTarget);
+    this.sun.update(this.renderer, this.scene, this._sunFocus, this.post.quality === 'high' ? 1 : 2, [this.world.morgue.roof]);
     this.post.render(this.scene, this.camera, this.time);
     this.updateLabels();
   }

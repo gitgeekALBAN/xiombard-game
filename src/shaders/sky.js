@@ -254,6 +254,7 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
     side: THREE.BackSide, depthWrite: false, fog: false,
   });
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(500, 48, 24), material);
+  mesh.userData.noShadow = true;
   mesh.frustumCulled = false;
   mesh.renderOrder = -1;
   return mesh;

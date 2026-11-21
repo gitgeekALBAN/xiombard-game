@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lightingGLSL, DAY, INK } from '../shaders/toon.js';
+import { lightingGLSL, DAY, INK, SUN } from '../shaders/toon.js';
 
 // The paint for every character. The mesh is low-poly and carries only a flat color, a material id and baked
 // occlusion per vertex; everything that reads as texture is computed here from the vertex's REST position, so it
@@ -350,7 +350,7 @@ export const FACE_T = { value: 0 };
 // Two materials sharing one set of uniforms: the paint and the ink hull.
 export function characterMaterials(opts = {}) {
   const uniforms = {
-    ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uDay: DAY,
+    ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), uDay: DAY, ...SUN,
     uPart: { value: Array.from({ length: 8 }, () => new THREE.Matrix4()) }, uNoHead: { value: 0 },
     uLightDir: { value: new THREE.Vector3(-0.4, 0.7, 0.5).normalize() }, uLightCol: { value: new THREE.Color(1, 1, 1) }, uShadeCol: { value: new THREE.Color(0.5, 0.45, 0.66) },
     uRimCol: { value: new THREE.Color(0, 0, 0) }, uInk: { value: new THREE.Color(INK) },
@@ -364,5 +364,7 @@ export function characterMaterials(opts = {}) {
   const fog = opts.fog !== false;
   const paint = new THREE.ShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: frag, fog });
   const hull = new THREE.ShaderMaterial({ uniforms, vertexShader: hullVert, fragmentShader: hullFrag, fog, side: THREE.BackSide });
+  // the sun's shadow pass (view/sun.js) draws the posed character with this: same skinning, no paint
+  paint.userData.depthMat = new THREE.ShaderMaterial({ uniforms, vertexShader: vert, fragmentShader: 'void main() { gl_FragColor = vec4(1.0); }' });
   return { paint, hull, uniforms };
 }

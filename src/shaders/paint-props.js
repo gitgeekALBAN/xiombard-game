@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { lightingGLSL, DAY, INK } from './toon.js';
+import { lightingGLSL, DAY, INK, shareLight } from './toon.js';
 import { noise } from './noise.glsl.js';
 import { PAL } from '../view/palette.js';
 import { COFFIN } from '../shared/layout.js';
@@ -634,7 +634,7 @@ export function propPaint({ rig = false } = {}) {
     } : {}]),
     vertexShader: vert, fragmentShader: frag, fog: true, defines: rig ? { RIG: 1 } : {},
   });
-  m.uniforms.uDay = DAY;
+  shareLight(m);
   if (!rig) shared = m;
   return m;
 }

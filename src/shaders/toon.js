@@ -14,6 +14,14 @@ export const SUN_AZ = new THREE.Vector3(0.94, 0, 0.34).normalize();
 export const LANTERN_Y = 2.35; // height of the lantern flame above the ground
 export const INK = '#120d1a'; // outline color
 export const DAY = { value: 0 };
+// The sun's shadow map (view/sun.js fills it every frame by day): every material that uses lightingGLSL shares
+// these uniform objects — call shareLight(material) after creating it.
+export const SUN = { uSunMap: { value: null }, uSunMat: { value: new THREE.Matrix4() }, uSunOn: { value: 0 }, uSunTexel: { value: 1 / 2048 } };
+export function shareLight(m) {
+  m.uniforms.uDay = DAY;
+  Object.assign(m.uniforms, SUN);
+  return m;
+}
 const L = (v) => `vec3(${v.x.toFixed(4)}, ${v.y.toFixed(4)}, ${v.z.toFixed(4)})`;
 
 // ---- JS twins of the day curves below (keep in sync with dayGLSL) ----
@@ -32,7 +40,7 @@ export function dayColor(hex, k, out) {
 }
 export const lampsOn = (k = DAY.value) => 1 - sstep(0.45, 0.8, clamp01(k));
 export function sunDir(k = DAY.value, out = new THREE.Vector3()) {
-  const e = -0.08 + 0.8 * sstep(0.25, 1, clamp01(k));
+  const e = -0.08 + 0.64 * sstep(0.25, 1, clamp01(k));
   return out.set(SUN_AZ.x * Math.cos(e), Math.sin(e), SUN_AZ.z * Math.cos(e));
 }
 // light band colors (linear multipliers): [dark, mid, lit] at night, dusk, day
@@ -76,7 +84,7 @@ float dayPaint() { return smoothstep(0.35, 0.9, dayK()); }
 float duskAmt() { return 1.0 - abs(dayK() * 2.0 - 1.0); }
 float lampsOn() { return 1.0 - smoothstep(0.45, 0.8, dayK()); }
 vec3 sunDir() {
-  float e = -0.08 + 0.8 * smoothstep(0.25, 1.0, dayK());
+  float e = -0.08 + 0.64 * smoothstep(0.25, 1.0, dayK());
   return vec3(SUN_AZ.x * cos(e), sin(e), SUN_AZ.z * cos(e));
 }
 vec3 keyDir() {
@@ -93,6 +101,20 @@ vec3 keyDir() {
 // lanternLight(worldPos, N)               — warm light only, for custom shaders (fades out by day)
 export const lightingGLSL = /* glsl */ `
 ${dayGLSL}
+// sun shadow: 1 in the sun, 0 in a cast shadow (always 1 at night and outside the shadow map)
+uniform sampler2D uSunMap; uniform mat4 uSunMat; uniform float uSunOn; uniform float uSunTexel;
+float sunShadow(vec3 w, vec3 N) {
+  if (uSunOn <= 0.0) return 1.0;
+  vec3 s = (uSunMat * vec4(w + N * 0.05, 1.0)).xyz * 0.5 + 0.5;
+  if (s.x < 0.0 || s.y < 0.0 || s.x > 1.0 || s.y > 1.0 || s.z > 1.0) return 1.0;
+  float z = s.z - 0.0012, t = uSunTexel, sh = 0.0;
+  sh += step(z, texture2D(uSunMap, s.xy + vec2(-0.5, -0.5) * t).r);
+  sh += step(z, texture2D(uSunMap, s.xy + vec2(0.5, -0.5) * t).r);
+  sh += step(z, texture2D(uSunMap, s.xy + vec2(-0.5, 0.5) * t).r);
+  sh += step(z, texture2D(uSunMap, s.xy + vec2(0.5, 0.5) * t).r);
+  vec2 e = smoothstep(vec2(0.0), vec2(0.06), s.xy) * smoothstep(vec2(1.0), vec2(0.94), s.xy); // fade out at the edge
+  return mix(1.0, sh * 0.25, uSunOn * e.x * e.y);
+}
 const int NL = ${LANTERNS.length};
 const vec3 LANTERN[NL] = vec3[](${LANTERNS.map(([x, z]) => `vec3(${x.toFixed(2)}, ${LANTERN_Y.toFixed(2)}, ${z.toFixed(2)})`).join(', ')});
 vec3 lanternLight(vec3 w, vec3 N) {
@@ -135,14 +157,16 @@ vec3 indoorLight(vec3 w, vec3 N) {
 }
 vec3 toonShadeRim(vec3 base, vec3 N, vec3 w, float rimK) {
   float d = dot(N, keyDir());
-  float lit = smoothstep(0.36, 0.44, d);
-  float mid = smoothstep(-0.16, -0.08, d);
+  float sh = sunShadow(w, N);
+  float lit = smoothstep(0.36, 0.44, d) * sh;
+  float mid = smoothstep(-0.16, -0.08, d) * (0.45 + 0.55 * sh); // a cast shadow is a cool lavender band, not black
   // shadows go purple (cool lavender by day) instead of just darker
   vec3 light = mix(${g3(BANDS.dark)}, ${g3(BANDS.mid)}, mid);
   light = mix(light, ${g3(BANDS.lit)}, lit);
   float rf = roofed(w);
-  // by day the hall fills with warm light bounced in through the door and the windows
-  if (rf > 0.0) light = mix(light, day3(${g3(BANDS.dark)} * 0.5, ${g3(BANDS.dark)} * 0.65, vec3(0.86, 0.72, 0.62)), rf) + indoorLight(w, N) * rf; // indoors: lamps, not the sky
+  // by day the hall fills with warm light bounced in through the door and the windows, and the sun that comes in
+  // through the door and the hatch lies on the floor in bright patches (the roof casts the rest of the shadow)
+  if (rf > 0.0) light = mix(light, day3(${g3(BANDS.dark)} * 0.5, ${g3(BANDS.dark)} * 0.65, vec3(0.86, 0.72, 0.62)) + vec3(1.0, 0.78, 0.5) * lit * 0.9 * uSunOn, rf) + indoorLight(w, N) * rf; // indoors: lamps, not the sky
   vec3 V = normalize(cameraPosition - w);
   float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0) * (0.35 + 0.65 * mid) * (1.0 - 0.7 * rf);
   vec3 rimCol = (base * 1.1 + 0.035) * day3(vec3(0.62, 0.74, 1.25), vec3(1.1, 0.62, 0.6), vec3(0.62, 0.6, 0.55));
@@ -238,7 +262,7 @@ export function toon(color, opts = {}) {
     }]),
     vertexShader: vert, fragmentShader: frag, fog: true, side: opts.side || THREE.FrontSide,
   });
-  m.uniforms.uDay = DAY;
+  shareLight(m);
   cache.set(key, m);
   return m;
 }

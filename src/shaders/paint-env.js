@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DAY, lightingGLSL } from './toon.js';
+import { DAY, lightingGLSL, shareLight } from './toon.js';
 import { noise } from './noise.glsl.js';
 
 // One painted material for the whole yard. Small relief (plank seams, shingles, mortar, bark grooves, window frames,
@@ -103,6 +103,7 @@ void main() {
     float id = floor(c);
     float h = hash12(vec2(id, 7.1));
     base = h < 0.3 ? WOOD_DARK : base * (0.9 + 0.2 * hash12(vec2(id, 1.3)));
+    base = mix(base, base * vec3(1.45, 1.0, 0.68), dayPaint() * 0.85); // by day plum boards turn warm sunny brown
     float f = fract(c);
     float grain = vnoise(vec2((f + id) * 14.0, o.y * 1.6 + id * 3.0));
     base *= 0.9 + 0.2 * smoothstep(0.35, 0.75, grain);
@@ -269,7 +270,7 @@ export function paintMat() {
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, {}]),
     vertexShader: vert, fragmentShader: frag, fog: true,
   });
-  mat.uniforms.uDay = DAY;
+  shareLight(mat);
   return mat;
 }
 

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { outlineMat, lightingGLSL, DAY } from '../../shaders/toon.js';
+import { outlineMat, lightingGLSL, DAY, shareLight } from '../../shaders/toon.js';
 import { noise } from '../../shaders/noise.glsl.js';
 import { outlineGeo } from './common.js';
 
@@ -50,7 +50,7 @@ let MAT = null;
 const charMat = () => {
   if (MAT) return MAT;
   MAT = new THREE.ShaderMaterial({ uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]), vertexShader: vert, fragmentShader: frag, fog: true });
-  MAT.uniforms.uDay = DAY; // shared day/night uniform (see toon.js)
+  shareLight(MAT); // shared day/night uniform (see toon.js)
   return MAT;
 };
 

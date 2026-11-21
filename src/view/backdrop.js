@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { lightingGLSL, dayGLSL, MOON_DIR, DAY, dayColor } from '../shaders/toon.js';
+import { lightingGLSL, dayGLSL, MOON_DIR, DAY, dayColor, shareLight } from '../shaders/toon.js';
 import { groundGLSL } from '../shaders/ground.js';
 import { noise } from '../shaders/noise.glsl.js';
 import { rng } from '../shared/rng.js';
@@ -103,7 +103,8 @@ function mat(frag, uniforms, extra = {}) {
     uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, uniforms]),
     vertexShader: baseVert, fragmentShader: frag, fog: true, ...extra,
   });
-  m.uniforms.uDay = DAY; // shared day/night uniform (see toon.js)
+  shareLight(m); // shared day/night uniform (see toon.js)
+  m.userData.noShadow = true;
   // merge clones values: re-link the day-following colors so setDay can update them in place
   for (const [k, u] of Object.entries(uniforms)) if (u.value && u.value.isColor && dayColors.some(([c]) => c === u.value)) m.uniforms[k].value = u.value;
   if (uniforms.uTime) m.uniforms.uTime = uniforms.uTime; // the shared clock, also cloned by merge
