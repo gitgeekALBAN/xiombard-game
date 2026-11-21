@@ -17,8 +17,8 @@ by wheel, E lights them; `CANDLES`).
 A digger's painted face follows what they do (`moodOf` in the sim, `crewMood` in `chars/material.js`): calm walking
 about; focused (a squint, the tip of the tongue out) carrying or working; straining (flushed, eyes popping, teeth
 gritted, sweat flying) under a coffin or a crocodile alone; angry while swinging the shovel. `?mood=0..3` forces one.
-When a grave is filled a **ghost** leaves it (`view/ghost.js`): happy when name tag, outfit, blessing and nails were all
-right, sad when anything was missed.
+When the candles are lit (the last step) a **ghost** leaves the grave (`view/ghost.js`): happy when name tag, outfit,
+blessing, nails and the candles were all right, sad when anything was missed (relighting candles later sends no second ghost).
 **Controls (decided):** only E picks things up and puts them down (stations too); the left mouse button only swings the
 shovel (on a touch screen GRAB does both). Anything thrown that hits someone knocks a digger off their feet (friends
 too) and stuns a zombie or a crocodile for a few seconds — stars over the head — without hurting it (`checkThrown`).
@@ -32,7 +32,8 @@ over). A card beside each window counts down (opens in / closes in) or says ring
 windows do not work at night. A live crocodile must be knocked out
 with the shovel first (5 s out cold: spiral eyes, tongue out, stars), or it lashes you with its tail and wriggles free.
 Or drop a rich one into a dug grave and fill it: no ghost, a "???" headstone, and `cash` (shown as $ in the HUD; the
-upgrades it buys come later). A live crocodile waddles about, lashes anyone close with its tail (they go limp) and
+upgrades it buys come later). It can also go in a coffin like a body (`itemCoffinAssist`; a live crocodile only while
+out cold): close the lid, nail it, bury it — the coffin's `passenger` is then `{ item }`. A live crocodile waddles about, lashes anyone close with its tail (they go limp) and
 wriggles out of your arms now and then.
 A body let go over a free station table is laid out straight on it (`tableAssist`), like a body dropped at a coffin.
 Each missed item (no tag, wrong outfit, wrong or no blessing, not nailed, wrong or no candles) adds 1 `unrest` to the
@@ -55,7 +56,10 @@ choice between calmer graves and a sturdier yard. 3 AI bot teammates join by def
 off duty: they walk out and stand east of the morgue (`doStand` in `bots.js`). `?botwork` puts them to work on the old
 chain; they have not learned the registry desk and the dressing table yet.
 Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, crooked shapes, big heads, purple night,
-huge moon, curly trees. Inspired by the mood only — never copy characters or designs from existing films/games.
+huge moon, curly trees. Lighting (decided 2026-11-21, from a NanoGPT lighting concept): fun and inviting, never grey —
+by day a golden sun under a turquoise sky, juicy grass, little haze; by night a bright teal-blue moonlit ground, violet
+sky and big warm orange pools under every lantern and lamp (`BANDS` and `lanternLight` in `toon.js`, sky in `sky.js`,
+fog in `view.js`, saturation in `post.js`). Inspired by the mood only — never copy characters or designs from existing films/games.
 
 Built on **three.js** + **Vite**, published to **GitHub Pages**.
 Live: https://gitgeekalban.github.io/xiombard-game/

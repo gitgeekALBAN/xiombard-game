@@ -136,8 +136,8 @@ export function createSky(horizon = new THREE.Color('#2a2344')) {
         float moonVis = 1.0 - smoothstep(0.35, 0.85, k);
 
         // ---- gradient (display space) ----
-        vec3 zen = day3(vec3(0.05, 0.045, 0.13), vec3(0.2, 0.14, 0.36), vec3(0.5, 0.57, 0.86));
-        vec3 mid = day3(vec3(0.13, 0.105, 0.26), vec3(0.62, 0.3, 0.47), vec3(0.72, 0.77, 0.93));
+        vec3 zen = day3(vec3(0.04, 0.05, 0.19), vec3(0.2, 0.14, 0.4), vec3(0.3, 0.74, 0.84));
+        vec3 mid = day3(vec3(0.21, 0.12, 0.4), vec3(0.66, 0.34, 0.48), vec3(0.74, 0.9, 0.93));
         vec3 glow = uHorizon * day3(1.28, 1.12, 1.03) + day3(vec3(0.03, 0.02, 0.02), vec3(0.04, 0.02, 0.0), vec3(0.01, 0.0, -0.01));
         glow *= 1.0 + 0.3 * side * (1.0 - smoothstep(0.2, 0.55, k));
         // the low sun sets the horizon on fire on its own side, a rose band on the far side

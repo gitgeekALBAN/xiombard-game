@@ -77,7 +77,7 @@ void main() {
 const finalFrag = /* glsl */ `
 uniform sampler2D tScene; uniform sampler2D tBloom;
 uniform float uBloom; uniform float uGrain; uniform float uTime; uniform float uAspect; uniform float uFlat;
-uniform float uLift; uniform vec3 uVigCol; uniform float uVig;
+uniform float uLift; uniform vec3 uVigCol; uniform float uVig; uniform float uSat;
 varying vec2 vUv;
 ${luma}
 vec3 toSRGB(vec3 c) { return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -93,7 +93,7 @@ void main() {
   vec3 g = toSRGB(clamp(c, 0.0, 1.0));
   // grade in display space: indigo lift in the darks, a little extra saturation, a gentle S-curve
   float l = luma(g);
-  g = mix(vec3(l), g, 1.1);
+  g = mix(vec3(l), g, uSat);
   g = mix(g, g * g * (3.0 - 2.0 * g), 0.18);
   g += vec3(0.022, 0.012, 0.05) * uLift * (1.0 - smoothstep(0.0, 0.35, l));
   // vignette toward deep plum, a touch stronger at the bottom so the HUD reads
@@ -123,7 +123,7 @@ export class Post {
     this.final = mat(finalFrag, {
       tScene: { value: null }, tBloom: { value: null }, uBloom: { value: this.strength }, uGrain: { value: 0 },
       uTime: { value: 0 }, uAspect: { value: 1 }, uFlat: { value: 0 },
-      uLift: { value: 1 }, uVigCol: { value: new THREE.Vector3(0.32, 0.26, 0.42) }, uVig: { value: 0.75 },
+      uLift: { value: 1 }, uVigCol: { value: new THREE.Vector3(0.32, 0.26, 0.42) }, uVig: { value: 0.75 }, uSat: { value: 1.18 },
     });
     this.sceneRT = null;
     this.down_ = [];
@@ -139,7 +139,8 @@ export class Post {
     const f = this.final.uniforms;
     f.uLift.value = day3(1, 0.8, 0.15, k);
     f.uVigCol.value.set(day3(0.32, 0.4, 0.62, k), day3(0.26, 0.26, 0.5, k), day3(0.42, 0.42, 0.44, k));
-    f.uVig.value = day3(0.75, 0.7, 0.45, k);
+    f.uVig.value = day3(0.7, 0.65, 0.4, k);
+    f.uSat.value = day3(1.18, 1.15, 1.14, k); // storybook colors: juicy, never grey
   }
 
   setQuality(q) {

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LANTERNS } from '../shared/layout.js';
+import { LANTERNS, MORGUE } from '../shared/layout.js';
 import { noise } from './noise.glsl.js';
 
 // Shared cartoon lighting: a key light in three bands with tinted shadows, a rim that follows the surface color,
@@ -37,9 +37,10 @@ export function sunDir(k = DAY.value, out = new THREE.Vector3()) {
 }
 // light band colors (linear multipliers): [dark, mid, lit] at night, dusk, day
 const BANDS = {
-  dark: [[0.3, 0.26, 0.5], [0.36, 0.25, 0.52], [0.6, 0.58, 0.78]],
-  mid: [[0.58, 0.56, 0.86], [0.78, 0.52, 0.66], [0.92, 0.88, 0.92]],
-  lit: [[0.92, 0.96, 1.12], [1.32, 0.82, 0.5], [1.3, 1.2, 1.0]],
+  // night: a cold moon, deep violet shadows; day: a warm sun, cool lavender shadows (more warm/cool contrast)
+  dark: [[0.26, 0.24, 0.55], [0.4, 0.27, 0.55], [0.56, 0.5, 0.8]],
+  mid: [[0.48, 0.66, 1.0], [0.84, 0.56, 0.66], [0.98, 0.88, 0.88]],
+  lit: [[0.78, 1.08, 1.32], [1.4, 0.86, 0.5], [1.42, 1.2, 0.84]],
 };
 const g3 = (b) => `day3(vec3(${b[0].join(', ')}), vec3(${b[1].join(', ')}), vec3(${b[2].join(', ')}))`;
 const KEY = { dir: new THREE.Vector3(), lit: new THREE.Color(), shade: new THREE.Color() };
@@ -101,13 +102,36 @@ vec3 lanternLight(vec3 w, vec3 N) {
   for (int i = 0; i < NL; i++) {
     vec3 d = LANTERN[i] - w;
     float r2 = dot(d, d);
-    float att = 1.0 / (1.0 + r2 * 0.16) * smoothstep(13.0, 4.0, sqrt(r2));
+    float att = 1.0 / (1.0 + r2 * 0.09) * smoothstep(17.0, 5.0, sqrt(r2));
     float wrap = clamp(dot(N, d * inversesqrt(r2 + 1e-4)) * 0.6 + 0.4, 0.0, 1.0);
     g += att * wrap;
   }
   // two soft steps so lantern pools read as painted shapes, not a smooth gradient
   float q = smoothstep(0.05, 0.11, g) * 0.35 + smoothstep(0.22, 0.34, g) * 0.4 + g * 0.6;
-  return vec3(1.0, 0.6, 0.26) * q * 1.7 * on;
+  return vec3(1.0, 0.56, 0.2) * q * 2.4 * on; // strong warm pools against the cold moonlight
+}
+// Under the morgue's roof the sun and the moon barely reach: 1 inside the hall (a soft edge just inside the walls),
+// 0 outside, so the walls' outer faces keep their light.
+float roofed(vec3 w) {
+  vec2 a = smoothstep(vec2(${(MORGUE.x0 + 0.15).toFixed(2)}, ${(MORGUE.z0 + 0.15).toFixed(2)}), vec2(${(MORGUE.x0 + 0.6).toFixed(2)}, ${(MORGUE.z0 + 0.6).toFixed(2)}), w.xz)
+         * smoothstep(vec2(${(MORGUE.x1 - 0.15).toFixed(2)}, ${(MORGUE.z1 - 0.15).toFixed(2)}), vec2(${(MORGUE.x1 - 0.6).toFixed(2)}, ${(MORGUE.z1 - 0.6).toFixed(2)}), w.xz);
+  return a.x * a.y * step(w.y, ${(MORGUE.h - 0.05).toFixed(2)});
+}
+// The hall's hanging lamps: warm pools on the floor, the tables and whoever stands under them. Always lit (dimmer by
+// day, when the windows and the door let some daylight in).
+const int NI = ${MORGUE.lamps.length};
+const vec3 INDOOR[NI] = vec3[](${MORGUE.lamps.map(([x, z]) => `vec3(${x.toFixed(2)}, ${(MORGUE.h - 0.72).toFixed(2)}, ${z.toFixed(2)})`).join(', ')});
+vec3 indoorLight(vec3 w, vec3 N) {
+  float g = 0.0;
+  for (int i = 0; i < NI; i++) {
+    vec3 d = INDOOR[i] - w;
+    float r2 = dot(d, d);
+    float att = 1.0 / (1.0 + r2 * 0.35) * smoothstep(5.5, 1.2, sqrt(r2));
+    float wrap = clamp(dot(N, d * inversesqrt(r2 + 1e-4)) * 0.6 + 0.4, 0.0, 1.0);
+    g += att * wrap;
+  }
+  float q = smoothstep(0.08, 0.16, g) * 0.35 + smoothstep(0.3, 0.45, g) * 0.35 + g * 0.55; // painted steps, as outside
+  return vec3(1.0, 0.62, 0.3) * q * day3(1.9, 1.7, 1.3);
 }
 vec3 toonShadeRim(vec3 base, vec3 N, vec3 w, float rimK) {
   float d = dot(N, keyDir());
@@ -116,8 +140,11 @@ vec3 toonShadeRim(vec3 base, vec3 N, vec3 w, float rimK) {
   // shadows go purple (cool lavender by day) instead of just darker
   vec3 light = mix(${g3(BANDS.dark)}, ${g3(BANDS.mid)}, mid);
   light = mix(light, ${g3(BANDS.lit)}, lit);
+  float rf = roofed(w);
+  // by day the hall fills with warm light bounced in through the door and the windows
+  if (rf > 0.0) light = mix(light, day3(${g3(BANDS.dark)} * 0.5, ${g3(BANDS.dark)} * 0.65, vec3(0.86, 0.72, 0.62)), rf) + indoorLight(w, N) * rf; // indoors: lamps, not the sky
   vec3 V = normalize(cameraPosition - w);
-  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0) * (0.35 + 0.65 * mid);
+  float rim = pow(1.0 - clamp(dot(N, V), 0.0, 1.0), 3.0) * (0.35 + 0.65 * mid) * (1.0 - 0.7 * rf);
   vec3 rimCol = (base * 1.1 + 0.035) * day3(vec3(0.62, 0.74, 1.25), vec3(1.1, 0.62, 0.6), vec3(0.62, 0.6, 0.55));
   return base * (light + lanternLight(w, N)) + rim * rimK * rimCol;
 }

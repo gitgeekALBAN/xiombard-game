@@ -348,15 +348,46 @@ export class Sim {
     return this.ents.find((e) => e.kind === 'item' && Math.abs(e.body.position.x - plot.x) < PLOT_HALF.x + 0.1
       && Math.abs(e.body.position.z - plot.z) < PLOT_HALF.z + 0.1 && e.body.position.y < -0.05) || null;
   }
-  // filled in over an odd thing: no ghost, no name, nobody to rise; the rich ones pay (quietly)
-  buryItem(plot, e) {
-    const o = ODDITIES[e.look];
+  // A body let go at an open, empty coffin is laid in it (coffinAssist); an odd thing too: close the lid on it, nail it
+  // and bury it like anyone else (a live crocodile only while it is out cold).
+  itemCoffinAssist(e, hand) {
+    if (e.croc && !(e.croc.stunT > this.time)) return false;
+    const o = ODDITIES[e.look], loc = new CANNON.Vec3();
+    for (const c of this.ents) {
+      if (c.kind !== 'coffin' || c.lid || this.coffinUp(c) < 0.7 || this.coffinContents(c) || this.coffinItem(c)) continue;
+      c.body.pointToLocalFrame(hand, loc);
+      if (Math.abs(loc.x) > COFFIN.hx + 0.6 || Math.abs(loc.z) > COFFIN.hz + 0.6 || loc.y > 2 || loc.y < -0.5) continue;
+      const b = e.body, cq = c.body.quaternion;
+      cq.vmult(new CANNON.Vec3(0, -COFFIN.hy + 0.1 + o.h[1], 0), b.position).vadd(c.body.position, b.position);
+      cq.mult(new CANNON.Quaternion().setFromEuler(0, Math.PI / 2, 0), b.quaternion); // its long side along the coffin
+      b.velocity.setZero(); b.angularVelocity.setZero(); b.wakeUp();
+      c.body.wakeUp();
+      this.emit('sfx', { name: 'thud', pos: [c.body.position.x, c.body.position.y, c.body.position.z] });
+      return true;
+    }
+    return false;
+  }
+  // the odd thing lying in an open coffin, if any
+  coffinItem(coffin) {
+    if (coffin.lid) return null;
+    const loc = new CANNON.Vec3();
+    for (const e of this.ents) {
+      if (e.kind !== 'item' || (e.croc && !(e.croc.stunT > this.time))) continue;
+      coffin.body.pointToLocalFrame(e.body.position, loc);
+      if (Math.abs(loc.x) < COFFIN.hx && Math.abs(loc.z) < COFFIN.hz && loc.y > -COFFIN.hy - 0.05 && loc.y < COFFIN.hy + 0.3) return e;
+    }
+    return null;
+  }
+  // filled in over an odd thing (loose, or nailed up in a coffin): no ghost, no name, nobody to rise; the rich ones
+  // pay (quietly)
+  buryItem(plot, e, coffin = null) {
+    const look = coffin ? coffin.passenger.item : e.look, o = ODDITIES[look];
     this.cash += o.cash;
     plot.name = '???';
-    plot.seed = e.id * 31 + 7;
-    plot.unrest = 0; plot.baseUnrest = 0; plot.nailed = true; plot.who = null; plot.candles = null;
-    plot.item = e.look;
-    this.removeEnt(e);
+    plot.seed = (coffin ? coffin.passenger.id : e.id) * 31 + 7;
+    plot.unrest = 0; plot.baseUnrest = 0; plot.nailed = coffin ? coffin.lid === 2 : true; plot.who = null; plot.candles = null;
+    plot.item = look;
+    this.removeEnt(coffin || e);
     plot.buried = true;
     plot.buriedAt = this.time;
     plot.fill = 0;
@@ -632,7 +663,7 @@ export class Sim {
     if (mate) mate.grab.end = 0; // the one left holding it takes it across the chest again
     if (assist && g.ent.kind === 'corpse' && !this.coffinAssist(g.ent, p.hand.position)) this.tableAssist(g.ent, p.hand.position);
     if (assist && g.ent.kind === 'coffin' && !mate) this.graveAssist(g.ent);
-    if (assist && g.ent.kind === 'item') { const k = this.windowAt(p.hand.position); if (!(k && this.handIn(g.ent, k))) this.itemGraveAssist(g.ent, p.hand.position); }
+    if (assist && g.ent.kind === 'item') { const k = this.windowAt(p.hand.position); if (!(k && this.handIn(g.ent, k)) && !this.itemCoffinAssist(g.ent, p.hand.position)) this.itemGraveAssist(g.ent, p.hand.position); }
   }
   // ---------- carrying ----------
   holdersOf(ent) { return this.ents.filter((e) => e.kind === 'digger' && e.grab && e.grab.ent === ent); }
@@ -865,6 +896,8 @@ export class Sim {
   // The laying-to-rest checklist. Each missed item makes the grave restless: zombies go for restless graves first,
   // and a coffin that is not nailed shut is dug up twice as fast.
   bury(plot, coffin) {
+    if (coffin.passenger.item != null) { this.buryItem(plot, null, coffin); return; } // nailed up with no body in it
+    plot.item = null;
     const who = coffin.passenger, named = who.tag === who.name, dressed = who.outfit === who.suit, nailed = coffin.lid === 2;
     const blessed = !!who.blessed && who.blessed === who.rite;
     const mark = (ok) => (ok ? '✓' : '✗');
@@ -884,10 +917,9 @@ export class Sim {
     this.buried++;
     this.score += 1 + (named ? 1 : 0) + (dressed ? 1 : 0) + (nailed ? 1 : 0) + (blessed ? 1 : 0);
     this.emit('sfx', { name: 'bury', pos: [plot.x, 0, plot.z] });
-    // the ghost leaves the grave: happy if everything on the note was done, sad if anything was missed
-    const content = named && dressed && blessed && nailed;
-    this.emit('ghost', { pos: [plot.x, 0.2, plot.z], happy: content });
-    this.emit('sfx', { name: content ? 'ghostHappy' : 'ghostSad', pos: [plot.x, 1, plot.z] });
+    // the ghost waits for the candles, the last step (see candleKey): this is what it knows so far
+    plot.ritesOk = named && dressed && blessed && nailed;
+    plot.ghostGone = false;
     this.emit('toast', { text: `R.I.P. ${plot.name}`, pos: [plot.x, 2.3, plot.z], big: true });
     this.emit('toast', { text: `${mark(named)} name  ${mark(dressed)} outfit  ${mark(blessed)} blessed  ${mark(nailed)} nailed`, pos: [plot.x, 1.7, plot.z] });
     if (plot.unrest >= 3) this.emit('toast', { text: 'The ground grumbles...', pos: [plot.x, 1.1, plot.z] });
@@ -998,7 +1030,8 @@ export class Sim {
   coffinStatus(c) {
     if (this.coffinUp(c) < 0.5) return { act: null, hint: 'The coffin is upside down! Flip it.' };
     if (!c.lid) {
-      const body = this.coffinContents(c);
+      const body = this.coffinContents(c), item = !body && this.coffinItem(c);
+      if (item) return { act: 'lid', coffin: c, item, hint: 'Hold F to close the lid on it' };
       return body ? { act: 'lid', coffin: c, body, hint: 'Hold F to close the lid' } : { act: null, hint: 'Empty coffin. Lay a body in it.' };
     }
     if (c.lid === 2) return { act: null, hint: 'Nailed shut. Carry it to a dug grave.' };
@@ -1033,24 +1066,27 @@ export class Sim {
     if (p.work < (w.act === 'redress' ? 0.5 : w.act === 'lid' ? 1 : w.act === 'repair' ? 2 : 1.6)) return;
     p.work = 0;
     if (w.act === 'redress') this.openWardrobe(p, w.body);
-    else if (w.act === 'lid') this.closeLid(w.coffin, w.body);
+    else if (w.act === 'lid') this.closeLid(w.coffin, w.body || w.item);
     else if (w.act === 'repair') this.repair(w);
     else this.nailLid(w.coffin);
   }
   // The lid goes on: from here the passenger is data on the coffin, not a ragdoll, and the coffin weighs for both.
   closeLid(c, body) {
-    c.passenger = { name: body.name, seed: body.seed, suit: body.suit, outfit: body.outfit, tag: body.tag, rite: body.rite, cand: body.cand, blessed: body.blessed, id: body.id };
+    const item = body.kind === 'item';
+    c.passenger = item ? { item: body.look, id: body.id }
+      : { name: body.name, seed: body.seed, suit: body.suit, outfit: body.outfit, tag: body.tag, rite: body.rite, cand: body.cand, blessed: body.blessed, id: body.id };
+    this.releaseGrabsOn(new Set(this.bodiesOf(body)));
     this.removeEnt(body);
     c.lid = 1;
     const b = c.body;
     b.addShape(new CANNON.Box(new CANNON.Vec3(COFFIN.hx, 0.03, COFFIN.hz)), new CANNON.Vec3(0, COFFIN.hy, 0));
-    b.mass = 25 + CORPSE_MASS;
+    b.mass = 25 + (item ? ODDITIES[body.look].mass : CORPSE_MASS);
     b.updateMassProperties();
     b.aabbNeedsUpdate = true;
     b.wakeUp();
     this.version++;
     this.emit('sfx', { name: 'thud', pos: [b.position.x, b.position.y, b.position.z] });
-    this.emit('toast', { text: `Goodnight, ${body.tag || 'whoever you are'}`, pos: [b.position.x, b.position.y + 1, b.position.z] });
+    this.emit('toast', { text: item ? 'Nobody needs to know. Nail it, bury it.' : `Goodnight, ${body.tag || 'whoever you are'}`, pos: [b.position.x, b.position.y + 1, b.position.z] });
   }
   nailLid(c) {
     if (this.nails < NAIL_COST || c.lid !== 1) return;
@@ -1209,6 +1245,14 @@ export class Sim {
       const pos = [plot.x, 1.3, plot.z - PLOT_HALF.z + 0.5];
       this.emit('sfx', { name: ok ? 'bell' : 'grab', pos });
       this.emit('toast', { text: ok ? `${candleLabel(plot.candles)} candles: just as they wished` : `${candleLabel(plot.candles)} candles... not what the note said`, pos });
+      // the candles are the last step: now the ghost leaves the grave, happy only if everything was right, candles too
+      // (lighting them again later changes the unrest, but the ghost has gone)
+      if (!plot.ghostGone) {
+        plot.ghostGone = true;
+        const happy = !!plot.ritesOk && ok;
+        this.emit('ghost', { pos: [plot.x, 0.2, plot.z], happy });
+        this.emit('sfx', { name: happy ? 'ghostHappy' : 'ghostSad', pos: [plot.x, 1, plot.z] });
+      }
       return true;
     }
     if (p.grab || p.charm >= 0) return false;
@@ -1321,7 +1365,7 @@ export class Sim {
       if (e.kind === 'corpse' && !e.z) {
         const d = e.bodies[0].position.distanceTo(f);
         if (d < bd) { bd = d; best = card(e, { stage: this.ents.some((c) => c.kind === 'coffin' && this.coffinContents(c) === e) ? 'coffin' : 'loose' }); }
-      } else if (e.kind === 'coffin' && e.passenger) {
+      } else if (e.kind === 'coffin' && e.passenger && e.passenger.item == null) {
         const d = e.body.position.distanceTo(f);
         if (d < bd) { bd = d; best = card(e.passenger, { stage: e.lid === 2 ? 'nailed' : 'closed' }); }
       }

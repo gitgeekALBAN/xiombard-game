@@ -103,11 +103,11 @@ vec3 lawnOn(vec2 p, float px, vec3 earth, float bare) {
   float lit = smoothstep(0.3, 0.72, n1);       // big lighter and darker patches
   float yel = smoothstep(0.55, 0.8, n2);       // yellower green
   float dry = smoothstep(0.72, 0.88, n3);      // dry straw over bare earth
-  vec3 gap = mix(${dn('#0e1819', '#3b5231')}, ${dn('#142223', '#667639')}, lit);
-  vec3 bBase = mix(${dn('#16262a', '#466031')}, ${dn('#1c3032', '#72823f')}, lit);
-  vec3 bTip = mix(${dn('#48666a', '#839653')}, ${dn('#62827f', '#bcc072')}, lit);
-  bBase = mix(bBase, ${dn('#26322e', '#6a7630')}, yel * 0.55);
-  bTip = mix(bTip, ${dn('#6e8078', '#c0bc62')}, yel * 0.55);
+  vec3 gap = mix(${dn('#0d1d2c', '#3a5e2c')}, ${dn('#132a3a', '#517c32')}, lit);
+  vec3 bBase = mix(${dn('#14304a', '#4a7a2e')}, ${dn('#1a3e56', '#5f9234')}, lit);
+  vec3 bTip = mix(${dn('#3a6e84', '#82a844')}, ${dn('#5a94a4', '#aac454')}, lit);
+  bBase = mix(bBase, ${dn('#282a40', '#6a7a30')}, yel * 0.55);
+  bTip = mix(bTip, ${dn('#6c7090', '#bcbc62')}, yel * 0.55);
   gap = mix(gap, ${dn('#262226', '#8c7250')}, dry * 0.7);
   bBase = mix(bBase, ${dn('#35362f', '#94824c')}, dry);
   bTip = mix(bTip, ${dn('#7e8278', '#d4c080')}, dry);
@@ -131,7 +131,7 @@ vec3 lawnOn(vec2 p, float px, vec3 earth, float bare) {
       float rr = 0.015 + 0.006 * h.x;
       float m = min(length(d - vec2(0.0, rr)), min(length(d - vec2(-0.866, -0.5) * rr), length(d - vec2(0.866, -0.5) * rr)));
       float leaf = smoothstep(rr + px, rr - px, m) * step(h.z, 0.6);
-      vec3 cc = mix(${dn('#3e605c', '#7cb24e')}, ${dn('#1a3230', '#3a6e2a')}, smoothstep(0.35, 1.0, m / rr));
+      vec3 cc = mix(${dn('#386a80', '#82b44a')}, ${dn('#14304a', '#3c7a2a')}, smoothstep(0.35, 1.0, m / rr));
       col = mix(col, cc, leaf * cp);
     }
   }

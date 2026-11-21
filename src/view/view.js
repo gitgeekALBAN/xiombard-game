@@ -23,10 +23,11 @@ import { DAY, day3, dayColor } from '../shaders/toon.js';
 
 // Fog and sky horizon share this color (sRGB): a dark saturated violet, so distance reads as depth, not milk.
 // FogExp2 at 0.0145 gives about 16% fog at 30 m, 50% at 57 m and 95% at 120 m.
-const FOG_COLOR = '#2a2344';
+const FOG_COLOR = '#2e2856';
 const FOG_DENSITY = 0.0145;
-// Day/night keys [night, dusk, day] for setDay; the night entries are the look above.
-const FOG_DAY = [FOG_COLOR, '#7a4a66', '#eed6c2'], FOG_DENSITY_DAY = [FOG_DENSITY, 0.0125, 0.0062];
+// Day/night keys [night, dusk, day] for setDay; the night entries are the look above. By day only a light blue
+// haze far away (the lighting concept: a clear golden afternoon under a turquoise sky).
+const FOG_DAY = [FOG_COLOR, '#8a4e66', '#b2d8e4'], FOG_DENSITY_DAY = [FOG_DENSITY, 0.0115, 0.0026];
 const SHADOW_DAY = ['#07040d', '#1a0c22', '#2a1f3c'];
 
 const _q = new THREE.Quaternion(), _rgb = { r: 0, g: 0, b: 0 };
