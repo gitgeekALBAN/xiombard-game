@@ -88,9 +88,13 @@ const SOUNDS = {
   bury: (v) => { [523, 466, 392, 311].forEach((f, i) => tone('triangle', f, f, 0.5, 0.18 * v, i * 0.16)); },
 };
 
+// the master volume from the settings (0..1)
+let VOLUME = 1;
+export function setVolume(v) { VOLUME = Math.max(0, Math.min(1, v)); }
+
 export function sfx(name, pos, listener) {
-  if (!ctx || ctx.state !== 'running' || !SOUNDS[name]) return;
-  let v = 1;
+  if (!ctx || ctx.state !== 'running' || !SOUNDS[name] || VOLUME <= 0) return;
+  let v = VOLUME;
   if (pos && listener) {
     const d = Math.hypot(pos[0] - listener.x, pos[1] - listener.y, pos[2] - listener.z);
     v = Math.max(0, 1 - d / 35);

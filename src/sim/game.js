@@ -37,7 +37,10 @@ const CROC_STUN = 5;        // seconds a crocodile stays out cold after a whack 
 const WINDOW_WAIT = 6;      // seconds from the bell to the shutter going up
 const WINDOW_OPEN = 20;     // seconds a hand-in window stays open (counted again from each hand-in)
 const ZOMBIE_STUN = 4;      // seconds a zombie sees stars after being hit with something thrown
-const CHANT_TIME = 3.2;     // humming the blessing over a body on the bier, waving the charm
+const CHANT_TIME = 3.2;
+// the daily quota and what it pays (see payQuota)
+const dailyQuota = (day) => 2 + day;
+const QUOTA_REWARD = { nails: 6, boards: 2, cash: 15 }, OVER_BONUS = { nails: 2, cash: 5 };     // humming the blessing over a body on the bier, waving the charm
 const SHOVEL_REACH = 1.9;   // meters; the dragger's fists reach further, so it has to be dodged or hit first
 const RISEN = { type: ZTYPE.walker, hp: 2, speed: 1.9, reach: 1.15 }; // a delivered body that got up again
 
@@ -78,6 +81,10 @@ export class Sim {
     this.acc = 0;
     this.score = 0;   // peace points
     this.cash = 0;    // money from odd things buried quietly (for upgrades, later)
+    // The daily quota: bodies laid to rest since this morning, out of how many the office expects (2 + the day).
+    // Meeting it pays supplies and cash; every burial over it pays a bonus (see payQuota).
+    this.today = 0;
+    this.quota = dailyQuota(1);
     this.windows = { lost: { state: 'closed', t: 0, react: 0, reactT: 0 }, police: { state: 'closed', t: 0, react: 0, reactT: 0 } }; // see ringBell
     this.noDelivery = false; // the big button: no more hearse today (tomorrow's first load comes double)
     this.buried = 0;  // bodies laid to rest
@@ -915,6 +922,7 @@ export class Sim {
     plot.fill = 0;
     this.setDepth(plot, 0);
     this.buried++;
+    this.payQuota(plot);
     this.score += 1 + (named ? 1 : 0) + (dressed ? 1 : 0) + (nailed ? 1 : 0) + (blessed ? 1 : 0);
     this.emit('sfx', { name: 'bury', pos: [plot.x, 0, plot.z] });
     // the ghost waits for the candles, the last step (see candleKey): this is what it knows so far
@@ -928,6 +936,24 @@ export class Sim {
       const old = this.plots.reduce((a, b) => (a.buriedAt < b.buriedAt ? a : b));
       old.buried = false;
       this.emit('toast', { text: 'Graveyard full! An old plot was cleared.', pos: [old.x, 2, old.z] });
+    }
+  }
+
+  // One more laid to rest today: meeting the daily quota pays supplies and cash, every one over it a bonus.
+  payQuota(plot) {
+    this.today++;
+    const pos = [plot.x, 2.9, plot.z];
+    if (this.today === this.quota) {
+      const r = QUOTA_REWARD;
+      this.nails += r.nails; this.boards += r.boards; this.cash += r.cash;
+      this.emit('toast', { text: `Daily quota met! +${r.nails} nails, +${r.boards} boards, +$${r.cash}`, pos, big: true });
+      this.emit('sfx', { name: 'bell', pos });
+      this.emit('reward', { kind: 'quota', text: 'Daily quota met', gain: `+${r.nails} nails · +${r.boards} boards · +$${r.cash}` });
+    } else if (this.today > this.quota) {
+      const b = OVER_BONUS;
+      this.nails += b.nails; this.cash += b.cash;
+      this.emit('toast', { text: `Over quota! Bonus +${b.nails} nails, +$${b.cash}`, pos });
+      this.emit('reward', { kind: 'bonus', text: `Over quota (${this.today}/${this.quota})`, gain: `+${b.nails} nails · +$${b.cash}` });
     }
   }
 
@@ -1047,6 +1073,9 @@ export class Sim {
     if (rt && rt.act) return rt;
     const dr = this.stationBody(p, MORGUE.dress);
     if (dr && dr.outfit !== 'shroud' && !p.choose) return { act: 'redress', body: dr, hint: 'Hold F to change their clothes' };
+    // a blessing gone wrong (or a change of mind): hold F at the bier to take the charms again
+    const bl = this.nearStation(p, MORGUE.chapel) && !p.grab && p.charm < 0 && !p.chant && this.stationBody(p, MORGUE.chapel);
+    if (bl && bl.blessed) return { act: 'rebless', body: bl, hint: 'Hold F to bless them again' };
     const near = this.ents.filter((e) => e.kind === 'coffin' && this.coffinDist(p, e) < 1.15).sort((a, b) => this.coffinDist(p, a) - this.coffinDist(p, b));
     const cs = near.map((c) => this.coffinStatus(c)).find((st) => st.act);
     return cs || (ps ? { ...ps, plot } : near.length ? this.coffinStatus(near[0]) : rt);
@@ -1063,9 +1092,10 @@ export class Sim {
       const q = w.coffin ? w.coffin.body.position : p.body.position;
       this.emit('sfx', { name: 'bonk', pos: [q.x, q.y, q.z] });
     }
-    if (p.work < (w.act === 'redress' ? 0.5 : w.act === 'lid' ? 1 : w.act === 'repair' ? 2 : 1.6)) return;
+    if (p.work < (w.act === 'redress' || w.act === 'rebless' ? 0.5 : w.act === 'lid' ? 1 : w.act === 'repair' ? 2 : 1.6)) return;
     p.work = 0;
     if (w.act === 'redress') this.openWardrobe(p, w.body);
+    else if (w.act === 'rebless') this.takeCharms(p);
     else if (w.act === 'lid') this.closeLid(w.coffin, w.body || w.item);
     else if (w.act === 'repair') this.repair(w);
     else this.nailLid(w.coffin);
@@ -1331,7 +1361,7 @@ export class Sim {
     if (this.nearStation(p, MORGUE.chapel) && !p.grab) {
       const body = this.stationBody(p, MORGUE.chapel), held = p.charm >= 0 ? RITES[p.charm].label : '';
       if (held) return body ? `${held} · wheel or 1-4 to change · E: bless ${body.name}` : `${held} in hand · lay a body on the bier · Q: put back`;
-      if (body && body.blessed) return `${body.name} is blessed (${riteLabel(body.blessed)}) · E: pick them up`;
+      if (body && body.blessed) return `${body.name} is blessed (${riteLabel(body.blessed)}) · E: pick them up · hold F: bless again`;
       return body ? `Chapel: E to take the charms and bless ${body.name}` : 'Chapel: lay a body on the bier to bless them';
     }
     if (this.truck.state === 'wait' && this.atHatch(p) && this.cargoInBed().length) {
@@ -1415,6 +1445,9 @@ export class Sim {
     this.spawns = [];
     this.emit('toast', { text: `Morning! Day ${this.dayN}`, pos: [0, 3.5, 4], big: true });
     this.emit('sfx', { name: 'rooster' });
+    if (this.today < this.quota) this.emit('toast', { text: `Yesterday: ${this.today} of ${this.quota} laid to rest. Quota missed.`, pos: [0, 2.4, 4] });
+    this.today = 0;
+    this.quota = dailyQuota(this.dayN);
     if (this.noDelivery) { // yesterday's deliveries were held back: today's first load brings them too
       this.truck.owed = (this.truck.owed || 0) + Math.min(5, 2 + Math.ceil((this.truck.loads + 1) / 2));
       this.noDelivery = false;
@@ -2005,7 +2038,7 @@ export class Sim {
     // a fresh coffin comes in from the stockroom whenever the stock table is clear
     if (Math.floor(this.time / 2) !== Math.floor((this.time - h) / 2)) this.restockCoffin();
     if (Math.floor(this.time * 5) !== Math.floor((this.time - h) * 5)) {
-      for (const e of this.ents) if (e.kind === 'digger') { this.checkWardrobe(e); this.checkCharms(e); this.checkCandles(e); e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); }
+      for (const e of this.ents) if (e.kind === 'digger') { this.checkWardrobe(e); this.checkCharms(e); this.checkCandles(e); e.hint = this.hintFor(e); e.card = e.rag ? null : this.cardFor(e); if (e.card) e.memo = e.card; }
     }
   }
 
@@ -2135,7 +2168,7 @@ export class Sim {
     const ev = this.events;
     this.events = [];
     return {
-      score: this.score, buried: this.buried, cash: this.cash, nodel: this.noDelivery ? 1 : 0,
+      score: this.score, buried: this.buried, cash: this.cash, quota: [this.today, this.quota], nodel: this.noDelivery ? 1 : 0,
       // the hand-in windows: [0 shut, 1 the bell rang, 2 open, 3 shut for the night; the clerk's face: 0 waiting,
       // 1 pleased, 2 cross; seconds to go: until it opens (1) or closes (2)]
       win: Object.fromEntries(Object.entries(this.windows).map(([k, w]) => [k, [this.phase === 'night' ? 3 : w.state === 'open' ? 2 : w.state === 'ringing' ? 1 : 0, w.react || 0,
@@ -2155,6 +2188,7 @@ export class Sim {
       players: this.ents.filter((e) => e.kind === 'digger').map((e) => ({
         id: e.id, name: e.name, color: e.color, hint: e.hint, rag: !!e.rag, dig: e.digging && (e.tool === 'dig' || e.tool === 'fill'),
         choose: e.choose ? 1 : 0, card: e.card || null, // choose: the outfit choice is open
+        memo: e.card ? null : e.memo || null, // the last note this digger saw (shown on demand with the note key)
         sw: this.swinging(e) ? 1 : 0, busy: e.grab || e.charm >= 0 ? 1 : 0,
         cnd: e.candle != null ? [e.cc, e.cn, this.plots[e.candle].name] : null, // the candle choice: color index, count, whose grave
         inf: e.infected ? 1 : 0, // bitten and infected (shown only on that player's own screen)

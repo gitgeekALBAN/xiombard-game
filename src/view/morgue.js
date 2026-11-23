@@ -81,13 +81,52 @@ export function buildMorgue(scene, batch) {
   w(G.box, spec('#b9c4d6', { rim: 1.6 }), M([dr.x, 1.55, Mg.z1 - 0.21], [0, 0, 0], [0.72, 1.32, 0.02]), 0);
   const Rk = Mg.rack, rz = Rk.z0 + ((OUTFITS.length - 1) * Rk.dz) / 2;
   w(G.cyl6, MAT.iron, M([Rk.x + 0.2, Rk.y + 0.42, rz], [Math.PI / 2, 0, 0], [0.025, OUTFITS.length * Rk.dz + 0.3, 0.025]), 0.008);
-  const look = { tux: ['#1e1a26', '#f2eee6'], sailor: ['#f2eee2', '#2c3e70'], clown: ['#f0c23a', '#d8433a'], gown: ['#6b3a7a', '#e9d9f0'], pajamas: ['#5d6f8c', '#e8e2d4'] };
+  // The costumes on show, one per outfit, each on a wooden hanger hooked over the rail. They face into the hall (+x):
+  // u runs along the wall (z), up is y, and every piece is a thin slab, so the shapes read like garments on a rack.
   OUTFITS.forEach((o, i) => {
-    const [a, b] = look[o.id], z = Rk.z0 + i * Rk.dz;
-    w(G.sph, spec(a, { pat: o.id === 'tux' || o.id === 'gown' ? P.plain : P.stripes, p1: 7 }), M([Rk.x + 0.22, Rk.y, z], [0, 0, 0], [0.13, 0.28, 0.2]), 0.012);
-    w(G.box, spec(b), M([Rk.x + 0.36, Rk.y + 0.08, z], [0, 0, 0], [0.02, 0.1, 0.1]), 0);
-    w(G.box, MAT.iron, M([Rk.x + 0.22, Rk.y + 0.33, z], [0, 0, 0], [0.015, 0.16, 0.015]), 0);
-    if (o.id === 'gown') w(G.cone6, spec(a), M([Rk.x + 0.22, Rk.y - 0.38, z], [0, 0, 0], [0.24, 0.44, 0.24]), 0.012);
+    const z = Rk.z0 + i * Rk.dz, x = Rk.x + 0.22, top = Rk.y + 0.3;
+    // hook and hanger: a curl over the rail and a little wooden triangle
+    w(G.tube6, MAT.iron, M([x, Rk.y + 0.38, z], [0, 0, 0], [0.01, 0.1, 0.01]), 0);
+    for (const s of [-1, 1]) w(G.box, MAT.boardLight, M([x, top + 0.04, z + s * 0.1], [s * -0.42, 0, 0], [0.025, 0.025, 0.24]), 0.006);
+    const slab = (c, y, dz, h, wdt, rot = 0, depth = 0.07, fx = 0) => w(G.box, c, M([x + fx, y, z + dz], [rot, 0, 0], [depth, h, wdt]), 0.01);
+    const sleeves = (c, y, wdt = 0.38) => { for (const s of [-1, 1]) slab(c, y, s * (wdt / 2 + 0.03), 0.34, 0.08, s * 0.18); };
+    if (o.id === 'tux') {
+      const black = spec('#1c1822'), white = spec('#f2eee6'), red = spec('#9a1d34');
+      slab(black, top - 0.24, 0, 0.46, 0.38);                               // jacket
+      for (const s of [-1, 1]) slab(black, top - 0.62, s * 0.09, 0.32, 0.09, s * -0.06); // tails
+      sleeves(black, top - 0.22);
+      slab(white, top - 0.14, 0, 0.26, 0.11, 0, 0.02, 0.04);                // shirt front
+      for (const s of [-1, 1]) w(G.cone4, red, M([x + 0.06, top - 0.03, z + s * 0.035], [s * Math.PI / 2, 0, 0], [0.03, 0.06, 0.02]), 0); // bow tie
+      for (let k = 0; k < 2; k++) w(G.sphLo, white, M([x + 0.05, top - 0.24 - k * 0.07, z], [0, 0, 0], 0.012), 0);
+    } else if (o.id === 'sailor') {
+      const white = spec('#f2eee2'), navy = spec('#2c3e70', { pat: P.stripes, p1: 2 }), red = spec('#c8343a');
+      slab(white, top - 0.2, 0, 0.4, 0.36);                                 // blouse
+      sleeves(white, top - 0.2, 0.36);
+      slab(navy, top - 0.04, 0, 0.14, 0.4, 0, 0.03, 0.04);                  // the square collar
+      w(G.cone4, red, M([x + 0.07, top - 0.16, z], [Math.PI, 0, 0], [0.05, 0.14, 0.02]), 0); // neckerchief
+      for (const s of [-1, 1]) slab(spec('#2c3e70'), top - 0.62, s * 0.09, 0.42, 0.15, s * 0.05); // bell-bottoms
+    } else if (o.id === 'clown') {
+      const yel = spec('#f0c23a', { pat: P.stripes, p1: 4 }), red = spec('#d8433a');
+      slab(yel, top - 0.26, 0, 0.5, 0.46, 0, 0.12);                         // a baggy smock
+      sleeves(red, top - 0.22, 0.46);
+      w(G.cyl6, spec('#f4efe4'), M([x, top - 0.02, z], [0, 0, 0], [0.13, 0.05, 0.2]), 0.008); // ruff
+      ['#3a7fd8', '#4fc06a', '#d8433a'].forEach((c, k) => w(G.sphLo, spec(c), M([x + 0.07, top - 0.14 - k * 0.12, z], [0, 0, 0], 0.035), 0)); // pompoms
+      w(G.cone4, spec('#4fc06a', { pat: P.stripes, p1: 3 }), M([x, top + 0.2, z + 0.12], [0.4, 0, 0], [0.07, 0.2, 0.07]), 0.008); // a party hat on the hook
+    } else if (o.id === 'gown') {
+      const purple = spec('#6b3a7a'), lilac = spec('#e9d9f0');
+      slab(purple, top - 0.13, 0, 0.26, 0.26);                              // bodice
+      w(G.cone6, spec('#4e2860'), M([x, top - 0.62, z], [0, 0, 0], [0.24, 0.78, 0.24]), 0.01); // a long skirt
+      slab(lilac, top - 0.27, 0, 0.05, 0.28, 0, 0.09);                      // sash
+      w(G.sphLo, lilac, M([x + 0.07, top - 0.27, z + 0.1], [0, 0, 0], 0.04), 0); // a bow on the sash
+    } else {
+      const stripe = spec('#5d6f8c', { pat: P.stripes, p1: 6 }), cream = spec('#e8e2d4');
+      slab(stripe, top - 0.2, 0, 0.4, 0.36);                                // pajama top
+      sleeves(stripe, top - 0.2, 0.36);
+      for (let k = 0; k < 3; k++) w(G.sphLo, cream, M([x + 0.05, top - 0.08 - k * 0.11, z], [0, 0, 0], 0.014), 0);
+      for (const s of [-1, 1]) slab(stripe, top - 0.6, s * 0.09, 0.36, 0.15);           // trousers
+      w(G.cone4, stripe, M([x, top + 0.14, z - 0.13], [-0.9, 0, 0], [0.06, 0.26, 0.06]), 0.008); // a floppy nightcap
+      w(G.sphLo, cream, M([x, top + 0.2, z - 0.25], [0, 0, 0], 0.03), 0);
+    }
   });
   // 4 the stock table, a low trestle in front of the stockroom door (west wall)
   const sk = Mg.stock;

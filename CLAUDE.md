@@ -36,6 +36,13 @@ upgrades it buys come later). It can also go in a coffin like a body (`itemCoffi
 out cold): close the lid, nail it, bury it — the coffin's `passenger` is then `{ item }`. A live crocodile waddles about, lashes anyone close with its tail (they go limp) and
 wriggles out of your arms now and then.
 A body let go over a free station table is laid out straight on it (`tableAssist`), like a body dropped at a coffin.
+**The delivery note on demand:** N (NOTE on a touch screen) pins the last note you saw open (`memo` per player in the
+state), wherever you are. **A blessing can be redone:** with a blessed body on the bier, hold F to take the charms again.
+**Daily quota (decided):** 2 + the day's number of bodies laid to rest since the morning (`dailyQuota`). Meeting it pays
+6 nails, 2 boards and $15; every burial over it pays 2 nails and $5 (`payQuota`, a `reward` event shows the card). A
+missed quota is only reported in the morning.
+The costumes on the dressing room rail are real garments on wooden hangers (tux with tails, sailor suit, clown smock with
+pompoms and a party hat, a long purple gown, striped pajamas with a nightcap), built in `view/morgue.js`.
 Each missed item (no tag, wrong outfit, wrong or no blessing, not nailed, wrong or no candles) adds 1 `unrest` to the
 grave and scores fewer peace points. A station's first E does its job; the next E picks the body up.
 Corpses slip out of your arms when you run, a coffin is too heavy for one, players can go limp and carry each other.
@@ -99,6 +106,18 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs and six odd ones — Bloat, Longshanks, Stack, Granny, Headless, Barrel — all on the same six parts), `layout.js` (level, colliders, decor, the morgue, outfits, fence sections, traps), `rng.js`.
 - `src/shaders/` — `toon.js` (cartoon lighting + inverted-hull outlines + lantern pools), `paint-env.js` (the static yard: one painted mesh), `paint-props.js` (coffins and their lids, headstones, truck: planks, iron, carvings, nail heads and lettering as paint), `paint-plants.js` (all vegetation: one material, fifteen painted kinds, wind in the vertex shader), `sky.js` (gradient, moon, sun, stars, brushed streaks and three rows of cumulus painted on a cylinder around the viewer), `ground.js` (lawn of brushed grass clumps, clover, footpaths with pebbles and prints, rutted road with puddles, dug earth, soil walls of graves), `noise.glsl.js`.
 - `src/audio.js` — procedural WebAudio SFX, no audio files.
+- `src/ui.js` + the `.gq` styles in `index.html` — the game's interface kit (decided 2026-11-23, after the team's
+  reference screenshots): dark ink panels with a thin gold frame, a hairline inside and corner marks, the menu's serif,
+  cream text, gold for values. Nothing slides or pops; things appear. It holds the **task list** (top left, vertical:
+  daily quota with its bar, laid to rest, peace points, supplies, crew, health), the **controls list** (bottom left,
+  one control per line, folded until H), the **reward card**, and the **Esc menu**: a small panel at the right edge,
+  never full screen, never darkening; its rows appear one after another in quick steps; Esc (or a click on the game)
+  closes it at once; settings (volume, mouse speed, invert look, picture quality, camera, FPS meter, controls list,
+  pause when alone) apply as they change and are kept in `localStorage` (`gq-settings`). Playing alone the game eases
+  to a halt behind the menu; with guests it cannot pause and says so. Touch screens get ☰ and NOTE buttons.
+- The station choices (outfit, charms, candles) use the same frame; while one is open the hint line steps aside
+  (`body.choosing`). The page-wide `canvas` rule pins the game canvas full screen, so any other canvas in the HUD
+  (the charm pictures) must reset `position`, or it escapes its box.
 - `src/touch.js` — phone/tablet controls (floating stick, drag-to-look, action buttons); feeds the same `input` object as the keyboard. Phones and tablets (a coarse main pointer) start with them; on a laptop with a touch screen they follow what is used: a mouse click hides them and grabs the pointer, a touch brings them back (`setTouchMode`).
 - Custom shaders use `ShaderMaterial`; they write linear color and include `colorspace_fragment` + fog chunks.
 - `src/view/warmup.js` — before the first frame, behind the menu's progress bar: compiles every shader program (the scene, one of everything that appears later, the post passes, each against the render target it draws into) in parallel via `KHR_parallel_shader_compile`, and sculpts every digger and zombie mesh. Nothing is drawn until it is done (`ready` in `main.js`); Host/Join pressed early wait for it. A new kind of object that appears mid-game must get a sample in its `cast`, or its shader compiles live and freezes the frame (on Windows a big painted shader takes seconds). Check with a headless run that wraps the WebGL calls: no `getProgramInfoLog` stall after the menu.

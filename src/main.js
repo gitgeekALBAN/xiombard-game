@@ -1,7 +1,8 @@
 import { View } from './view/view.js';
 import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom, routeOf, joinLobby } from './net.js';
-import { unlockAudio } from './audio.js';
+import { unlockAudio, setVolume } from './audio.js';
+import { createUI } from './ui.js';
 import { touch, initTouch, isTouchDevice, canTouch, setTouchMode, goLandscape } from './touch.js';
 import { OUTFITS, RITES, CANDLES, MAX_CANDLES } from './shared/layout.js';
 import { drawCharm } from './view/models/charms.js';
@@ -76,10 +77,15 @@ addEventListener('wheel', (e) => {
 }, { passive: true });
 let playing = false;
 const SENS = 0.0024;
+let sensK = 1, invertY = false; // from the settings (ui.js)
 
 addEventListener('keydown', (e) => {
   if (!playing || e.target.tagName === 'INPUT') return;
   if (e.repeat) return;
+  // Esc: the menu. With the mouse locked the browser takes that Esc to free the pointer, and the menu opens from
+  // pointerlockchange below; otherwise it toggles here. Closing it with Esc locks the mouse again.
+  if (e.code === 'Escape') { if (ui.open) { ui.close(); lockPointer(); } else ui.show(); return; }
+  if (e.code === 'KeyN') { notePinned = !notePinned; lastCard = ''; }
   keys.add(e.code);
   if (e.code === 'KeyE') input.g++;
   if (e.code === 'KeyQ') input.th++;
@@ -89,7 +95,7 @@ addEventListener('keydown', (e) => {
   if (digit && choosing && +digit[1] <= OUTFITS.length) pickOutfit(+digit[1] - 1);
   else if (digit && myCharm >= 0 && +digit[1] <= RITES.length) pickCharm(+digit[1] - 1);
   else if (digit && myCandles && +digit[1] <= CANDLES.length) setCandles(+digit[1] - 1, myCandles[1]);
-  if (e.code === 'KeyH') $('help').classList.toggle('open');
+  if (e.code === 'KeyH') ui.toggleHelp();
   if (e.code === 'KeyV') setFirstPerson(!view.firstPerson);
   if (e.code === 'Space') e.preventDefault();
 });
@@ -104,14 +110,19 @@ function lockPointer() {
 canvas.addEventListener('pointerdown', (e) => {
   if (!playing || e.pointerType !== 'mouse') return;
   unlockAudio();
+  if (ui.open) { ui.close(); lockPointer(); return; } // a click on the game resumes
   if (document.pointerLockElement !== canvas) { lockPointer(); return; }
   if (e.button === 0) input.wk++; // left click: swing the shovel (E picks things up)
   if (e.button === 2) input.th++;
 });
+// The mouse freed while playing (Esc, or the window lost focus): open the menu, unless we freed it ourselves.
+document.addEventListener('pointerlockchange', () => {
+  if (playing && !touch.active && document.pointerLockElement !== canvas && !ui.open) ui.show();
+});
 addEventListener('mousemove', (e) => {
   if (!playing || document.pointerLockElement !== canvas) return;
-  look.yaw -= e.movementX * SENS;
-  look.pitch = clampPitch(look.pitch + e.movementY * SENS);
+  look.yaw -= e.movementX * SENS * sensK;
+  look.pitch = clampPitch(look.pitch + e.movementY * SENS * sensK * (invertY ? -1 : 1));
 });
 
 function readInput(dt) {
@@ -240,9 +251,9 @@ function showRoom(code, note) {
 }
 
 // The delivery note card: who this is, what they should wear, and the laying-to-rest checklist.
-let lastCard = '';
+let lastCard = '', notePinned = false; // N pins the last note you saw open (me.memo), wherever you are
 function renderCard(me) {
-  const c = me && me.card, key = JSON.stringify(c);
+  const live = me && me.card, c = live || (notePinned && me ? me.memo : null), key = JSON.stringify([c, !live && notePinned]);
   if (key === lastCard) return;
   lastCard = key;
   const el = $('card');
@@ -256,7 +267,8 @@ function renderCard(me) {
     + li(c.suitOk, dressed ? `wearing: ${escapeHtml(c.outfit.toLowerCase())}` : 'dress at the dressing table', dressed && !c.suitOk)
     + li(c.riteOk, c.blessed ? `blessed with the ${escapeHtml(c.blessed)}` : 'bless them at the chapel', c.blessed && !c.riteOk)
     + li(c.stage === 'coffin' || closed, 'in a coffin') + li(closed, 'lid closed') + li(c.stage === 'nailed', 'nailed shut (calms them)')
-    + li(false, 'buried, then candles at the headstone') + '</ul>';
+    + li(false, 'buried, then candles at the headstone') + '</ul>'
+    + (live ? '' : `<span class="pinned">the last note you saw · ${touch.active ? 'NOTE' : 'N'} to put it away</span>`);
 }
 
 // The outfit choice at the dressing table: a list of the outfits, picked with keys 1-5 or a tap.
@@ -279,8 +291,8 @@ function renderCharms(me) {
   el.classList.toggle('show', ch >= 0);
   if (ch < 0) return;
   if (!el.childElementCount) {
-    el.innerHTML = RITES.map((r, i) => `<button data-i="${i}"><canvas width="64" height="64"></canvas><span><kbd>${i + 1}</kbd>${escapeHtml(r.label)}</span></button>`).join('')
-      + `<small>${touch.active ? 'GRAB: bless · THROW: put back' : 'wheel or 1-4 · E: bless · Q: put back'}</small>`;
+    el.innerHTML = '<h3>BLESS WITH</h3>' + RITES.map((r, i) => `<button data-i="${i}"><canvas width="64" height="64"></canvas><span><kbd>${i + 1}</kbd>${escapeHtml(r.label)}</span></button>`).join('')
+      + `<small>${touch.active ? 'GRAB: bless · THROW: put back' : 'wheel or 1-4 to pick · E: bless · Q: put back'}<br>wrong one? hold F at the bier to bless again</small>`;
     el.querySelectorAll('button').forEach((b, i) => {
       drawCharm(b.querySelector('canvas').getContext('2d'), RITES[i].id, 32, 33, 52, '#efe6d0');
       b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); pickCharm(i); });
@@ -313,16 +325,14 @@ function renderCandles(me) {
 
 function applyState(st) {
   view.setState(st);
-  $('score').textContent = st.buried ?? st.score;
-  $('points').textContent = st.score;
-  $('nails').textContent = st.nails ?? 0;
-  $('boards').textContent = st.boards ?? 0;
-  $('cash').textContent = st.cash ?? 0;
+  for (const ev of st.ev || []) if (ev.type === 'reward') ui.showReward(ev);
+  ui.renderTasks(st, myId);
   renderCard(st.players.find((p) => p.id === myId));
   renderWardrobe(st.players.find((p) => p.id === myId));
   renderCharms(st.players.find((p) => p.id === myId));
   renderCandles(st.players.find((p) => p.id === myId));
-  { const me = st.players.find((p) => p.id === myId), inf = !!(me && me.inf); document.body.classList.toggle('infected', inf); $('health').textContent = inf ? 'infected' : 'healthy'; } // only my own bite shows
+  { const me = st.players.find((p) => p.id === myId), inf = !!(me && me.inf); document.body.classList.toggle('infected', inf); } // only my own bite shows (the task list says it too)
+  document.body.classList.toggle('choosing', choosing || myCharm >= 0 || !!myCandles); // a choice is open: the hint line steps aside
   if (st.phase) {
     const [night, left, day, light, zombies] = st.phase;
     view.setDay?.(light);
@@ -337,7 +347,6 @@ function applyState(st) {
   $('grip').classList.toggle('show', grip >= 0);
   $('gripfill').style.width = `${Math.max(0, grip) * 100}%`;
   $('gripfill').style.background = grip < 0.3 ? '#e2584a' : '#cfe8a0';
-  $('players').innerHTML = st.players.map((p) => `<li style="--c:${p.color}">${escapeHtml(p.name)}${p.id === myId ? ' (you)' : ''}</li>`).join('');
 }
 // Hints are written by the host in keyboard terms; on a touch screen show the button names instead.
 const TOUCH_WORDS = [[/Hold F/g, 'Hold WORK'], [/\bE:/g, 'GRAB:'], [/keys 1-5 · Q to cancel/g, 'tap one · THROW to cancel'], [/Right-click to throw/g, 'THROW to throw'], [/E to pick up/g, 'Tap GRAB'], [/E to drop/g, 'GRAB to drop'], [/Click to whack/g, 'Tap GRAB to whack'],
@@ -347,6 +356,7 @@ const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&l
 
 // ---------- loop ----------
 let last = performance.now();
+let timeScale = 1; // eases toward 0 while the menu is open in a game of one (see frame)
 function tick(dt) {
   if (sim) {
     if (playing) sim.setInput(myId, { ...readInput(dt) });
@@ -388,6 +398,21 @@ function togglePerf(on = !perf.el) {
   } else if (!on && perf.el) { perf.el.remove(); perf.el = null; }
 }
 if (/fps/.test(location.search + location.hash)) togglePerf(true);
+// the game's own interface: the task list, the controls list, rewards and the Esc menu with its settings (ui.js)
+const ui = createUI({
+  setFirstPerson, isFirstPerson: () => view.firstPerson,
+  setQuality: (q) => view.post?.setQuality?.(q), quality: () => view.post?.quality || 'high',
+  setVolume, setSens: (k) => { sensK = k; }, setInvertY: (b) => { invertY = b; },
+  togglePerf: (on) => togglePerf(!!on || /fps/.test(location.search + location.hash)),
+  solo: () => !hostConn && !guests.size,
+  leave: () => location.reload(),
+  onClose: () => {},
+});
+for (const [id, fn] of [['t-menu', () => ui.toggle()], ['t-note', () => { notePinned = !notePinned; lastCard = ''; }]]) {
+  const b = $(id);
+  if (!b) continue;
+  b.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); fn(); });
+}
 addEventListener('keydown', (e) => { if (e.code === 'F3') { e.preventDefault(); togglePerf(); } });
 function measure(now, dt) {
   if (!perf.el) return;
@@ -404,8 +429,11 @@ function frame(now) {
   const raw = (now - last) / 1000;
   const dt = Math.min(0.05, raw);
   last = now;
-  tick(dt);
-  if (ready) view.frame(dt, look); // nothing is drawn until warmUp has compiled the shaders: a draw would compile them on the spot
+  const halt = ui.open && ui.settings.pause && sim && !guests.size;
+  timeScale += ((halt ? 0 : 1) - timeScale) * Math.min(1, dt * 6);
+  if (timeScale < 0.02 && halt) timeScale = 0;
+  tick(dt * timeScale);
+  if (ready) view.frame(dt * Math.max(timeScale, 0.15), look); // nothing is drawn until warmUp has compiled the shaders: a draw would compile them on the spot
   measure(now, raw);
   requestAnimationFrame(frame);
 }
@@ -490,6 +518,6 @@ if (canTouch()) {
     }
   }, { capture: true });
 }
-if (innerHeight < 520) $('help').classList.remove('open'); // keep short screens uncluttered
+try { if (innerHeight < 520 && !localStorage.getItem('gq-settings') && ui.settings.help) ui.toggleHelp(); } catch { /* storage blocked */ } // short screens start uncluttered
 const autoJoin = new URLSearchParams(location.search).get('join');
 if (autoJoin) { $('code').value = autoJoin.toUpperCase(); $('join').textContent = 'Join friends'; $('join').focus(); }
