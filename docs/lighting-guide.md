@@ -1,5 +1,8 @@
 # Lighting guide — how GraveQuota is lit, and why
 
+> **The amber sunset is now the default daytime look.** See [implementation and review notes](lighting-c.md).
+> The golden-day rig below remains available with `?lighting=legacy`; cloud silhouette fixes apply to both rigs.
+
 Rules pulled from books and talks on lighting with several lights (film, animation, stylized games), then turned into
 one rig for our day and our night. The numbers live in `RIG` in `src/shaders/toon.js`; this file says what each light
 is for, so that tuning stays a matter of roles and ratios, not of taste per pixel.

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { MORGUE } from '../shared/layout.js';
-import { sunDir, MOON_DIR } from '../shaders/toon.js';
+import { sunDir, MOON_DIR, LIGHTING_C } from '../shaders/toon.js';
 
 // Light shafts in the hall's dusty air: where the key comes in through a pane, the door or the hatch, a soft beam
 // runs from the opening down to its patch on the floor (docs/lighting-guide.md: atmosphere makes light visible).
@@ -63,7 +63,7 @@ export function buildShafts(scene) {
   const ss = (a, b, x) => { const k = Math.min(1, Math.max(0, (x - a) / (b - a))); return k * k * (3 - 2 * k); };
   return {
     setDay(k) {
-      day.material.uniforms.uStrength.value = 0.3 * ss(0.7, 1, k);
+      day.material.uniforms.uStrength.value = 0.3 * ss(0.7, 1, k) * (LIGHTING_C ? 0 : 1);
       night.material.uniforms.uStrength.value = 0.16 * (1 - ss(0.05, 0.4, k));
       day.visible = day.material.uniforms.uStrength.value > 0.001;
       night.visible = night.material.uniforms.uStrength.value > 0.001;

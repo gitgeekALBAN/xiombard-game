@@ -20,7 +20,7 @@ import { sfx } from '../audio.js';
 import { isTouchDevice } from '../touch.js';
 import { Post } from './post.js';
 import { Sun } from './sun.js';
-import { DAY, SUN, day3, dayColor } from '../shaders/toon.js';
+import { DAY, SUN, day3, dayColor, LIGHTING_C } from '../shaders/toon.js';
 
 // Fog and sky horizon share this color (sRGB): a dark saturated violet, so distance reads as depth, not milk.
 // FogExp2 at 0.0145 gives about 16% fog at 30 m, 50% at 57 m and 95% at 120 m.
@@ -28,7 +28,7 @@ const FOG_COLOR = '#353d70'; // lighter than the moonlit ground far away: distan
 const FOG_DENSITY = 0.0145;
 // Day/night keys [night, dusk, day] for setDay; the night entries are the look above. By day only a light blue
 // haze far away (the lighting concept: a clear golden afternoon under a turquoise sky).
-const FOG_DAY = [FOG_COLOR, '#8a4e66', '#cbe4ea'], FOG_DENSITY_DAY = [0.0125, 0.0115, 0.0026];
+const FOG_DAY = [FOG_COLOR, '#8a4e66', LIGHTING_C ? '#bf8795' : '#cbe4ea'], FOG_DENSITY_DAY = [0.0125, 0.0115, LIGHTING_C ? 0.0032 : 0.0026];
 const SHADOW_DAY = ['#07040d', '#1a0c22', '#2a1f3c'];
 
 const _q = new THREE.Quaternion(), _rgb = { r: 0, g: 0, b: 0 };
@@ -290,7 +290,7 @@ export class View {
     const meState = me && this.state ? this.state.players.find((p) => p.id === this.myId) : null;
     // first person while on your feet; a ragdolled digger falls back to the third-person view so you see the flop
     const fp = !!(me && this.firstPerson && !meState?.rag);
-    const fov = fp ? 74 : 62;
+    const fov = this.debugCam?.fov || (fp ? 74 : 62);
     if (this.camera.fov !== fov) { this.camera.fov = fov; this.camera.updateProjectionMatrix(); }
     // a third-person camera indoors needs the morgue's roof out of the way
     if (me) { const q = me.groups[0].position; this.world.morgue.roof.visible = (fp && !this.debugCam) || !insideMorgue(q.x, q.z); }

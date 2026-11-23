@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import { day3 } from '../shaders/toon.js';
+import { day3, LIGHTING_C } from '../shaders/toon.js';
 
 // Small post pipeline: scene -> multisampled target, a dual-filter bloom chain at half resolution or lower,
 // and ONE final full-screen pass that adds bloom, grades, vignettes, adds grain and encodes to sRGB.
@@ -135,15 +135,17 @@ export class Post {
 
   // k: 0 night .. 0.5 dusk .. 1 day (see toon.js DAY)
   setDay(k) {
-    this.strength = day3(0.85, 0.75, 0.4, k);
+    this.day = k;
+    this.strength = day3(0.85, 0.75, LIGHTING_C ? 0.28 : 0.4, k);
     this.prefilter.uniforms.uThr.value = this.thr * day3(1, 1, 1.5, k);
     this.prefilter.uniforms.uWarmThr.value = day3(0.4, 0.45, 1.1, k);
     const f = this.final.uniforms;
     f.uLift.value = day3(1, 0.8, 0.15, k);
     f.uVigCol.value.set(day3(0.32, 0.4, 0.62, k), day3(0.26, 0.26, 0.5, k), day3(0.42, 0.42, 0.44, k));
-    f.uVig.value = day3(0.85, 0.7, 0.5, k);
-    f.uFg.value = day3(0.25, 0.3, 0.42, k);
-    f.uSat.value = day3(1.0, 1.1, 1.14, k); // the night keeps its low chroma (only lamp light is saturated)
+    f.uVig.value = day3(0.85, 0.7, LIGHTING_C ? 0.26 : 0.5, k);
+    f.uFg.value = day3(0.25, 0.3, LIGHTING_C ? 0 : 0.42, k);
+    f.uSat.value = day3(1.0, 1.1, LIGHTING_C ? 1.08 : 1.14, k);
+    f.uGrain.value = this.quality === 'high' ? (LIGHTING_C ? day3(0.035, 0.035, 0.012, k) : 0.035) : 0;
   }
 
   setQuality(q) {
@@ -173,7 +175,7 @@ export class Post {
       this.down_.push(mk());
       if (i < levels - 1) this.up_.push(mk());
     }
-    this.final.uniforms.uGrain.value = high ? 0.035 : 0;
+    this.final.uniforms.uGrain.value = high ? (LIGHTING_C ? day3(0.035, 0.035, 0.012, this.day ?? 0) : 0.035) : 0;
     this.final.uniforms.uAspect.value = w / h;
   }
 

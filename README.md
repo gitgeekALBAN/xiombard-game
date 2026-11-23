@@ -70,3 +70,7 @@ Every push to `main` builds with Vite and publishes to GitHub Pages via `.github
 ## Contributing
 
 Branch from `main`, open a pull request, get one review, merge. Pages redeploys automatically.
+
+## Lighting review and agent harness
+
+See [the project harness](docs/agents/harness.md) for fixed-camera reviews, saved comparisons, research history and the vendored Matt Pocock skill pack (including grill-me). Run npm run review and npm run review:boards in separate terminals.

@@ -102,8 +102,10 @@ void main() {
     float c = across(o, N) / vPat.y;
     float id = floor(c);
     float h = hash12(vec2(id, 7.1));
-    base = h < 0.3 ? WOOD_DARK : base * (0.9 + 0.2 * hash12(vec2(id, 1.3)));
+    base = h < 0.3 ? mix(WOOD_DARK, base * 0.40, artDay()) : base * (0.9 + 0.2 * hash12(vec2(id, 1.3)));
     base = mix(base, base * vec3(1.45, 1.0, 0.68), dayPaint() * 0.85); // by day plum boards turn warm sunny brown
+    base *= mix(vec3(1.0), vec3(1.12, 1.12, 0.76), artDay());
+    base *= mix(vec3(1.0), vec3(0.88, 0.98, 1.12), artDay() * max(N.y, 0.0) * inHall(vW, N));
     float f = fract(c);
     float grain = vnoise(vec2((f + id) * 14.0, o.y * 1.6 + id * 3.0));
     base *= 0.9 + 0.2 * smoothstep(0.35, 0.75, grain);
@@ -122,10 +124,12 @@ void main() {
     vec2 q = ax == 0 ? vec2(across(o, N), o.y) : ax == 1 ? vec2(o.y + o.z, o.x) : vec2(o.x + o.y, o.z);
     float grain = vnoise(vec2(q.x * 40.0, q.y * 2.5));
     base *= 0.88 + 0.24 * smoothstep(0.3, 0.8, grain);
+    base *= mix(vec3(1.0), vec3(1.45, 1.25, 0.96), artDay() * inHall(vW, N));
+    base *= mix(vec3(1.0), vec3(1.6, 1.65, 1.2), artDay() * inHall(vW, N) * smoothstep(0.5, 0.9, N.y));
     mot = 0.4;
   } else if (pat == 4) {
     // shingles: staggered rows down the slope, scalloped edges, a tone per shingle, a few missing
-    if (N.y < 0.2) { base = ${lin('#2a1c33')}; }
+    if (N.y < 0.2) { base = mix(${lin('#2a1c33')}, ${lin('#241c2d')}, artDay() * inHall(vW, N)); }
     else {
       float row = floor(o.y / 0.34);
       float fy = fract(o.y / 0.34);
@@ -144,7 +148,7 @@ void main() {
       base *= 1.0 + (vnoise(o.xy * vec2(9.0, 26.0)) - 0.5) * 0.25;
       // a roof is not one flat color: darker toward the eaves, lighter and sun-bleached toward the ridge by day
       base *= mix(0.72, 1.2, smoothstep(2.8, 4.4, vW.y));
-      base = mix(base, base * vec3(1.35, 1.12, 1.0) + 0.025, dayPaint() * 0.75);
+      base = mix(base, base * vec3(1.35, 1.12, 1.0) + 0.025, dayPaint() * mix(0.75, 0.55, artDay()));
     }
     mot = 0.4;
   } else if (pat == 5) {
@@ -184,7 +188,9 @@ void main() {
     float mull = max(line(o.x, 0.02), line(o.y - hh * 0.2, 0.02));
     vec3 glass = AMBER * (0.85 + 0.25 * vnoise(o.xy * 6.0));
     float inHall = dayPaint() * facesHall(vW, N); // from inside, by day: the pane is bright daylight, not a lamp
-    glass = mix(glass, vec3(1.0, 0.95, 0.74) * 1.3, inHall);
+    vec3 daylightGlass = mix(vec3(1.0, 0.95, 0.74) * 1.3,
+      mix(vec3(0.40, 0.15, 0.25), vec3(0.72, 0.31, 0.40), smoothstep(-hh, hh, o.y)), artDay());
+    glass = mix(glass, daylightGlass, inHall);
     base = mix(mix(glass, WOOD_DARK, mull), WOOD, frame);
     base = mix(base, INK, line(max(abs(o.x) - hw + 0.07, abs(o.y) - hh + 0.07), 0.008));
     em = 0.88 * (1.0 - max(frame, mull)); lamp = 1.0 - inHall; rim = 0.8;
@@ -259,7 +265,12 @@ void main() {
 
   if (mot > 0.0) base *= 1.0 + mot * (mottle(o) - 0.5) * 1.2;
   // lamps go out by day: the glowing part loses its glow and darkens, as in toon()
-  if (lamp > 0.0 && em > 0.0) { float on = mix(1.0, lampsOn(), lamp); em *= on; base *= mix(0.4, 1.0, on); }
+  if (lamp > 0.0 && em > 0.0) {
+    float on = mix(1.0, lampsOn(), lamp);
+    // The hall's practical bulbs stay bright even when the exterior lanterns are dimmed by day.
+    on = mix(on, 1.0, artDay() * inHall(vW, N));
+    em *= on; base *= mix(0.4, 1.0, on);
+  }
   vec3 col = mix(toonShadeRim(base, N, vW, rim), base, em);
   gl_FragColor = vec4(col, 1.0);
   #include <colorspace_fragment>

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "review": "vite --host 127.0.0.1 --port 5174 --strictPort",
+    "review:boards": "node art/lighting/2026-11-22-implementation-c/serve.mjs",
     "build": "vite build",
     "build:cast": "vite build --config vite.cast.config.js",
     "build:single": "vite build && node scripts/single-file.mjs",

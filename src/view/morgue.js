@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Batch, MAT, G, M, paintBox } from './models/environment.js';
 import { spec, P, paintMat, paintAttrs, glowSprites } from '../shaders/paint-env.js';
-import { lampsOn, toon } from '../shaders/toon.js';
+import { lampsOn, toon, LIGHTING_C, day3 } from '../shaders/toon.js';
 import { part } from './models/common.js';
 import { PAL } from './palette.js';
 import { rng } from '../shared/rng.js';
@@ -100,7 +100,7 @@ export function buildMorgue(scene, batch) {
   // 5 the chapel corner by the south wall: a draped bier, two tall candles at its ends, the charm board on the wall
   // (the charms themselves are painted on a quad below, with the signs' material)
   const cp = Mg.chapel, rk = Mg.charmRack;
-  w(G.box, MAT.woodDark, M([cp.x, cp.top - 0.05, cp.z], [0, 0, 0], [cp.hx * 2, 0.1, cp.hz * 2]), 0.016);
+  w(G.box, LIGHTING_C ? MAT.boardDark : MAT.woodDark, M([cp.x, cp.top - 0.05, cp.z], [0, 0, 0], [cp.hx * 2, 0.1, cp.hz * 2]), 0.016);
   w(G.box, spec('#4a2a5a', { pat: P.stripes, p1: 3 }), M([cp.x, cp.top - 0.2, cp.z + cp.hz + 0.01], [0, 0, 0], [cp.hx * 2, 0.3, 0.02]), 0);
   legs(cp, cp.top - 0.1, MAT.woodDark, 0.09);
   for (const sx of [-1, 1]) {
@@ -299,6 +299,7 @@ export function buildMorgue(scene, batch) {
     setDay(k) {
       shafts.setDay(k);
       glow.mesh.visible = lampsOn(k) > 0;
+      if (LIGHTING_C) for (let i = 0; i < glow.count; i++) glow.set(i, day3(0.75, 0.75, 0.40, k), day3(1, 1, 0.65, k));
       textMat.color.setScalar(0.5 + 0.5 * k); // the paper is not a lamp: dimmer at night
       countMat.color.copy(textMat.color);
     },
