@@ -1,0 +1,54 @@
+{
+  "morgue": {
+    "camera": "morgue",
+    "p": [
+      -1.441,
+      1.813,
+      6.98
+    ],
+    "t": [
+      -8.9,
+      0.505,
+      13.511
+    ],
+    "fov": 72.543,
+    "day": "1",
+    "lighting": "C",
+    "size": [
+      948,
+      593
+    ],
+    "calls": 65,
+    "triangles": 140055,
+    "cpuMedianMs": 2.3,
+    "gpuMedianMs": null,
+    "frameMedianMs": 16.7,
+    "shaderErrors": 0
+  },
+  "yard": {
+    "camera": "yard",
+    "p": [
+      4.565,
+      1.652,
+      -4.686
+    ],
+    "t": [
+      -4.021,
+      0.854,
+      7.587
+    ],
+    "fov": 76.82,
+    "day": "1",
+    "lighting": "C",
+    "size": [
+      948,
+      593
+    ],
+    "calls": 82,
+    "triangles": 140365,
+    "cpuMedianMs": null,
+    "gpuMedianMs": null,
+    "frameMedianMs": null,
+    "shaderErrors": 0
+  }
+}

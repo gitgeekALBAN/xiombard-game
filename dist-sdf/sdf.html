@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>XIOMBARD Shader Crew</title>
+    <style>
+      /* two deliberate looks chosen by the page itself: a paper model sheet and a night scene */
+      :root { color-scheme: light; --fg: #2a2030; --muted: #6a6072; --accent: #7a4fa8; --on-accent: #fff; --panel: rgba(250, 247, 243, 0.86); --line: #b9b0bd; --shade: rgba(216, 212, 207, 0.92); }
+      :root[data-mode="night"] { color-scheme: dark; --fg: #efe6d6; --muted: #a59bb8; --accent: #f0c060; --on-accent: #140f1c; --panel: rgba(24, 18, 34, 0.84); --line: #4a3f5c; --shade: rgba(20, 15, 32, 0.9); }
+      html, body { margin: 0; height: 100%; background: #d8d4cf; color: var(--fg); overflow: hidden; font-family: Georgia, 'Times New Roman', serif; }
+      :root[data-mode="night"] body { background: #2b2348; }
+      canvas { display: block; position: fixed; inset: 0; touch-action: none; cursor: grab; }
+      #head { position: fixed; z-index: 2; pointer-events: none; top: max(14px, env(safe-area-inset-top, 0px)); left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); }
+      h1 { margin: 0; font-size: clamp(22px, 4.2vw, 36px); letter-spacing: .1em; line-height: 1.05; transform: rotate(-1deg); transform-origin: left; }
+      #head p { margin: 6px 0 0; max-width: 50ch; color: var(--muted); font-size: 14px; line-height: 1.35; }
+      #labels { position: fixed; inset: 0; z-index: 1; pointer-events: none; overflow: hidden; }
+      .tag { position: absolute; left: 0; top: 0; text-align: center; white-space: nowrap; padding: 3px 9px 4px; border-radius: 10px 4px 11px 5px;
+        background: var(--panel); border: 1.5px solid var(--c, var(--line)); font-size: 12px; line-height: 1.25; }
+      .tag b { display: block; font-size: 14px; letter-spacing: .04em; }
+      .tag span { color: var(--muted); }
+      #bar { position: fixed; z-index: 2; left: 0; right: 0; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; justify-content: center;
+        padding: 10px max(16px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+        background: linear-gradient(transparent, var(--shade) 45%); }
+      button { font: inherit; font-size: 14px; color: var(--fg); background: var(--panel); border: 1.5px solid var(--line); border-radius: 12px 5px 13px 6px; padding: 7px 13px; cursor: pointer; }
+      button:hover { border-color: var(--accent); }
+      button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      button.main { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: bold; }
+      button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+      label { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+      input[type="range"] { width: 92px; accent-color: var(--accent); }
+      #info { flex-basis: 100%; text-align: center; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      @media (max-width: 600px) { #head p { display: none; } .tag span { display: none; } button { padding: 6px 10px; font-size: 13px; } input[type="range"] { width: 70px; } }
+    </style>
+    <script type="module" crossorigin src="./assets/sdf-BpXVyQcy.js"></script>
+  </head>
+  <body>
+    <div id="head">
+      <h1>SHADER CREW</h1>
+      <p>Five diggers with no models and no textures: each one is a handful of distance formulas drawn by a single shader. Drag to look around, click one to knock it over.</p>
+    </div>
+    <div id="labels"></div>
+    <div id="bar">
+      <button id="mode" class="main">Night</button>
+      <button id="walk">Walk</button>
+      <button id="turn">Turn</button>
+      <button id="drop">Drop them all</button>
+      <button id="up">Back on your feet</button>
+      <label for="ink">Ink line <input id="ink" type="range" min="0" max="0.03" step="0.0005" value="0.011" /></label>
+      <div id="info"><span id="stats"></span> · <span id="fps"></span></div>
+    </div>
+  </body>
+</html>

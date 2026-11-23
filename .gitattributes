@@ -1,0 +1,2 @@
+# Preserve the vendored skills and their shell templates byte-for-byte on Windows.
+.agents/skills/** text eol=lf
