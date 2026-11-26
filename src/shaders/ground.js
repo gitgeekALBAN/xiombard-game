@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { noise } from './noise.glsl.js';
 import { lightingGLSL, dayGLSL, DAY, shareLight } from './toon.js';
 import { PLOTS, PLOT_HALF, ROAD_Z, ROAD_HALF, PATHS } from '../shared/layout.js';
+import { TUNING } from '../shared/tuning.js';
 
 const f = (v) => v.toFixed(2);
 const srgb = (hex) => { const c = new THREE.Color(hex); return `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`; };
@@ -303,7 +304,7 @@ vec3 groundTop(vec2 p, float px) { return groundTopEx(p, px, 0.0); }
 export function groundMaterial() {
   const PH = [PLOT_HALF.x, PLOT_HALF.z];
   const m = new THREE.ShaderMaterial({
-    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uPlotState: { value: new Float32Array(PLOTS.length) } }]),
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uPlotState: { value: new Float32Array(PLOTS.map((_, i) => (i < TUNING.plotsStart ? 0 : -1))) } }]),
     vertexShader: /* glsl */ `
       varying vec3 vW; varying vec3 vN;
       #include <common>
@@ -372,16 +373,22 @@ export function groundMaterial() {
         // angles and reads as streaks radiating from the camera
         float px = mix(min(dp.x, dp.y), max(max(dp.x, dp.y), fwidth(vW.y)), 0.85);
         vec3 col;
+        float glow = 0.0;
         if (vW.y < -0.02) {
           bool floorFace = N.y > 0.5;
           vec2 uv = floorFace ? p : vec2(abs(N.x) > 0.5 ? p.y : p.x, 0.0);
           col = soil(uv, vW.y, px, floorFace);
         } else {
           float tn = vnoise(p * 2.2) * 0.5 + vnoise(p * 0.8) * 0.5;
+
           float trample = 0.0, line = 0.0;
           for (int i = 0; i < ${PLOTS.length}; i++) {
+            // -1 a row not marked yet (plain lawn), 0 open, 1 filled, 2 a grave with a mistake in it (glows green
+            // before sunset and at night), 3 its tenant digging out
+            if (uPlotState[i] < -0.5) continue;
             vec2 d = abs(p - PLOT[i]) - PH;
             float out_ = max(d.x, d.y);
+            if (uPlotState[i] > 1.5) glow = max(glow, smoothstep(0.7, -0.15, out_ + (tn - 0.5) * 0.3) * (uPlotState[i] > 2.5 ? 1.0 : 0.6));
             // trampled, dug-over earth around every plot
             trample = max(trample, smoothstep(0.75, 0.05, out_ + (tn - 0.5) * 0.7));
             // dashed outline while the plot is still to be dug
@@ -398,7 +405,7 @@ export function groundMaterial() {
           col = groundTopEx(p, px, smoothstep(0.1, 0.85, trample));
           col = mix(col, ${srgb('#8c7464')}, line * 0.75);
         }
-        gl_FragColor = vec4(toonShade2(col, lampBase(col), N, vW, 1.0), 1.0);
+        gl_FragColor = vec4(toonShade2(col, lampBase(col), N, vW, 1.0) + vec3(0.18, 0.75, 0.24) * glow * 0.6, 1.0);
         #include <colorspace_fragment>
         #include <fog_fragment>
       }`,

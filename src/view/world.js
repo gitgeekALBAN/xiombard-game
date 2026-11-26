@@ -6,10 +6,11 @@ import { glowSprites, paintMat, paintAttrs } from '../shaders/paint-env.js';
 import { buildHeadstoneField, geo } from './models.js';
 import {
   Batch, MAT, G, M, treeParts, crowParts, buildCrowHead, lanternPostParts, lanternParts, pillarParts,
-  gateLeafParts, shedParts, carpenterParts, coffinLidParts, signLabels,
+  shedParts, carpenterParts, coffinLidParts, signLabels,
 } from './models/environment.js';
 import { buildPlants } from './plants.js';
 import { buildMorgue, buildYardDamage, railMesh } from './morgue.js';
+import { buildGates } from './gates.js';
 import { buildBackdrop } from './backdrop.js';
 import { rng } from '../shared/rng.js';
 import { groundBoxes, DECOR, LANTERNS, FENCE, ROAD_Z, ROAD_HALF, CARPENTER } from '../shared/layout.js';
@@ -145,8 +146,9 @@ export function buildWorld(scene) {
 
   // the morgue between the road and the graves (its walls and furniture join the static batch)
   const morgue = buildMorgue(s, batch);
+  const gates = buildGates(s);
 
-  // gateways: leaning stone pillars with lanterns, iron leaves swung open outward (the truck enters at +X)
+  // gateways: leaning stone pillars with lanterns (the truck enters at +X)
   for (const sx of [1, -1]) {
     const gx = sx * FENCE;
     for (const [hz, sz] of [[gate0 - 0.35, -1], [gate1 + 0.35, 1]]) {
@@ -160,12 +162,7 @@ export function buildWorld(scene) {
       lanternParts(sub, M([0, h + 0.62, 0], [0, 0.4, 0]), 1.6);
       glowQuad(new THREE.Vector3(0, h + 0.62, 0).applyMatrix4(pm), 2.6, 0.8);
       for (let i = 0; i < 3; i++) tuft(gx + pr.range(-0.6, 0.6), hz + sz * pr.range(0.35, 0.7), 1.3);
-      // leaf hinged at the pillar's road-side edge, swung ~155 degrees open (lies near the fence outside)
-      const open = sx === 1 ? 1.75 + (sz + 1) * 0.08 : sz === 1 ? 1.9 : 2.45;
-      const dx = sx * Math.sin(open), dz = -sz * Math.cos(open);
-      const yaw = Math.atan2(-dz, dx);
-      const droop = sx === -1 && sz === 1 ? -0.06 : 0;
-      gateLeafParts(batch.sub(M([gx + sx * 0.12, 0.04, hz - sz * 0.32], [0, yaw, droop])), pr, 2.35);
+      // the leaves are plank gates of their own that open and shut and take damage (gates.js)
     }
   }
   crow(new THREE.Vector3(FENCE, 2.25, FENCE / 4), -Math.PI / 2 - 0.4);
@@ -217,7 +214,8 @@ export function buildWorld(scene) {
   return {
     groundMat,
     morgue,
-    setYard: (st) => { damage.set(st); morgue.setWaiting(st.bed ? st.bed.length : 0, !!(st.truck && st.truck[1])); morgue.setNoDelivery(!!st.nodel); morgue.setWindows(st.win); }, // traps, fence, the hatch sign
+    gates,
+    setYard: (st) => { damage.set(st); gates.set(st); morgue.setWaiting(st.bed ? st.bed.length : 0, !!(st.truck && st.truck[1])); morgue.setNoDelivery(!!st.nodel); morgue.setWindows(st.win); }, // traps, fence, the hatch sign
     setDay(k) {
       lamps = lampsOn(k);
       glow.mesh.visible = lamps > 0;
@@ -226,6 +224,7 @@ export function buildWorld(scene) {
     },
     update(time, dt, camera) {
       plants.update(time);
+      gates.update(dt);
       if (glow.mesh.visible) glows.forEach((g, i) => {
         const f = 0.88 + 0.08 * Math.sin(time * 11 + i * 1.7) * Math.sin(time * 6.3 + i * 2.9) + 0.04 * Math.sin(time * 2.1 + i);
         glow.set(g.i, g.base * f * lamps, 0.96 + f * 0.05);

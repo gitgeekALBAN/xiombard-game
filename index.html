@@ -231,6 +231,7 @@
       .gq-bar { height: 6px; margin-top: 4px; background: rgba(239, 230, 214, .18); border-radius: 1px; overflow: hidden; }
       .gq-bar i { display: block; height: 100%; background: linear-gradient(90deg, #b89656, var(--gq-gold)); }
       .gq-bar.done i { background: linear-gradient(90deg, #6f9a52, #a9d67a); }
+      .gq-bar.low i { background: linear-gradient(90deg, #8a2e26, #e2584a); }
 
       /* the task list, top left */
       #tasks { left: calc(14px + env(safe-area-inset-left)); top: 14px; width: 232px; font-size: 14px; }
@@ -285,6 +286,29 @@
       /* a reward: a card near the top that is simply there for a few seconds */
       #reward { left: 50%; top: 84px; transform: translateX(-50%); width: 320px; text-align: center; display: none; z-index: 5; padding-bottom: 0; overflow: hidden; }
       #reward.show { display: block; }
+      /* the defeat screen: a panel in the middle, the game keeps running behind it */
+      #over { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(340px, calc(100vw - 32px)); z-index: 6; display: none; text-align: center; }
+      #over.open { display: block; }
+      #over .gq-title { justify-content: center; font-size: 22px; color: #e2584a; }
+      #over p { margin: 6px 0 12px; }
+      #over .line { display: flex; justify-content: space-between; margin: 4px 8px; }
+      #over .line b { color: #f0c060; }
+      #over .gq-item { margin-top: 14px; width: 100%; }
+      /* the phase line blinks through the last minute before sunset */
+      #phase.warn { border-color: #e2584a; animation: gq-blink 1s steps(1) infinite; }
+      #phase.warn b, #phase.warn small { color: #ff8a6a; }
+      @keyframes gq-blink { 50% { opacity: .45; } }
+      /* bars over the gates and graves (view.updateLabels) */
+      .wbar { position: absolute; left: 0; top: 0; pointer-events: none; text-align: center; font: 600 11px/1.2 Georgia, serif; color: #efe6d6; text-shadow: 1px 1px 0 #000; }
+      .wbar b { display: block; font-weight: 600; margin-bottom: 2px; }
+      .wbar i { display: block; position: relative; width: 70px; height: 7px; margin: 0 auto; background: rgba(16, 14, 30, .85); border: 1px solid rgba(222, 196, 140, .7); }
+      .wbar s, .wbar u { position: absolute; left: 0; top: 0; bottom: 0; text-decoration: none; }
+      .wbar s { background: #9fd66a; }
+      .wbar.mid s { background: #f0c060; }
+      .wbar.low s, .wbar.rising s { background: #e2584a; }
+      .wbar.work s { background: #c9a77a; }
+      .wbar u { background: rgba(255, 255, 255, .55); height: 2px; top: auto; }
+      .nametag.special { border-color: #7ad66a; color: #b9f29a; }
       #reward .gq-title { justify-content: center; font-size: 16px; }
       #reward p { margin: 2px 0 10px; color: var(--gq-cream); font-size: 15px; }
       #reward .gain { margin: 0 -14px; padding: 8px 10px; background: #c8742a; color: #fff4e0; font-size: 15px; letter-spacing: .03em; }
@@ -383,6 +407,7 @@
     </div>
     <div id="pause" class="gq"></div>
     <div id="labels"></div>
+    <div id="over" class="gq"></div>
     <div id="lost">The host left the graveyard.<br />Click to go back.</div>
     <script type="module" src="./src/main.js"></script>
   </body>

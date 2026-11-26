@@ -241,10 +241,12 @@ export class View {
     }
     this.world.setYard(st);
     this.stunned = new Set(st.stun || []);
-    st.plots.forEach(([d, f, b, seed, name, , cc = -1, cn = 0], i) => {
+    // a grave with a mistake in it glows green from the minute before sunset on (and while its tenant digs out)
+    const restlessShows = st.phase && (st.phase[0] || st.phase[5]);
+    st.plots.forEach(([d, f, b, seed, name, , cc = -1, cn = 0, act = 1, mood = 0], i) => {
       this.graves.setPlot(i, d, f, b, seed, name, this.time);
       this.graves.setCandles(i, cc, cn);
-      this.groundMat.uniforms.uPlotState.value[i] = b;
+      this.groundMat.uniforms.uPlotState.value[i] = !act ? -1 : mood === 2 ? 3 : mood === 1 && restlessShows ? 2 : b;
     });
     const pl = new Map(st.players.map((p) => [p.id, p])), risen = new Set(st.risen || []), bed = new Set(st.bed || []);
     for (const e of this.order) {
@@ -429,7 +431,54 @@ export class View {
       el.style.display = v.z < 1 ? '' : 'none';
       el.style.transform = `translate(-50%, -50%) translate(${(v.x * 0.5 + 0.5) * innerWidth}px, ${(-v.y * 0.5 + 0.5) * innerHeight}px)`;
     }
-    for (const el of [...this.labels.querySelectorAll('.nametag')]) if (!seen.has(+el.dataset.id)) el.remove();
+    // a special shows the name tag it was buried with (or ??? without one)
+    for (const id of this.state.risen || []) {
+      const e = this.ents.get(id);
+      if (!e || !e.crew) continue;
+      const key = 'r' + id;
+      seen.add(key);
+      const el = this.label(key, 'nametag special');
+      el.textContent = e.tag ? e.name : '???';
+      this.place(el, e.groups[CP.head].position.clone().add(new THREE.Vector3(0, e.crew.rig.hatTop + 0.35, 0)));
+    }
+    // bars: a gate's HP (always at night, by day only when it is damaged; a repair shows its progress), and one bar
+    // over a grave being dug or filled together, or with a tenant digging out
+    const st = this.state, night = st.phase && st.phase[0];
+    (st.gates || []).forEach(([hp, , , work], i) => {
+      if (!(night || hp < this.world.gates.maxHp || work > 0)) return;
+      const key = 'g' + i;
+      seen.add(key);
+      const el = this.bar(key, hp <= 33 ? 'low' : hp <= 66 ? 'mid' : '', `Gate ${hp}`, hp / this.world.gates.maxHp, work);
+      this.place(el, new THREE.Vector3(...this.world.gates.barPos(i)));
+    });
+    (st.plots || []).forEach((pl, i) => {
+      const k = pl[10] ?? -1;
+      if (k < 0) return;
+      const key = 'p' + i, rising = pl[9] === 2;
+      seen.add(key);
+      const el = this.bar(key, rising ? 'rising' : 'work', rising ? 'Digging out!' : pl[1] > 0 ? 'Filling' : 'Digging', Math.min(1, k), 0);
+      this.place(el, new THREE.Vector3(PLOTS[i].x, 1.9, PLOTS[i].z));
+    });
+    for (const el of [...this.labels.querySelectorAll('[data-id]')]) if (!seen.has(isNaN(+el.dataset.id) ? el.dataset.id : +el.dataset.id)) el.remove();
+  }
+  label(key, cls) {
+    let el = this.labels.querySelector(`[data-id="${key}"]`);
+    if (!el) { el = document.createElement('div'); el.className = cls; el.dataset.id = key; this.labels.appendChild(el); }
+    return el;
+  }
+  bar(key, cls, text, k, work) {
+    const el = this.label(key, 'wbar');
+    if (!el.firstChild) el.innerHTML = '<b></b><i><s></s><u></u></i>';
+    el.className = `wbar ${cls}`;
+    el.firstChild.textContent = text;
+    el.querySelector('s').style.width = `${Math.round(k * 100)}%`;
+    el.querySelector('u').style.width = `${Math.round(work * 100)}%`;
+    return el;
+  }
+  place(el, w) {
+    const v = w.project(this.camera);
+    el.style.display = v.z < 1 && Math.abs(v.x) < 1.2 && Math.abs(v.y) < 1.2 ? '' : 'none';
+    el.style.transform = `translate(-50%, -50%) translate(${(v.x * 0.5 + 0.5) * innerWidth}px, ${(-v.y * 0.5 + 0.5) * innerHeight}px)`;
   }
 
   puff(pos, kind) {

@@ -1,7 +1,7 @@
 import { View } from './view/view.js';
 import { Sim } from './sim/game.js';
 import { hostRoom, joinRoom, routeOf, joinLobby } from './net.js';
-import { unlockAudio, setVolume } from './audio.js';
+import { unlockAudio, setVolume, sfx } from './audio.js';
 import { createUI } from './ui.js';
 import { touch, initTouch, isTouchDevice, canTouch, setTouchMode, goLandscape } from './touch.js';
 import { OUTFITS, RITES, CANDLES, MAX_CANDLES } from './shared/layout.js';
@@ -61,7 +61,9 @@ function setFirstPerson(on) {
 }
 setFirstPerson(new URLSearchParams(location.search).get('view') !== 'third');
 // g/th/fl/pk count presses (one-shot actions survive a dropped packet); pv is the outfit picked with the last pk
-const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0, cc: 0, cn: 1, us: 0, wk: 0, tc: 0 };
+// lmb: the left button is held (at a plot to dig or fill it digs, like F; see digZone in the sim)
+const input = { mx: 0, mz: 0, yaw: look.yaw, run: false, jump: false, dig: false, lmb: false, g: 0, th: 0, fl: 0, pk: 0, pv: 0, cw: 0, cc: 0, cn: 1, us: 0, wk: 0, tc: 0 };
+let lmbHeld = false;
 let choosing = false; // the host says my outfit choice is open (dressing table)
 const pickOutfit = (i) => { input.pv = i; input.pk++; };
 // cw: the chapel charm I want in hand (index into RITES), sent with every input; the host applies it while I hold the charms
@@ -112,12 +114,14 @@ canvas.addEventListener('pointerdown', (e) => {
   unlockAudio();
   if (ui.open) { ui.close(); lockPointer(); return; } // a click on the game resumes
   if (document.pointerLockElement !== canvas) { lockPointer(); return; }
-  if (e.button === 0) input.wk++; // left click: swing the shovel (E picks things up)
+  if (e.button === 0) { input.wk++; lmbHeld = true; } // left click: swing the shovel (E picks things up), or dig at a plot
   if (e.button === 2) input.th++;
 });
+addEventListener('pointerup', (e) => { if (e.button === 0) lmbHeld = false; });
+addEventListener('blur', () => { lmbHeld = false; });
 // The mouse freed while playing (Esc, or the window lost focus): open the menu, unless we freed it ourselves.
 document.addEventListener('pointerlockchange', () => {
-  if (playing && !touch.active && document.pointerLockElement !== canvas && !ui.open) ui.show();
+  if (playing && !touch.active && document.pointerLockElement !== canvas && !ui.open && !$('over').classList.contains('open')) ui.show(); // not over the defeat screen
 });
 addEventListener('mousemove', (e) => {
   if (!playing || document.pointerLockElement !== canvas) return;
@@ -137,6 +141,7 @@ function readInput(dt) {
   input.run = k('ShiftLeft') || k('ShiftRight') || touch.run;
   input.jump = k('Space') || touch.jump;
   input.dig = k('KeyF') || touch.dig;
+  input.lmb = lmbHeld && document.pointerLockElement === canvas;
   input.yaw = look.yaw;
   return input;
 }
@@ -166,6 +171,26 @@ function playerName() {
   return n;
 }
 
+function makeBots(n) {
+  const q = new URLSearchParams(location.search);
+  bots = createBots(sim, { work: q.has('botwork'), ...(q.has('botlog') ? { log: (m) => (window.__botlog || (window.__botlog = [])).push(m) } : {}) });
+  for (let i = 0; i < n; i++) bots.add(); // each takes the next free crew member and its name
+}
+// "Zombies in town": the host starts the run over with the same crew (guests are welcomed into the new game; ids
+// carry on counting so nothing from the old one is mixed in).
+function restart() {
+  if (!sim) return;
+  const q = new URLSearchParams(location.search), old = sim, nBots = bots ? bots.ids.length : 0;
+  sim = new Sim({ dayLen: +q.get('daylen') || 0, nightLen: +q.get('nightlen') || 0, startId: old.nextId, version: old.version + 1 });
+  myId = sim.addPlayer(playerName()).id;
+  view.myId = myId;
+  makeBots(nBots);
+  for (const [conn, g] of guests) { g.id = sim.addPlayer(g.name).id; g.ver = -1; if (conn.open) conn.send({ t: 'welcome', id: g.id }); }
+  window.__xiom = { sim, view, look, bots };
+  $('over').classList.remove('open');
+  lockPointer();
+}
+
 async function host() {
   unlockAudio();
   setStatus('Opening the graveyard gates...');
@@ -175,9 +200,7 @@ async function host() {
   myId = sim.addPlayer(playerName()).id;
   // AI teammates so nobody digs alone: ?bots=N (0..5), 3 by default; they step aside for joining humans
   // ?botlog: what the bots are up to; ?botwork: bots run the whole chain (by default they just stand outside)
-  bots = createBots(sim, { work: q.has('botwork'), ...(q.has('botlog') ? { log: (m) => (window.__botlog || (window.__botlog = [])).push(m) } : {}) });
-  const nBots = Math.max(0, Math.min(5, +(new URLSearchParams(location.search).get('bots') ?? 3)));
-  for (let i = 0; i < nBots; i++) bots.add(); // each takes the next free crew member and its name
+  makeBots(Math.max(0, Math.min(5, +(q.get('bots') ?? 3))));
   window.__xiom = { sim, view, look, bots };
   view.myId = myId;
   startPlaying();
@@ -199,7 +222,7 @@ function onGuest(conn) {
       // a bot steps aside so the yard never holds more than six diggers
       if (bots.ids.length && 1 + guests.size + bots.ids.length >= 6) bots.remove(bots.ids[bots.ids.length - 1]);
       const p = sim.addPlayer(msg.name);
-      guests.set(conn, { id: p.id, ver: -1 });
+      guests.set(conn, { id: p.id, ver: -1, name: msg.name });
       conn.send({ t: 'welcome', id: p.id });
       view.toast(`${p.name} joined the night shift`, [0, 3, 8], true);
       advertise();
@@ -334,19 +357,48 @@ function applyState(st) {
   { const me = st.players.find((p) => p.id === myId), inf = !!(me && me.inf); document.body.classList.toggle('infected', inf); } // only my own bite shows (the task list says it too)
   document.body.classList.toggle('choosing', choosing || myCharm >= 0 || !!myCandles); // a choice is open: the hint line steps aside
   if (st.phase) {
-    const [night, left, day, light, zombies] = st.phase;
-    view.setDay?.(light);
+    const [night, left, day, light, zombies, warn] = st.phase;
+    // the last minute before sunset: the sky reddens toward dusk (the sim's own twilight takes over at the end)
+    view.setDay?.(warn ? Math.min(light, 0.5 + 0.5 * Math.max(0, (left - 10) / 50)) : light);
+    sunsetLeft = warn ? left : -1;
     document.body.classList.toggle('night', !!night);
+    $('phase').classList.toggle('warn', !!warn);
     const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
-    $('phase').innerHTML = night ? `<b>Night ${day}</b> ${clock} to dawn<small>${zombies ? `${zombies} on their feet: whack them!` : 'quiet... for now'}</small>`
-      : `<b>Day ${day}</b> ${clock} to dusk<small>bury them before dark</small>`;
+    $('phase').innerHTML = night ? `<b>Night ${day}</b> ${clock} to dawn<small>${zombies ? `${zombies} on their feet: guard the gates!` : 'quiet... for now'}</small>`
+      : warn ? `<b>Day ${day}</b> ${clock} to sunset!<small>One minute to sunset!</small>` : `<b>Day ${day}</b> ${clock} to dusk<small>bury them before dark</small>`;
   }
+  showOver(st.over);
   const me = st.players.find((p) => p.id === myId);
   $('hint').textContent = me ? hintText(me.hint) : '';
   const grip = me ? me.grip : -1;
   $('grip').classList.toggle('show', grip >= 0);
   $('gripfill').style.width = `${Math.max(0, grip) * 100}%`;
   $('gripfill').style.background = grip < 0.3 ? '#e2584a' : '#cfe8a0';
+}
+// The run is lost (a gate broke, or a body walked off to town): the screen, with Restart for the host.
+let overShown = '';
+function showOver(over) {
+  const key = over ? over.join('|') : '';
+  if (key === overShown) return;
+  overShown = key;
+  const el = $('over');
+  el.classList.toggle('open', !!over);
+  if (!over) return;
+  const [days, buried, why] = over;
+  el.innerHTML = `<div class="gq-title">Zombies in town</div>`
+    + `<p>${why === 'walked' ? 'A body left outside the fence walked off to town.' : 'A gate gave way and they are out on the road.'}</p>`
+    + `<div class="line"><span>Days survived</span><b>${days}</b></div><div class="line"><span>Bodies buried</span><b>${buried}</b></div>`
+    + (sim ? '<button class="gq-item" id="restart">Restart</button>' : '<small>Waiting for the host to start again...</small>');
+  document.exitPointerLock?.();
+  const b = $('restart');
+  if (b) b.addEventListener('click', restart);
+}
+// The last minute before sunset: a drum that beats faster and faster.
+let sunsetLeft = -1, drumAcc = 0;
+function sunsetDrum(dt) {
+  if (sunsetLeft < 0) { drumAcc = 0; return; }
+  drumAcc += dt;
+  if (drumAcc >= 0.3 + 0.7 * Math.min(1, sunsetLeft / 60)) { drumAcc = 0; sfx('drum'); }
 }
 // Hints are written by the host in keyboard terms; on a touch screen show the button names instead.
 const TOUCH_WORDS = [[/Hold F/g, 'Hold WORK'], [/\bE:/g, 'GRAB:'], [/keys 1-5 · Q to cancel/g, 'tap one · THROW to cancel'], [/Right-click to throw/g, 'THROW to throw'], [/E to pick up/g, 'Tap GRAB'], [/E to drop/g, 'GRAB to drop'], [/Click to whack/g, 'Tap GRAB to whack'],
@@ -358,6 +410,7 @@ const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&l
 let last = performance.now();
 let timeScale = 1; // eases toward 0 while the menu is open in a game of one (see frame)
 function tick(dt) {
+  sunsetDrum(dt);
   if (sim) {
     if (playing) sim.setInput(myId, { ...readInput(dt) });
     bots.update(dt);

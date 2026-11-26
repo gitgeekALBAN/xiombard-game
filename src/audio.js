@@ -85,6 +85,8 @@ const SOUNDS = {
   poof: (v) => { noise(0.4, 700, 0.3 * v); tone('sine', 300, 700, 0.3, 0.1 * v); },
   night: (v) => { [196, 185, 147].forEach((f, i) => tone('sine', f, f * 0.98, 1.3, 0.2 * v, i * 0.5)); },
   rooster: (v) => { [[660, 880, 0.14], [880, 990, 0.14], [990, 1180, 0.5], [1180, 700, 0.35]].reduce((t, [a, b, d]) => { tone('square', a, b, d, 0.09 * v, t); return t + d; }, 0); },
+  // the last minute before sunset: a low drum beat
+  drum: (v) => { tone('sine', 120, 50, 0.16, 0.3 * v); noise(0.06, 500, 0.12 * v); },
   bury: (v) => { [523, 466, 392, 311].forEach((f, i) => tone('triangle', f, f, 0.5, 0.18 * v, i * 0.16)); },
 };
 

@@ -9,11 +9,14 @@ drawn). The morgue is a long office with work stations, and the laying-to-rest c
 in at the hatch onto the intake table (E, only onto a clear table) → its **delivery note** comes with it: a physical
 card (`note` entity) with the name, the outfit, the charm for the blessing and the candles; pick it up to read it, carry
 it, put it anywhere → lay the body on the registry desk, E writes its name tag → on the dressing table, E opens the
-outfit choice (keys 1-5 or tap; hold F to change later) → on the **chapel** bier (south wall), E takes the charms, the
-wheel / keys 1-4 / a tap pick one, E hums the blessing for 3 s (`RITES`: four made-up charms — never real religious
-symbols) → lay it in the coffin from the stockroom on the stock table → close the lid (F) → optionally nail it shut
-(F, 4 nails) → carry it out the south door to a dug grave → fill it → E at the headstone: **candles** (color 1-3, count
-by wheel, E lights them; `CANDLES`).
+outfit choice (keys 1-5 or tap; hold F to change later) → on the **chapel** bier (south-west corner), E takes the charms,
+the wheel / keys 1-4 / a tap pick one, E hums the blessing for 3 s (`RITES`: four made-up charms — never real religious
+symbols) → lay it in the coffin from the stockroom on the stock table (by the south door) → close the lid (F) →
+optionally nail it shut (F, 4 nails, a hammer blow per nail) → carry it out the south door to a dug grave → fill it → E
+at the headstone: **candles** (color 1-3, count by wheel, E lights them; `CANDLES`).
+**Morgue layout (decided 2026-11-26):** the hatch and intake table are at the east end, the stock table at the other end
+of the chain by the south door: about 8-10 s of walking with a body, so a crew splits the stations and throws bodies on
+(a thrown body is caught by a friend with free hands, or laid out by a free table it lands on: `throwCatch`).
 A digger's painted face follows what they do (`moodOf` in the sim, `crewMood` in `chars/material.js`): calm walking
 about; focused (a squint, the tip of the tongue out) carrying or working; straining (flushed, eyes popping, teeth
 gritted, sweat flying) under a coffin or a crocodile alone; angry while swinging the shovel. `?mood=0..3` forces one.
@@ -38,28 +41,54 @@ wriggles out of your arms now and then.
 A body let go over a free station table is laid out straight on it (`tableAssist`), like a body dropped at a coffin.
 **The delivery note on demand:** N (NOTE on a touch screen) pins the last note you saw open (`memo` per player in the
 state), wherever you are. **A blessing can be redone:** with a blessed body on the bier, hold F to take the charms again.
-**Daily quota (decided):** 2 + the day's number of bodies laid to rest since the morning (`dailyQuota`). Meeting it pays
-6 nails, 2 boards and $15; every burial over it pays 2 nails and $5 (`payQuota`, a `reward` event shows the card). A
-missed quota is only reported in the morning.
+**The loop (decided 2026-11-26, the "Coffin Crew" spec, iteration 1):** the day presses with time, the night matters, and
+the run can be lost. Every number is in `src/shared/tuning.js` (`TUNING`): change it there, not where it is used.
+- **Bodies:** the hearse comes once a day with day + players - 1 bodies (bots do not count, `crewSize`); only what the
+  coach (6) cannot hold comes on a second trip. What is still aboard at nightfall rides back and comes tomorrow. The
+  task list shows "Buried X of Y" (Y counted live: `dayTotal`); burying all of them pays $15 (`payQuota`, the reward
+  card). The NO DELIVERY button keeps today's hearse away; its load comes tomorrow.
+- **Day length** 2:30 + 1:30 per day, at most 8:00; the night 1:20. A minute before sunset: the sky reddens toward dusk,
+  a drum beats faster, the timer blinks, "One minute to sunset!", "Body outside the fence!" if one is, and graves with a
+  mistake in them glow green.
+- **Supplies:** the run starts with 6 boards and 18 nails; the morning hearse brings +3 boards and +6 nails. Nails are
+  shared between coffins (4) and gates (2 per repair).
+- **Gates** (`GATES`, `updateGates`): the two road gaps in the fence, 100 HP each, open by day, shut at sunset, HP never
+  comes back by itself. Looks: intact, cracked (planks torn off), skewed, broken (`view/gates.js`); an HP bar over them
+  at night, by day only when damaged. Repair: hold F at a gate 2 s for 1 board + 2 nails = +25 HP (a hammer blow every
+  0.4 s, a fresh board shows); a zombie's blow interrupts it; "No boards" / "No nails". A gate at 0 HP: the zombies are
+  out on the road and the run is lost (`lose`): after 2.5 s "Zombies in town" with days survived and bodies buried,
+  and Restart for the host (a new `Sim` with the same crew; guests are welcomed into it).
+- **Normal zombies** come up by the old headstones inside the fence (`ZOMBIE_SPAWNS`: never outside the fence, never in
+  the morgue, never within 3 m of a digger): 4 + 2 per day + 2 per extra player, in 4 waves 20 s apart. They go for
+  the nearest gate, attack a digger closer than 4 m and give up past 8 m, take 2 shovel hits and crumble to dust
+  (no body). Some first help a stirring grave (+25% speed each).
+- **Specials** are delivered bodies that got up: every body not in a filled grave at sunset (on a table, in a closed
+  coffin, on the ground; not in the hearse) rises where it lies; a grave with a mistake in it (no happy ghost: wrong
+  name, outfit, charm, nails or candles, or no candles) is dug out over 20 s. A happy ghost's grave is safe. Specials
+  are green and glow, wear what they were buried in with their name tag over the head, take 5 hits, walk 1.3x faster,
+  hit gates harder, and beaten they fall as a body with their note: bury them again, or they rise again the next
+  sunset. The grave they left stays dug. A body outside the fence at sunset walks off to town: lost.
+- Gate damage per blow is lower than the spec's start values (1 and 2.5 every 3 s instead of 2 and 5 every 1.5 s): with
+  those a gate fell in the first night with nobody defending; now an idle crew of one or two loses on night 3.
+- A shovel hit knocks a zombie back about 1 m and floors it for 1.5 s; a zombie's hit floors a digger for 2.5 s.
+- **Plots:** two rows of five are marked at the start (`PLOT_ROWS` has four); a morning with more bodies due than free
+  plots marks the next row, further from the morgue (`markRow`). The old headstones moved to the back of the yard.
+- **Co-op:** two on a coffin walk at running speed x 0.9 with no stamina; digging, filling and gate repairs go x2 with
+  two diggers and x2.5 with three or more (one shared job, one bar over the grave: `TUNING.crewWork`). The left mouse
+  button digs too while you stand at a plot to dig or fill (`digZone`; it swings when a zombie is in reach).
 The costumes on the dressing room rail are real garments on wooden hangers (tux with tails, sailor suit, clown smock with
 pompoms and a party hat, a long purple gown, striped pajamas with a nightcap), built in `view/morgue.js`.
 Each missed item (no tag, wrong outfit, wrong or no blessing, not nailed, wrong or no candles) adds 1 `unrest` to the
 grave and scores fewer peace points. A station's first E does its job; the next E picks the body up.
 Corpses slip out of your arms when you run, a coffin is too heavy for one, players can go limp and carry each other.
-The hearse **always** comes back by day (decided: no throttle on bodies lying about). The only way to stop it is the
-big red NO DELIVERY button on the morgue's north wall (E, by day): no more loads today, and tomorrow's first load
-brings the held-back ones too (the coach holds 6; the rest ride with the next). Between deliveries it waits far down
-the road, out of sight (`TRUCK_PARK_X`).
-By **night** zombies come — mostly from outside the fence. They wear fence sections down until they break, step in bear
-traps and dig up graves with their hands (restless graves first; nailed coffins take twice as long). They fight only a
-digger who comes close (3.5 m, dogs 6 m) and give up on one who gets away; a hit infects with a 20% chance (only the
-bitten player sees it; what infection does next is to come, see the concept doc). When a grave is dug up the body rises, and
-a fresh copy of its note lies by the grave. Unburied bodies rise at nightfall (not those still in the hearse).
-The crew whacks them with shovels (a click with empty hands). A visitor beaten for good leaves a stranger's body with
-its own note (`remains`): bury it properly or it gets up the next night (dogs just crumble). At dawn visitors crumble;
-risen bodies lie down, still unburied.
-By day, repair: fence 1 board + 2 nails, trap 2 nails. Nails are scarce (+6 per delivery, +2 boards), so every nail is a
-choice between calmer graves and a sturdier yard. 3 AI bot teammates join by default (`?bots=0..5`). For now they are
+The hearse comes once a day (see the loop above); the big red NO DELIVERY button on the morgue's north wall (E, by day)
+keeps it away today and its load comes tomorrow. Between deliveries it waits far down the road, out of sight
+(`TRUCK_PARK_X`).
+By **night** zombies come (see the loop above). They step in bear traps; a zombie's hit infects with a 20% chance (only
+the bitten player sees it; what infection does next is to come, see the concept doc). When a special digs itself out, a
+fresh copy of its note lies by the grave. The crew whacks them with shovels (a click with empty hands). At dawn normals
+crumble; specials lie down, still unburied. The fence sections no longer take damage (zombies go for the gates); it can
+still be patched (1 board + 2 nails), a trap fixed for 2 nails. 3 AI bot teammates join by default (`?bots=0..5`). For now they are
 off duty: they walk out and stand east of the morgue (`doStand` in `bots.js`). `?botwork` puts them to work on the old
 chain; they have not learned the registry desk and the dressing table yet.
 Art direction: cartoony, gloomy storybook (Tim Burton-ish *mood*): stripes, crooked shapes, big heads, purple night,
@@ -101,6 +130,8 @@ Live: https://gitgeekalban.github.io/xiombard-game/
   Concept art stays outside the repo.
 - `src/view/shafts.js` — light shafts in the hall: additive beams from the panes, the door and the hatch (sun by day, moon by night).
 - `src/view/morgue.js` — the morgue (walls, stations, the stockroom door and the office furniture go into the yard's static batch, the roof is its own mesh so it can hide for a third-person camera indoors, all signs are one canvas; the layout itself is `MORGUE` in `shared/layout.js`) and what the night does to the yard: bear traps (three instanced meshes) and fence sections that lean and fall.
+- `src/view/gates.js` — the two road gates: plank leaves that swing open by day and shut at night, one painted mesh per look (intact, cracked, skewed; broken ones lie in the road) and a fresh board per repair.
+- `src/shared/tuning.js` — every number of the loop (gates, supplies, day and night lengths, zombie waves, co-op speeds, plots), for playtests.
 - `src/view/plants.js` — vegetation: flat ribbons and cards placed by a seeded generator into one static mesh (one draw call). It keeps tall plants away from plots, footpaths, the morgue and the truck's stop. Concept art for sky, ground and plants is kept outside the repo; the palettes in the shaders follow it.
 - `src/chars/` + `src/view/crew.js` — **every character** (diggers, zombies, dogs, the dead). Each one is described by distance formulas in JavaScript (`human.js`, `creatures.js`), turned into a low-poly mesh once at load (`mesher.js`: surface nets, baked occlusion, two bone weights per vertex) and painted by one shader from the rest position (`material.js`: gouache, knitting, stitched patches, dirt, faces, ink hull). No model or texture files. `cast.html` shows the whole cast (`npm run build:cast`).
 - `src/shared/` — data both sides need: `crew.js` (the digging crew: looks, six-part rig, pose, ragdoll shapes), `corpses.js` (the dead: a look generated from the seed, same rig), `zombies.js` (night visitors: walkers, the knuckle-dragger, zombie dogs and six odd ones — Bloat, Longshanks, Stack, Granny, Headless, Barrel — all on the same six parts), `layout.js` (level, colliders, decor, the morgue, outfits, fence sections, traps), `rng.js`.
@@ -145,7 +176,8 @@ Live: https://gitgeekalban.github.io/xiombard-game/
 - The fence is not a static collider: each of `FENCE_SECTIONS` has its own bodies in `sim.fence`, removed when the section breaks and built again on repair.
 - `afterStep` clamps prop speeds as a safety net against solver blow-ups.
 - Anything on its feet at night has a walker in `e.z` (a steered capsule + a pose). A risen corpse keeps its ragdoll bodies as kinematic ghosts that follow the pose, so `e.bodies[...]` stays valid everywhere; a whack turns them dynamic again.
-- Test a night quickly with `?daylen=15&nightlen=90`. `?botlog` collects what the bots are doing in `window.__botlog`. `?mute` turns the sound off (scripted and headless runs).
+- Test a night quickly with `?daylen=15&nightlen=90` (fixes both halves for every day). The sim runs in node too
+  (`import { Sim } from './src/sim/game.js'`): balance checks such as "an idle crew loses on night N" are quick there. `?botlog` collects what the bots are doing in `window.__botlog`. `?mute` turns the sound off (scripted and headless runs).
 
 ## Workflow
 - `npm install`, `npm run dev` (port 5173), `npm run build` must pass before pushing.

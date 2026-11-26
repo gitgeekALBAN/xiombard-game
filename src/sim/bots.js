@@ -1314,6 +1314,7 @@ export function createBots(sim, opts = {}) {
   return {
     add(name) {
       const p = sim.addPlayer(name);
+      p.bot = true; // bots do not count toward the day's load or the night's crowd
       const r = rng(hashName(p.name) ^ (++nAdded * 7919));
       const persona = {
         speed: 0.86 + r() * 0.14,  // some amble, some hurry

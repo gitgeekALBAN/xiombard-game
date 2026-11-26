@@ -21,7 +21,7 @@ function saveSettings(s) { try { localStorage.setItem(KEY, JSON.stringify(s)); }
 // The controls, one per line (keyboard and mouse; the touch buttons say what they do themselves).
 const CONTROLS = [
   ['W A S D', 'move'], ['Shift', 'run'], ['Space', 'jump'], ['Mouse', 'look around'],
-  ['E', 'pick up, put down, use a station'], ['Click', 'swing the shovel'], ['F (hold)', 'work: dig, lid, nails, fill, repair'],
+  ['E', 'pick up, put down, use a station'], ['Click', 'swing the shovel (hold at a plot: dig)'], ['F (hold)', 'work: dig, lid, nails, fill, repair'],
   ['Q', 'throw / cancel'], ['N', 'read the delivery note'], ['1-5', 'pick in a choice'], ['R', 'go limp'],
   ['V', 'first / third person'], ['U', 'stuck? wriggle free'], ['Esc', 'menu and settings'],
 ];
@@ -76,7 +76,8 @@ export function createUI(ctx) {
       html += `<div class="gq-title"><button class="gq-back" data-go="main">‹</button> How to play</div>`;
       const steps = ['Take the body in at the hatch (E)', 'Read its delivery note (N)', 'Registry desk: write the name tag', 'Dressing table: pick the outfit on the note',
         'Chapel: bless with the charm on the note', 'Lay them in a coffin, close the lid (F), nail it if you can spare nails', 'Carry it to a dug grave and fill it (F)',
-        'Light the candles the note asks for', 'Meet the daily quota for supplies; every one over it pays a bonus', 'At night: whack the visitors, repair the fence by day'];
+        'Light the candles the note asks for: a happy ghost means a quiet grave', 'Bury them all before sunset: every mistake rises at night',
+        'At night: guard the two gates (hold F to repair: 1 board, 2 nails). A broken gate loses the run'];
       html += steps.map((t, i) => row(`<span class="gq-num">${i + 1}</span><span>${esc(t)}</span>`, 'step')).join('');
     }
     el.innerHTML = html;
@@ -118,14 +119,15 @@ export function createUI(ctx) {
     const [today, quota] = st.quota || [0, 0];
     const day = st.phase ? st.phase[2] : 1, night = st.phase && st.phase[0];
     const me = st.players.find((p) => p.id === myId);
-    const key = JSON.stringify([today, quota, day, night, st.buried, st.score, st.nails, st.boards, st.cash, me && me.inf, st.players.map((p) => [p.id, p.name, p.color])]);
+    const key = JSON.stringify([today, quota, day, night, st.buried, st.score, st.nails, st.boards, st.cash, st.gates, me && me.inf, st.players.map((p) => [p.id, p.name, p.color])]);
     if (key === lastTasks) return;
     lastTasks = key;
-    const pct = quota ? Math.min(1, today / quota) : 0, over = Math.max(0, today - quota);
+    const pct = quota ? Math.min(1, today / quota) : 0;
     const bar = (k, cls = '') => `<div class="gq-bar ${cls}"><i style="width:${(k * 100).toFixed(0)}%"></i></div>`;
     $('tasks').innerHTML = `<div class="gq-title">${night ? 'Night' : 'Day'} ${day} · Tasks</div>`
-      + `<div class="task"><div class="line"><span>Daily quota</span><b>${today} / ${quota}</b></div>${bar(pct, today >= quota ? 'done' : '')}`
-      + `<small>${today >= quota ? (over ? `+${over} over quota: bonus paid` : 'met! each extra pays a bonus') : 'lay them to rest before dawn'}</small></div>`
+      + `<div class="task"><div class="line"><span>Buried</span><b>${today} of ${quota}</b></div>${bar(pct, quota && today >= quota ? 'done' : '')}`
+      + `<small>${quota && today >= quota ? 'all of today\'s dead laid to rest' : 'unburied bodies rise at sunset'}</small></div>`
+      + `<div class="task">${(st.gates || []).map(([hp], i) => `<div class="line"><span>${i ? 'East' : 'West'} gate</span><b>${hp} / 100</b></div>${bar(hp / 100, hp > 66 ? 'done' : hp > 33 ? '' : 'low')}`).join('')}</div>`
       + `<div class="task"><div class="line"><span>Laid to rest</span><b>${st.buried ?? 0}</b></div><div class="line"><span>Peace points</span><b>${st.score ?? 0}</b></div></div>`
       + '<div class="gq-head">Supplies</div>'
       + `<div class="task res"><span>Nails <b>${st.nails ?? 0}</b></span><span>Boards <b>${st.boards ?? 0}</b></span><span>Cash <b>$${st.cash ?? 0}</b></span></div>`

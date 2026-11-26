@@ -5,17 +5,21 @@ export const WORLD_HALF = 80;
 export const FENCE = 28;
 export const ROAD_Z = 15;
 export const ROAD_HALF = 2.2;
-export const TRUCK_STOP_X = 1;
+export const TRUCK_STOP_X = 4.6; // the coach's rear lines up with the loading hatch (MORGUE.hatch)
 export const TRUCK_START_X = 60;
-export const PILE = { x: -10.6, z: 7.9 }; // fresh coffins: the morgue's stock table (MORGUE.stock)
+export const PILE = { x: -5.6, z: 7.9 }; // fresh coffins: the morgue's stock table (MORGUE.stock)
 export const SPAWN = { x: 0.8, z: 9.4 }; // inside the morgue
 export const CARPENTER = { x: -15.4, z: 7.4 }; // the carpenter's corner by the shed (decor)
 
 export const PLOT_HALF = { x: 0.65, z: 1.3 };
 export const PLOT_MAX_DEPTH = 1.25;
 export const PLOT_MIN_DEPTH = 0.75; // a coffin can be buried once the hole is at least this deep
+// Rows of five plots, nearest the morgue first. Only the first rows are marked at the start (TUNING.plotsStart); when a
+// morning brings more bodies than there are free plots, the next row is marked (further and further from the morgue).
+// All rows exist from the start (holes in the ground, the shader's plot list): marking one only makes it usable.
+export const PLOT_ROWS = [3.2, -2.4, -8.0, -13.6];
 export const PLOTS = [];
-for (const z of [3.2, -2.4]) for (const x of [-8, -4.5, -1, 2.5, 6]) PLOTS.push({ x, z });
+for (const z of PLOT_ROWS) for (const x of [-8, -4.5, -1, 2.5, 6]) PLOTS.push({ x, z, row: PLOT_ROWS.indexOf(z) });
 
 export const LANTERNS = [
   [-10.5, 0.4], [9, 0.4], [7.6, 12.9], [-7, 12.95], [-14.5, 10.5], [0, -7],
@@ -42,25 +46,27 @@ export const TRUCK = {
 
 // The morgue: a long one-storey office between the road and the graves. The hearse parks along its north wall and
 // passes bodies in through the loading hatch; the south door leads out to the graveyard. Inside, a body goes from
-// station to station, east to west along the north wall and back along the west wall:
-//   intake (under the hatch) -> registry desk (E writes the name tag) -> dressing table (E: pick an outfit)
-//   -> the stock table, where coffins come in from the stockroom -> lid (F) and nails (F) -> out the south door.
+// station to station, east to west along the north wall and back along the south wall, so the intake and the coffin
+// table are at opposite ends of the chain (8-10 s of walking with a body: a crew splits the work and throws bodies on):
+//   intake (under the hatch, east) -> registry desk (E writes the name tag) -> dressing table (E: pick an outfit)
+//   -> the chapel bier in the south-west corner (the blessing) -> the stock table, where coffins come in from the
+//   stockroom, by the south door -> lid (F) and nails (F) -> out the door to the graves.
 // The east end is the clerk's office: nails and boards are kept there.
 const STATION = { hx: 1.1, hz: 0.42, top: 0.85 }; // a table a body lies on lengthwise (along x)
 export const MORGUE = {
   x0: -13, x1: 13, z0: 6.0, z1: 12.4, h: 3.0, t: 0.12,
-  door: [-0.9, 2.3], // south door (x range), wide enough to carry a coffin through
-  hatch: [1.0, 3.6], hatchSill: 0.9, hatchTop: 2.0, // loading hatch in the north wall
-  table: { x: 2.3, z: 11.35, ...STATION },  // 1 intake table under the hatch
+  door: [-3.6, -0.4], // south door (x range), wide enough to carry a coffin through, by the stock table
+  hatch: [4.6, 7.2], hatchSill: 0.9, hatchTop: 2.0, // loading hatch in the north wall (east end)
+  table: { x: 5.9, z: 11.35, ...STATION },  // 1 intake table under the hatch
   desk: { x: -3.4, z: 11.35, ...STATION },  // 2 registry desk: a body on it gets its name tag written (E)
   dress: { x: -8.8, z: 11.35, ...STATION }, // 3 dressing table: a body on it is dressed in the outfit you pick (E)
-  stock: { x: -10.6, z: 7.9, hx: 0.66, hz: 1.3, top: 0.5 }, // 4 a fresh coffin slides in here from the stockroom
-  chapel: { x: -5.6, z: 7.0, ...STATION }, // the bier in the chapel corner (south wall): a body on it is blessed with a charm
-  charmRack: { x: -7.25, z: 6.16, y: 1.45 }, // the charms hang on the south wall beside the bier
+  stock: { x: -5.6, z: 7.9, hx: 0.66, hz: 1.3, top: 0.5 }, // 5 a fresh coffin is put here from the stockroom, by the door
+  chapel: { x: -10.3, z: 7.0, ...STATION }, // 4 the bier in the chapel corner (south-west): a body on it is blessed with a charm
+  charmRack: { x: -12.25, z: 6.16, y: 1.45 }, // the charms hang on the south wall beside the bier
   noDelivery: { x: -0.6, y: 1.35 }, // the big red button on the north wall: no more hearse today (tomorrow's comes double)
   // two hand-in windows in the office end of the south wall: a counter inside under each sign (odd deliveries go here)
   windows: { lost: { x: 8.0, z: 6.0, top: 1.0 }, police: { x: 11.2, z: 6.0, top: 1.0 } },
-  stockDoor: [7.0, 8.8], // the stockroom door in the west wall (z range), behind the stock table
+  stockDoor: [7.0, 8.8], // the stockroom door in the west wall (z range), behind the chapel
   rack: { x: -12.86, z0: 9.7, dz: 0.52, y: 1.5 }, // the outfits on show by the dressing table (west wall)
   crate: { x: 12.3, z: 8.2, hx: 0.45, hy: 0.35, hz: 0.35 }, // nails and boards, in the office
   office: [ // clerk's desk and filing cabinets in the east end: furniture you bump into
@@ -69,10 +75,10 @@ export const MORGUE = {
     { c: [12.5, 0.75, 10.6], h: [0.3, 0.75, 0.45], kind: 'cabinet' },
     { c: [6.4, 0.25, 6.5], h: [0.9, 0.25, 0.25], kind: 'bench' },
   ],
-  lamps: [[-8.8, 9.4], [-3.4, 9.4], [2.3, 9.4], [8.6, 9.4], [-5.6, 7.6]],
+  lamps: [[-8.8, 9.4], [-3.4, 9.4], [5.9, 9.4], [10.2, 9.4], [-10.3, 7.6]], // over the stations; the last one over the bier
   // lit windows: x, z on the wall's center line and the wall's outward normal (the view draws them, the lighting
   // throws their light onto the ground outside)
-  wins: [[-10.5, 6.0, 0, -1], [-6, 6.0, 0, -1], [5, 6.0, 0, -1], [9.5, 6.0, 0, -1], [-6, 12.4, 0, 1], [6.5, 12.4, 0, 1], [10.5, 12.4, 0, 1], [13, 7.6, 1, 0]],
+  wins: [[-10.5, 6.0, 0, -1], [-6, 6.0, 0, -1], [5, 6.0, 0, -1], [9.5, 6.0, 0, -1], [-6, 12.4, 0, 1], [2.2, 12.4, 0, 1], [10.5, 12.4, 0, 1], [13, 7.6, 1, 0]],
 };
 // stations a player works at (registry, dressing) and how near counts as "at it"
 export const atStation = (st, x, z, m = 0.95) => Math.abs(x - st.x) < st.hx + m && Math.abs(z - st.z) < st.hz + m;
@@ -161,6 +167,11 @@ export const fenceSectionAt = (x, z) => FENCE_SECTIONS.findIndex((f) => {
   const [along, across] = f.axis === 'z' ? [x, z] : [z, x];
   return Math.abs(across - f.at) < 0.6 && along >= f.a0 - 0.01 && along < f.a1 + 0.01;
 });
+// The two gates where the road crosses the fence (east and west). Open by day for the hearse, shut at sunset; the
+// night's zombies go for them, and if one breaks they are out on the road to town: the game is lost.
+export const GATE_HALF = ROAD_HALF + 0.3; // half the opening along z
+export const GATES = [{ x: -FENCE, z: ROAD_Z }, { x: FENCE, z: ROAD_Z }];
+export const gateNear = (x, z, r = 2.6) => GATES.findIndex((g) => Math.abs(x - g.x) < r && Math.abs(z - g.z) < GATE_HALF + 0.6);
 // bear traps around the graves, where the restless dead are headed
 export const TRAPS = [[-10, -5.6], [-6.2, -5.6], [-2.6, -5.6], [0.9, -5.6], [4.3, -5.6], [8, -5.6], [-12, 0.4], [10.6, 0.4]];
 export const TRAP_DUR = 3; // snaps before a trap breaks
@@ -190,7 +201,7 @@ export function groundBoxes() {
 export const DECOR = (() => {
   const r = rng(1337);
   const stones = [];
-  for (const z of [-9, -12.5, -16, -19.5]) {
+  for (const z of [-17.6, -20.6, -23.6]) {
     for (let x = -20; x <= 20; x += 3.3) {
       if (r() < 0.22) continue;
       stones.push({
@@ -204,9 +215,18 @@ export const DECOR = (() => {
   }
   const trees = [[-22, -14], [21, -19], [-24, 4], [23, 5], [16, -11], [-11, -24], [24, 22], [-23, 22], [8, -25], [-3, 24]]
     .map(([x, z]) => ({ x, z, seed: Math.floor(r() * 1e6), h: r.range(5, 8) }));
+  // no headstone in a tree trunk (filtered after all the draws, so the seed sequence stays the same)
+  for (let i = stones.length - 1; i >= 0; i--) if (trees.some((t) => Math.hypot(t.x - stones[i].x, t.z - stones[i].z) < 1.6)) stones.splice(i, 1);
   const shed = { x: -17, z: 12, hx: 2.2, hy: 1.6, hz: 1.7 };
   return { stones, trees, shed };
 })();
+
+// Where the night's normal zombies come up: in front of the old headstones in the back of the yard and along the side
+// fences, inside the fence, far from the morgue (never in it) and clear of the plots.
+export const ZOMBIE_SPAWNS = DECOR.stones
+  .map((st) => ({ x: st.x + Math.sin(st.ry) * 0.9, z: st.z + Math.cos(st.ry) * 0.9 }))
+  .filter((q) => Math.abs(q.x) < FENCE - 1.5 && Math.abs(q.z) < FENCE - 1.5 && !(q.z > 4 && Math.abs(q.x) < 14)
+    && !PLOTS.some((p) => Math.abs(q.x - p.x) < PLOT_HALF.x + 0.8 && Math.abs(q.z - p.z) < PLOT_HALF.z + 0.8));
 
 // Every static collider box that never changes: ground, shed, tree trunks, old headstones, lantern posts, the morgue.
 // The fence is not here: its sections come and go, see FENCE_SECTIONS and the sim's fence state.

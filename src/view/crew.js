@@ -53,12 +53,14 @@ export function buildCrew(rig, opts = {}) {
     u.uRimCol.value.copy(key.shade).multiplyScalar(0.35);
     u.uNoHead.value = noHead ? 1 : 0;
   }
-  // a body that got up at night wears a zombie's face, goes green and earthy until it lies down again
+  // a body that got up at night (a special) wears a zombie's face, goes green and earthy and glows, still in the
+  // clothes it was buried in, until it lies down again
   const face = k.face || 0, grime = k.grime || 0;
   function setRisen(on) {
     u.uFace.value = on ? 1 : face;
-    u.uTint.value.set(0.33, 0.47, 0.27, on ? 0.75 : 0);
-    u.uGrime.value = on ? 0.7 : grime;
+    u.uTint.value.set(0.36, 0.72, 0.3, on ? 0.8 : 0);
+    u.uGrime.value = on ? 0.6 : grime;
+    u.uGlow.value = on ? 1 : 0;
   }
   // a digger's mood shows on the face (0 calm, 1 focused, 2 straining, 3 angry; see crewMood in chars/material.js)
   const setMood = (m) => { u.uMood.value = m; };
